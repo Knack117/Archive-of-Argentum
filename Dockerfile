@@ -15,6 +15,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         gcc \
         g++ \
+        curl \
         && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better Docker layer caching
@@ -36,7 +37,7 @@ EXPOSE $PORT
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:$PORT/health || exit 1
+    CMD sh -c "curl -f http://localhost:$PORT/health || exit 1"
 
-# Run the application
-CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "$PORT"]
+# Run the application with shell form to properly expand environment variables
+CMD ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port $PORT"]
