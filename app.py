@@ -44,10 +44,16 @@ THEME_INDEX_CACHE_TTL_SECONDS = 6 * 3600  # Refresh the theme catalog every 6 ho
 # Color mapping for EDHRec themes
 COLOR_SLUG_MAP = {
     "white": "w",
-    "blue": "u", 
+    "blue": "u",
     "black": "b",
     "red": "r",
     "green": "g",
+    "mono-white": "w",
+    "mono-blue": "u",
+    "mono-black": "b",
+    "mono-red": "r",
+    "mono-green": "g",
+    "colorless": "c",
     "azorius": "wu",
     "boros": "rw",
     "selesnya": "gw",
@@ -71,6 +77,8 @@ COLOR_SLUG_MAP = {
     "sans-green": "wubr",
     "five-color": "wubrg"
 }
+
+_SORTED_COLOR_IDENTIFIERS: List[str] = sorted(COLOR_SLUG_MAP.keys(), key=len, reverse=True)
 
 
 _theme_catalog_cache: Dict[str, Any] = {
@@ -453,67 +461,88 @@ def _split_color_prefixed_theme_slug(theme_slug: str) -> Tuple[Optional[str], Op
     
     return None, None
 
-def _build_theme_route_candidates(theme_slug: str) -> List[Dict[str, str]]:
+def _split_theme_slug(theme_slug: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Split a theme slug into its base theme and colour identifier.
+
+    Returns a tuple of (theme_name, colour_identifier, position) where position is
+    "prefix", "suffix", or None when no colour identifier could be resolved.
+    """
+    sanitized = (theme_slug or "").strip().lower()
+    if not sanitized:
+        return None, None, None
+
+    for identifier in _SORTED_COLOR_IDENTIFIERS:
+        prefix = f"{identifier}-"
+        if sanitized.startswith(prefix):
+            remainder = sanitized[len(prefix):]
+            if remainder:
+                return remainder, identifier, "prefix"
+
+    for identifier in _SORTED_COLOR_IDENTIFIERS:
+        suffix = f"-{identifier}"
+        if sanitized.endswith(suffix):
+            remainder = sanitized[: -len(suffix)]
+            if remainder:
+                return remainder, identifier, "suffix"
+
+    return sanitized, None, None
+
+
+def _build_theme_route_candidates(
+    theme_slug: str,
+    theme_name: Optional[str] = None,
+    color_identity: Optional[str] = None,
+) -> List[Dict[str, str]]:
     """
     Build possible route candidates for a theme
     """
-    candidates = []
-    color, theme = _split_color_prefixed_theme_slug(theme_slug)
-    
-    if color and theme:
-        # Color-prefixed theme
+    candidates: List[Dict[str, str]] = []
+    sanitized = (theme_slug or "").strip().lower()
+    derived_theme, derived_color, _ = _split_theme_slug(sanitized)
+
+    base_theme = (theme_name or derived_theme or sanitized or "").strip("-")
+    color_value = color_identity or derived_color
+
+    slug_variants: List[str] = []
+    seen_slugs: Set[str] = set()
+
+    def add_slug(slug: Optional[str]) -> None:
+        value = (slug or "").strip().strip("/")
+        if not value:
+            return
+        if value in seen_slugs:
+            return
+        seen_slugs.add(value)
+        slug_variants.append(value)
+
+    add_slug(sanitized)
+    add_slug(base_theme)
+
+    if color_value and base_theme:
+        add_slug(f"{color_value}-{base_theme}")
+        add_slug(f"{base_theme}-{color_value}")
+
+    seen_paths: Set[str] = set()
+
+    def add_candidate(page_path: str) -> None:
+        normalized = page_path.strip("/")
+        if not normalized or normalized in seen_paths:
+            return
+        seen_paths.add(normalized)
         candidates.append({
-            "page_path": f"tags/{theme}/{color}",
-            "json_path": f"tags/{theme}/{color}.json"
+            "page_path": normalized,
+            "json_path": f"{normalized}.json"
         })
-        candidates.append({
-            "page_path": f"themes/{theme_slug}",
-            "json_path": f"themes/{theme_slug}.json"
-        })
-    else:
-        # Base theme - check if it starts with color prefix
-        if theme_slug.startswith(("white-", "blue-", "black-", "red-", "green-")):
-            # Handle color-prefixed themes that don't match COLOR_SLUG_MAP exactly
-            parts = theme_slug.split("-", 1)
-            if len(parts) == 2:
-                color_prefix = parts[0]
-                theme_name = parts[1]
-                candidates.append({
-                    "page_path": f"tags/{theme_name}/{color_prefix}",
-                    "json_path": f"tags/{theme_name}/{color_prefix}.json"
-                })
-            else:
-                candidates.append({
-                    "page_path": f"tags/{theme_slug}",
-                    "json_path": f"tags/{theme_slug}.json"
-                })
-        elif theme_slug.startswith("five-color-"):
-            # Special handling for five-color themes
-            parts = theme_slug.split("-", 2)  # Split into ["five", "color", "rest"]
-            if len(parts) >= 3:
-                color_prefix = "-".join(parts[:2])  # "five-color"
-                theme_name = "-".join(parts[2:])    # "gates"
-                candidates.append({
-                    "page_path": f"tags/{theme_name}/{color_prefix}",
-                    "json_path": f"tags/{theme_name}/{color_prefix}.json"
-                })
-            else:
-                candidates.append({
-                    "page_path": f"tags/{theme_slug}",
-                    "json_path": f"tags/{theme_slug}.json"
-                })
-        else:
-            # Base theme
-            candidates.append({
-                "page_path": f"tags/{theme_slug}",
-                "json_path": f"tags/{theme_slug}.json"
-            })
-        
-        candidates.append({
-            "page_path": f"themes/{theme_slug}",
-            "json_path": f"themes/{theme_slug}.json"
-        })
-    
+
+    if color_value and base_theme:
+        add_candidate(f"tags/{base_theme}/{color_value}")
+        add_candidate(f"tags/{color_value}/{base_theme}")
+
+    for slug in slug_variants:
+        add_candidate(f"tags/{slug}")
+        add_candidate(f"themes/{slug}")
+
     return candidates
 
 def _resolve_theme_card_limit(limit: Optional[Union[str, int]]) -> int:
@@ -845,97 +874,104 @@ class ComboSearchResponse(BaseModel):
 # Theme Fetching Function
 # --------------------------------------------------------------------
 
-async def fetch_theme_tag(theme_name: str, color_identity: Optional[str] = None) -> PageTheme:
+async def fetch_theme_tag(theme_slug: str, color_identity: Optional[str] = None) -> PageTheme:
     """
     Fetch theme data from EDHRec
     """
-    # Build search parameters
-    search_params = f"?q={theme_name}"
-    if color_identity:
-        search_params += f"&identity={color_identity}"
-    
-    # Try to fetch theme data
+    sanitized_slug = (theme_slug or "").strip().lower()
+    theme_name, derived_color, _ = _split_theme_slug(sanitized_slug)
+    base_theme = theme_name or sanitized_slug
+    effective_color = color_identity or derived_color
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
+    candidates = _build_theme_route_candidates(
+        sanitized_slug,
+        theme_name=base_theme,
+        color_identity=effective_color,
+    )
+
+    last_error: Optional[Exception] = None
+
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        
-        # Attempt to fetch theme data
-        url = f"{EDHREC_BASE_URL}tags/{theme_name}"
-        if color_identity:
-            url += f"/{color_identity}"
-            
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, headers=headers)
-            
-            if response.status_code == 404:
-                # Theme not found, return empty response
-                return PageTheme(
-                    header=f"Theme: {theme_name}",
-                    description="Theme not found",
-                    tags=[],
-                    container=ThemeContainer(collections=[]),
-                    source_url=url
-                )
-            
-            response.raise_for_status()
-            html_content = response.text
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
-            # Extract theme data from __NEXT_DATA__ JSON (same approach as commander pages)
-            next_data_script = soup.find('script', {'id': '__NEXT_DATA__', 'type': 'application/json'})
-            
-            collections = []
-            header = f"{theme_name.title()} Theme"
-            description = f"EDHRec {theme_name} theme data"
-            
-            if next_data_script and next_data_script.string:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            for candidate in candidates:
+                page_path = candidate["page_path"]
+                url = f"{EDHREC_BASE_URL}{page_path}"
+
                 try:
-                    data = json.loads(next_data_script.string)
-                    page_data = data.get('props', {}).get('pageProps', {}).get('data', {})
-                    
-                    # Get header and description from page data
-                    header = page_data.get('header', header)
-                    description = page_data.get('description', description)
-                    
-                    # Extract cardlists from container.json_dict.cardlists
-                    container = page_data.get('container', {})
-                    json_dict = container.get('json_dict', {})
-                    cardlists = json_dict.get('cardlists', [])
-                    
-                    # Build collections from cardlists
-                    for cardlist in cardlists:
-                        if not isinstance(cardlist, dict):
-                            continue
-                        
-                        list_header = cardlist.get('header', 'Unknown')
-                        cardviews = cardlist.get('cardviews', [])
-                        
-                        if not cardviews:
-                            continue
-                        
-                        items = []
-                        for card_data in cardviews:
-                            if isinstance(card_data, dict):
-                                card_name = card_data.get('name', 'Unknown')
-                                num_decks = card_data.get('num_decks', 0)
-                                
-                                items.append(ThemeItem(
-                                    name=card_name,
-                                    num_decks=num_decks,
-                                    sanitized_name=card_data.get('sanitized', ''),
-                                    card_url=card_data.get('url', '')
+                    response = await client.get(url, headers=headers)
+                except Exception as exc:
+                    last_error = exc
+                    continue
+
+                if response.status_code == 404:
+                    continue
+
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    continue
+
+                html_content = response.text
+                soup = BeautifulSoup(html_content, 'html.parser')
+                next_data_script = soup.find('script', {'id': '__NEXT_DATA__', 'type': 'application/json'})
+
+                collections: List[ThemeCollection] = []
+                header = f"{base_theme.title()} Theme"
+                description = f"EDHRec {base_theme} theme data"
+                source_url = str(response.url)
+
+                parsed_successfully = False
+
+                if next_data_script and next_data_script.string:
+                    try:
+                        data = json.loads(next_data_script.string)
+                        page_data = data.get('props', {}).get('pageProps', {}).get('data', {})
+
+                        header = page_data.get('header', header)
+                        description = page_data.get('description', description)
+
+                        container = page_data.get('container', {})
+                        json_dict = container.get('json_dict', {})
+                        cardlists = json_dict.get('cardlists', [])
+
+                        for cardlist in cardlists:
+                            if not isinstance(cardlist, dict):
+                                continue
+
+                            list_header = cardlist.get('header', 'Unknown')
+                            cardviews = cardlist.get('cardviews', [])
+
+                            if not cardviews:
+                                continue
+
+                            items = []
+                            for card_data in cardviews:
+                                if isinstance(card_data, dict):
+                                    items.append(ThemeItem(
+                                        name=card_data.get('name', 'Unknown'),
+                                        num_decks=card_data.get('num_decks', 0),
+                                        sanitized_name=card_data.get('sanitized', ''),
+                                        card_url=card_data.get('url', '')
+                                    ))
+
+                            if items:
+                                collections.append(ThemeCollection(
+                                    header=list_header,
+                                    items=items
                                 ))
-                        
-                        if items:
-                            collections.append(ThemeCollection(
-                                header=list_header,
-                                items=items
-                            ))
-                            
-                except (json.JSONDecodeError, KeyError) as e:
-                    logger.error(f"Error parsing theme JSON data: {e}")
-                    # Fall back to HTML parsing if JSON fails
+
+                        if collections:
+                            parsed_successfully = True
+
+                    except (json.JSONDecodeError, KeyError) as e:
+                        logger.error(f"Error parsing theme JSON data: {e}")
+
+                if not parsed_successfully:
                     sections, is_summary = extract_theme_sections_from_json({
                         "pageProps": {
                             "data": {
@@ -947,36 +983,46 @@ async def fetch_theme_tag(theme_name: str, color_identity: Optional[str] = None)
                             }
                         }
                     })
-                    
+
                     for section_name, section_data in sections.items():
                         if section_data["cards"]:
                             items = []
                             for card in section_data["cards"]:
                                 items.append(ThemeItem(name=card.get("name", "Unknown")))
-                            
+
                             collections.append(ThemeCollection(
                                 header=section_name.title(),
                                 items=items
                             ))
-            
-            return PageTheme(
-                header=header,
-                description=description,
-                tags=[theme_name],
-                container=ThemeContainer(collections=collections),
-                source_url=url
-            )
-            
+
+                    if collections:
+                        parsed_successfully = True
+
+                if parsed_successfully:
+                    return PageTheme(
+                        header=header,
+                        description=description,
+                        tags=[base_theme],
+                        container=ThemeContainer(collections=collections),
+                        source_url=source_url
+                    )
+
     except Exception as exc:
-        logger.error(f"Error fetching theme {theme_name}: {exc}")
-        # Return empty response on error
-        return PageTheme(
-            header=f"Theme: {theme_name}",
-            description="Error fetching theme data",
-            tags=[],
-            container=ThemeContainer(collections=[]),
-            error=str(exc)
-        )
+        last_error = exc
+        logger.error(f"Error fetching theme {base_theme}: {exc}")
+
+    error_message = "Error fetching theme data"
+    if last_error:
+        error_message = str(last_error)
+
+    return PageTheme(
+        header=f"Theme: {base_theme}",
+        description="Error fetching theme data",
+        tags=[],
+        container=ThemeContainer(collections=[]),
+        source_url=f"{EDHREC_BASE_URL}tags/{base_theme}",
+        error=error_message
+    )
 
 # ------------------------------------------------
 # Create FastAPI application instance BEFORE routes
@@ -1597,27 +1643,19 @@ async def get_theme(theme_slug: str, api_key: str = Depends(verify_api_key)) -> 
     """
     Fetch EDHRec theme or tag data via a lightweight mechanism.
     A slug may be a simple theme (e.g. "spellslinger") or include a colour
-    prefix (e.g. "temur-spellslinger").  If a colour is detected, the
-    prefix is interpreted as the colour identity, and the suffix as the theme.
-    Colour names are resolved via COLOR_SLUG_MAP; if no colour is detected,
-    the slug is treated as a base theme with no colour restriction.
+    prefix/suffix (e.g. "temur-spellslinger" or "goblins-mono-red").  If a
+    colour is detected it is interpreted as the colour identity and the
+    remaining portion as the base theme.  Colour names are resolved via
+    COLOR_SLUG_MAP; if no colour is detected, the slug is treated as a base
+    theme with no colour restriction.
     """
     sanitized = theme_slug.strip().lower()
-    # Try to split on the first hyphen: colour-prefix and theme
-    parts = sanitized.split("-", 1)
-    color_prefix = None
-    theme_name = sanitized
-    if len(parts) == 2:
-        possible_color, possible_theme = parts
-        if possible_color in COLOR_SLUG_MAP:
-            color_prefix = possible_color
-            theme_name = possible_theme
+    theme_name, color_identifier, _ = _split_theme_slug(sanitized)
 
-    # If a colour prefix is detected, call fetch_theme_tag with identity
-    if color_prefix:
-        return await fetch_theme_tag(theme_name, color_prefix)
-    # otherwise fetch the base theme (no colour identity)
-    return await fetch_theme_tag(theme_name, None)
+    if color_identifier:
+        return await fetch_theme_tag(sanitized, color_identifier)
+
+    return await fetch_theme_tag(sanitized, None)
 
 # --------------------------------------------------------------------
 # Commander Spellbook Combo Fetching Function
