@@ -5,6 +5,7 @@ from app import (
     _resolve_theme_card_limit,
     _split_color_prefixed_theme_slug,
     extract_theme_sections_from_json,
+    normalize_theme_colors,
 )
 
 
@@ -29,12 +30,14 @@ def test_build_theme_route_candidates_with_color_prefix():
 
 def test_build_theme_route_candidates_without_color_prefix():
     candidates = _build_theme_route_candidates("spellslinger")
-    assert candidates == [
-        {
-            "page_path": "themes/spellslinger",
-            "json_path": "themes/spellslinger.json",
-        }
-    ]
+    assert candidates[0] == {
+        "page_path": "tags/spellslinger",
+        "json_path": "tags/spellslinger.json",
+    }
+    assert candidates[1] == {
+        "page_path": "themes/spellslinger",
+        "json_path": "themes/spellslinger.json",
+    }
 
 
 def test_build_theme_route_candidates_handles_five_color_slug():
@@ -50,8 +53,8 @@ def test_resolve_theme_card_limit_defaults_and_caps():
 
 
 def test_resolve_theme_card_limit_zero_disables_limit():
-    assert _resolve_theme_card_limit(0) is None
-    assert _resolve_theme_card_limit(-5) is None
+    assert _resolve_theme_card_limit(0) == 0
+    assert _resolve_theme_card_limit(-5) == 60
 
 
 def test_extract_theme_sections_respects_limit():
@@ -91,7 +94,7 @@ def test_extract_theme_sections_respects_limit():
         }
     }
 
-    sections = extract_theme_sections_from_json(payload, max_cards_per_category=2)
+    sections, summary_flag = extract_theme_sections_from_json(payload, max_cards_per_category=2)
     assert "instants" in sections
     instants = sections["instants"]
     assert instants["total_cards"] == 2
@@ -101,3 +104,11 @@ def test_extract_theme_sections_respects_limit():
         "Lightning Bolt",
         "Opt",
     ]
+    assert summary_flag is False
+
+
+def test_normalize_theme_colors_handles_aliases():
+    profile = normalize_theme_colors(["red", "UG", "blue-green", "Azorius"])
+    assert profile["codes"] == ["W", "U", "R", "G"]
+    assert profile["slug"] == "sans-black"
+    assert profile["symbol"] == "WURG"
