@@ -55,7 +55,6 @@ def extract_build_id_from_html(html: str) -> Optional[str]:
         return match.group(1)
     return None
 
-
 def normalize_commander_tags(values: list) -> List[str]:
     """Clean and deduplicate commander tags while preserving order."""
     seen = set()
@@ -78,7 +77,6 @@ def normalize_commander_tags(values: list) -> List[str]:
     
     return result
 
-
 def extract_commander_name_from_url(url: str) -> str:
     """Extract commander name from an EDHREC commander URL."""
     try:
@@ -99,14 +97,12 @@ def extract_commander_name_from_url(url: str) -> str:
     except Exception:
         return "unknown"
 
-
 def _clean_text(value: str) -> str:
     """Clean HTML text content"""
     from html import unescape
     cleaned = unescape(value or "")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip()
-
 
 def _gather_section_card_names(source: Any) -> List[str]:
     """Extract card names from JSON source"""
@@ -202,7 +198,6 @@ def _safe_float(value: Any) -> Optional[float]:
         return float(value)
     except (ValueError, TypeError):
         return None
-
 
 def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """Extract commander card sections from the EDHREC Next.js payload."""
@@ -322,7 +317,6 @@ def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, D
 
     return sections
 
-
 def extract_commander_tags_from_html(html: str) -> List[str]:
     """Extract commander tags from HTML content using BeautifulSoup."""
     try:
@@ -341,7 +335,6 @@ def extract_commander_tags_from_html(html: str) -> List[str]:
     except Exception as e:
         logger.warning(f"Error extracting tags from HTML: {e}")
         return []
-
 
 def extract_commander_tags_from_json(payload: Dict[str, Any]) -> List[str]:
     """Extract commander tags from Next.js JSON payload using correct EDHRec structure"""
@@ -399,7 +392,6 @@ def extract_commander_tags_from_json(payload: Dict[str, Any]) -> List[str]:
     logger.info(f"Total tags extracted: {len(tags)}")
     return normalize_commander_tags(tags)
 
-
 def extract_commander_top_tags_from_json(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Extract the ranked commander tags with deck counts from the EDHREC payload."""
 
@@ -443,19 +435,14 @@ def extract_commander_top_tags_from_json(payload: Dict[str, Any]) -> List[Dict[s
 
     return top_tags
 
-
 def _estimate_response_size(theme_data: Dict[str, Any]) -> int:
     """Estimate the size of a theme response in bytes using JSON serialization."""
     try:
-        import json
-        # Use compact JSON to get accurate byte size
         json_str = json.dumps(theme_data, separators=(',', ':'))
         return len(json_str.encode('utf-8'))
     except Exception as e:
-        # Fallback estimation
         logger.warning(f"Failed to estimate response size: {e}")
         return 0
-
 
 def _create_categories_summary(sections: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """Create a summary of categories without full card data."""
@@ -468,7 +455,6 @@ def _create_categories_summary(sections: Dict[str, Dict[str, Any]]) -> Dict[str,
             "is_truncated": category_data.get("is_truncated", False),
         }
     return summary
-
 
 def _convert_cardview_to_theme_card(card: Dict[str, Any], position: int) -> Optional[Dict[str, Any]]:
     """Convert EDHRec cardview entry into a normalized theme card structure."""
@@ -514,7 +500,6 @@ def _convert_cardview_to_theme_card(card: Dict[str, Any], position: int) -> Opti
         result["trend_score"] = trend
 
     return result
-
 
 def extract_theme_sections_from_json(
     payload: Dict[str, Any],
@@ -603,7 +588,6 @@ def extract_theme_sections_from_json(
 
     return sections, summary_triggered
 
-
 def _simplify_related_entries(entries: Any) -> List[Dict[str, Any]]:
     """Simplify related theme/card data into name/url dictionaries."""
     simplified: List[Dict[str, Any]] = []
@@ -636,7 +620,6 @@ def _simplify_related_entries(entries: Any) -> List[Dict[str, Any]]:
             simplified.append(entry)
 
     return simplified
-
 
 def extract_theme_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Extract metadata for a theme page."""
@@ -733,7 +716,6 @@ def extract_theme_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     return metadata
 
-
 async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
     """
     Scrape EDHRec commander page using Next.js JSON approach
@@ -798,7 +780,6 @@ async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
         result["categories"][category_key] = section_data
 
     return result
-
 
 COLOR_IDENTITY_SLUGS = [
     "five-color",
@@ -889,7 +870,6 @@ COLOR_LETTER_MAP = {
     "g": "G",
 }
 
-
 def _build_color_alias_map() -> Dict[str, List[str]]:
     alias_map: Dict[str, List[str]] = {}
 
@@ -928,9 +908,7 @@ def _build_color_alias_map() -> Dict[str, List[str]]:
 
     return alias_map
 
-
 COLOR_ALIAS_MAP = _build_color_alias_map()
-
 
 def _lookup_color_codes(value: str) -> Optional[List[str]]:
     if not value:
@@ -976,7 +954,6 @@ def _lookup_color_codes(value: str) -> Optional[List[str]]:
         return [COLOR_LETTER_MAP[ch] for ch in compact]
 
     return None
-
 
 def normalize_theme_colors(raw_values: Any) -> Dict[str, Any]:
     if raw_values is None:
@@ -1025,7 +1002,6 @@ def normalize_theme_colors(raw_values: Any) -> Dict[str, Any]:
         "raw": values,
     }
 
-
 # Color identity utilities (from mtg-mightstone-gpt)
 WUBRG_ORDER = "wubrg"
 
@@ -1066,7 +1042,6 @@ SLUG_MAP = {
 LABEL_TO_CODE = {v.replace("-", " ").title(): k for k, v in SLUG_MAP.items()}
 SLUG_TO_CODE = {v: k for k, v in SLUG_MAP.items()}
 
-
 def _sort_code_letters(raw: str) -> str:
     letters = [c for c in raw if c in WUBRG_ORDER]
     seen = set()
@@ -1076,7 +1051,6 @@ def _sort_code_letters(raw: str) -> str:
             ordered.append(c)
             seen.add(c)
     return "".join(ordered)
-
 
 def canonicalize_identity(value: str) -> Tuple[str, str, str]:
     """Canonicalize an EDH color identity.
@@ -1112,7 +1086,6 @@ def canonicalize_identity(value: str) -> Tuple[str, str, str]:
     label = slug.replace("-", " ").title()
     return code, label, slug
 
-
 def _walk_for_named_arrays(obj: Any) -> Dict[str, List[str]]:
     """
     Heuristic: EDHREC Next.js JSON often has arrays of objects with a 'name' field
@@ -1120,7 +1093,6 @@ def _walk_for_named_arrays(obj: Any) -> Dict[str, List[str]]:
     Returns {'Cardviews': [...names], 'Cards': [...names], ...}
     """
     buckets: Dict[str, List[str]] = {}
-
     def walk(node: Any, current_key: Optional[str] = None):
         if isinstance(node, dict):
             for k, v in node.items():
@@ -1142,7 +1114,6 @@ def _walk_for_named_arrays(obj: Any) -> Dict[str, List[str]]:
             for el in node:
                 walk(el, current_key)
         # primitives are ignored
-
     walk(obj)
     # de-dup while preserving order
     for k, vals in list(buckets.items()):
@@ -1154,7 +1125,6 @@ def _walk_for_named_arrays(obj: Any) -> Dict[str, List[str]]:
                 seen.add(n)
         buckets[k] = uniq
     return buckets
-
 
 def _extract_theme_tags_from_payload(payload: Any) -> List[str]:
     """Return a normalized list of theme tags from a Next.js payload."""
@@ -1241,7 +1211,6 @@ def _extract_theme_tags_from_payload(payload: Any) -> List[str]:
     walk(page_props, False)
     return collected
 
-
 async def _fetch_theme_resources(name: str, identity: str) -> Dict[str, Any]:
     tag_slug = (name or "").strip().lower()
     try:
@@ -1291,7 +1260,6 @@ async def _fetch_theme_resources(name: str, identity: str) -> Dict[str, Any]:
         "data": data,
     }
 
-
 def _extract_title_description_from_head(html: str) -> Tuple[str, str]:
     title = ""
     desc = ""
@@ -1307,7 +1275,6 @@ def _extract_title_description_from_head(html: str) -> Tuple[str, str]:
         desc = _clean_text(m_desc.group(1))
     return title or "Unknown", desc or ""
 
-
 DEFAULT_THEME_CARD_LIMIT = 60
 MAX_THEME_CARD_LIMIT = 200
 LARGE_THEME_CARD_LIMIT = 30  # For themes with many categories
@@ -1316,7 +1283,6 @@ LARGE_THEME_CARD_LIMIT = 30  # For themes with many categories
 MAX_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024  # 8MB
 SMALL_RESPONSE_SIZE_BYTES = 4 * 1024 * 1024  # 4MB
 LARGE_RESPONSE_THRESHOLD = 50  # categories with more than this many cards total
-
 
 def _get_adaptive_card_limit(theme_slug: str, sections: Dict[str, Any], requested_limit: Optional[int] = None) -> int:
     """Get an appropriate card limit based on theme size and requested limit."""
@@ -1347,7 +1313,6 @@ def _get_adaptive_card_limit(theme_slug: str, sections: Dict[str, Any], requeste
     
     return DEFAULT_THEME_CARD_LIMIT
 
-
 def _resolve_theme_card_limit(requested_limit: Optional[int]) -> Optional[int]:
     """Normalize the requested per-category card limit."""
     if requested_limit is None:
@@ -1365,7 +1330,6 @@ def _resolve_theme_card_limit(requested_limit: Optional[int]) -> Optional[int]:
         return 0
 
     return min(value, MAX_THEME_CARD_LIMIT)
-
 
 def _generate_card_limit_plan(initial_limit: Optional[int]) -> List[int]:
     """Generate progressively smaller card limits to avoid oversized responses."""
@@ -1410,7 +1374,6 @@ def _generate_card_limit_plan(initial_limit: Optional[int]) -> List[int]:
 
     return plan
 
-
 def _assemble_theme_payload(
     sanitized_slug: str,
     theme_url: str,
@@ -1437,24 +1400,20 @@ def _assemble_theme_payload(
 
     return payload
 
-
 def _is_valid_theme_data(metadata: Dict[str, Any], sections: Dict[str, Any]) -> bool:
     """Check if the extracted theme data represents a valid theme."""
-    # Check if we have meaningful metadata
     has_valid_metadata = (
         metadata.get("theme_name") is not None or
         metadata.get("description") is not None or
         metadata.get("total_decks") is not None
     )
     
-    # Check if we have card sections
     has_sections = bool(sections) and any(
         section_data.get("cards") for section_data in sections.values()
         if isinstance(section_data, dict)
     )
     
     return has_valid_metadata or has_sections
-
 
 def _create_theme_error_message(
     sanitized_slug: str,
@@ -1463,17 +1422,14 @@ def _create_theme_error_message(
 ) -> str:
     """Create a helpful error message for invalid themes."""
 
-    # Check if this looks like a color-prefixed theme
     color_slug, theme_part = _split_color_prefixed_theme_slug(sanitized_slug)
     if color_slug and theme_part:
-        # Suggest removing the theme suffix
         suggestion = f"Did you mean '{theme_part}' or '{color_slug}'?"
         color_hint = f"Colors on EDHRec: {', '.join(sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=True))}"
     else:
         suggestion = f"Try a common theme like 'spellslinger', 'voltron', 'tokens', 'graveyard', or 'battles'"
         color_hint = f"Valid colors: {', '.join(sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=True))}"
 
-    # Get examples of common themes
     example_themes = [
         "spellslinger", "voltron", "tokens", "graveyard", "battles",
         "lifegain", "counters", "enchantments", "artifacts", "reanimator"
@@ -1503,7 +1459,6 @@ def _create_theme_error_message(
 
     return "\n".join(part for part in message_parts if part is not None)
 
-
 def _split_color_prefixed_theme_slug(sanitized_slug: str) -> Tuple[Optional[str], Optional[str]]:
     """Split a slug into color identity and theme parts when prefixed by a color slug."""
     for color_slug in _SORTED_COLOR_IDENTITY_SLUGS:
@@ -1513,7 +1468,6 @@ def _split_color_prefixed_theme_slug(sanitized_slug: str) -> Tuple[Optional[str]
             if theme_part:
                 return color_slug, theme_part
     return None, None
-
 
 def _build_theme_route_candidates(sanitized_slug: str) -> List[Dict[str, str]]:
     """Build possible EDHRec routes for a given theme slug."""
@@ -1546,7 +1500,6 @@ def _build_theme_route_candidates(sanitized_slug: str) -> List[Dict[str, str]]:
             unique_candidates.append(candidate)
 
     return unique_candidates
-
 
 def _parse_theme_slugs_from_html(html_content: str) -> Set[str]:
     """Extract theme slugs from the EDHRec tags index HTML page."""
@@ -1597,7 +1550,6 @@ def _parse_theme_slugs_from_html(html_content: str) -> Set[str]:
         slugs.add(candidate)
 
     return slugs
-
 
 async def _get_available_theme_slugs(force_refresh: bool = False) -> Set[str]:
     """Fetch and cache the list of available EDHRec theme slugs from the tags index."""
@@ -1662,7 +1614,6 @@ async def _get_available_theme_slugs(force_refresh: bool = False) -> Set[str]:
 
         return set(slugs)
 
-
 def _validate_theme_slug_against_catalog(sanitized_slug: str, available_themes: Set[str]) -> None:
     """Validate a sanitized theme slug against the catalog of known themes."""
 
@@ -1689,7 +1640,6 @@ def _validate_theme_slug_against_catalog(sanitized_slug: str, available_themes: 
     )
     raise HTTPException(status_code=404, detail=detail)
 
-
 def _sanitize_theme_slug(theme_slug: str) -> str:
     """Normalize a user-provided theme slug for EDHRec lookups."""
     if not theme_slug:
@@ -1702,7 +1652,6 @@ def _sanitize_theme_slug(theme_slug: str) -> str:
         raise HTTPException(status_code=400, detail="Invalid theme slug")
 
     return sanitized_slug
-
 
 def _extract_next_data_from_html(html_content: str) -> Optional[Dict[str, Any]]:
     """Extract the Next.js data blob embedded in EDHRec theme pages."""
@@ -1722,7 +1671,6 @@ def _extract_next_data_from_html(html_content: str) -> Optional[Dict[str, Any]]:
     except Exception as exc:
         logger.warning(f"Failed to extract __NEXT_DATA__ from theme page: {exc}")
         return None
-
 
 async def _fetch_theme_document(
     sanitized_slug: str,
@@ -1771,7 +1719,6 @@ async def _fetch_theme_document(
     error_detail = _create_theme_error_message(sanitized_slug, last_error, available_themes)
     raise HTTPException(status_code=404, detail=error_detail)
 
-
 # Configure logging
 logging.basicConfig(level=getattr(logging, settings.log_level))
 logger = logging.getLogger(__name__)
@@ -1782,15 +1729,11 @@ SCRYFALL_HEADERS = {
     "Accept": "application/json;q=0.9,*/*;q=0.8"
 }
 
-# Rate limiter: REMOVED - No longer limiting EDHRec requests
-# rate_limiter = AsyncLimiter(max_rate=10, time_period=1.0)
-
 # Cache for Scryfall responses (1 hour TTL for 80-90% hit rate)
 cache = TTLCache(maxsize=1000, ttl=3600)
 
 # Global HTTP session with custom headers
 http_session: Optional[ClientSession] = None
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1813,7 +1756,6 @@ async def lifespan(app: FastAPI):
         if http_session:
             await http_session.close()
             logger.info("Closed HTTP session")
-
 
 # Create FastAPI app with lifespan
 app = FastAPI(
@@ -1838,33 +1780,20 @@ security = HTTPBearer()
 # Rate limiting per client (IP + API key)
 client_rate_limits = defaultdict(list)
 
-
 async def get_client_identifier(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Get unique client identifier for rate limiting"""
     client_ip = request.client.host if request.client else "unknown"
     api_key = credentials.credentials if credentials else "no_key"
     return f"{client_ip}:{api_key}"
 
-
 async def check_rate_limit(client_id: str):
     """Check if client has exceeded rate limit"""
     now = time.time()
-    # Clean old entries (older than 1 second)
     client_rate_limits[client_id] = [
         timestamp for timestamp in client_rate_limits[client_id]
         if now - timestamp < 1.0
     ]
-    
-    # Check if at limit - REMOVED RATE LIMITING
-    # if len(client_rate_limits[client_id]) >= 10:  # 10 requests per second
-    #     raise HTTPException(
-    #         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-    #         detail="Rate limit exceeded. Maximum 10 requests per second per client."
-    #     )
-    
-    # Record this request
     client_rate_limits[client_id].append(now)
-
 
 async def make_scryfall_request(url: str, method: str = "GET", **kwargs) -> Dict[str, Any]:
     """Make request to Scryfall with proper error handling - NO RATE LIMITING for EDHRec"""
@@ -1884,14 +1813,12 @@ async def make_scryfall_request(url: str, method: str = "GET", **kwargs) -> Dict
     
     try:
         async with http_session.request(method, url, **kwargs) as response:
-            # Handle rate limiting
             if response.status == 429:
                 retry_after = int(response.headers.get('Retry-After', 60))
                 logger.warning(f"Rate limit exceeded, retrying after {retry_after}s")
                 await asyncio.sleep(retry_after)
                 return await make_scryfall_request(url, method, **kwargs)
             
-            # Handle other errors
             if response.status >= 400:
                 error_text = await response.text()
                 logger.error(f"Scryfall API error {response.status}: {error_text}")
@@ -1900,10 +1827,8 @@ async def make_scryfall_request(url: str, method: str = "GET", **kwargs) -> Dict
                     detail=f"Scryfall API error: {response.status}"
                 )
             
-            # Parse successful response
             data = await response.json()
             
-            # Cache successful GET responses
             if method == "GET" and response.status == 200:
                 cache[cache_key] = data
                 logger.debug(f"Cached response for {url}")
@@ -1923,22 +1848,18 @@ async def make_scryfall_request(url: str, method: str = "GET", **kwargs) -> Dict
             detail=f"Scryfall API request failed: {str(e)}"
         )
 
-
 # Pydantic models
 class ThemeItem(BaseModel):
     name: str
     id: Optional[str] = None
     image: Optional[str] = None
 
-
 class ThemeCollection(BaseModel):
     header: str
     items: List[ThemeItem] = Field(default_factory=list)
 
-
 class ThemeContainer(BaseModel):
     collections: List[ThemeCollection] = Field(default_factory=list)
-
 
 class PageTheme(BaseModel):
     header: str
@@ -1947,7 +1868,6 @@ class PageTheme(BaseModel):
     container: ThemeContainer
     source_url: Optional[str] = None
     error: Optional[str] = None
-
 
 class Card(BaseModel):
     id: str
@@ -1999,7 +1919,6 @@ class Card(BaseModel):
     mana_cost_html: Optional[str] = None
     generated_mana: Optional[str] = None
 
-
 class CardsResponse(BaseModel):
     object: str
     total_cards: int
@@ -2007,14 +1926,12 @@ class CardsResponse(BaseModel):
     next_page: Optional[str] = None
     data: List[Card]
 
-
 class StatusResponse(BaseModel):
     status: str
     timestamp: str
     cache_stats: Dict[str, Any]
     rate_limiting: Dict[str, Any]
     scryfall_compliance: Dict[str, Any]
-
 
 class ThemeCard(BaseModel):
     name: str
@@ -2029,14 +1946,12 @@ class ThemeCard(BaseModel):
     synergy_percentage: Optional[str] = None
     trend_score: Optional[float] = None
 
-
 class ThemeCategory(BaseModel):
     category_name: str
     total_cards: int
     cards: List[ThemeCard]
     available_cards: Optional[int] = None
     is_truncated: bool = False
-
 
 class ThemeColorProfile(BaseModel):
     codes: List[str] = Field(default_factory=list)
@@ -2045,7 +1960,6 @@ class ThemeColorProfile(BaseModel):
     slug: Optional[str] = None
     display_name: Optional[str] = None
     raw: List[str] = Field(default_factory=list)
-
 
 class ThemeResponse(BaseModel):
     theme_slug: str
@@ -2062,7 +1976,6 @@ class ThemeResponse(BaseModel):
     top_commanders: List[Dict[str, Any]] = Field(default_factory=list)
     related_themes: List[Dict[str, Any]] = Field(default_factory=list)
     response_info: Optional[Dict[str, Any]] = None
-
 
 class ThemeMetadataResponse(BaseModel):
     """Simplified response for large datasets"""
@@ -2081,7 +1994,6 @@ class ThemeMetadataResponse(BaseModel):
     response_info: Optional[Dict[str, Any]] = None
     categories_summary: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
-
 async def fetch_theme_tag(name: str, identity: str) -> PageTheme:
     """
     Pulls the EDHREC Tag (e.g., /tags/prowess/jeskai) Next.js JSON and builds a PageTheme.
@@ -2091,13 +2003,11 @@ async def fetch_theme_tag(name: str, identity: str) -> PageTheme:
     # Heuristic extraction
     buckets = _walk_for_named_arrays(resources["data"])
     collections: List[ThemeCollection] = []
-    # Prefer Cardviews + Cards if present
     ordered_keys = []
     if "Cardviews" in buckets:
         ordered_keys.append("Cardviews")
     if "Cards" in buckets:
         ordered_keys.append("Cards")
-    # include any other buckets we found
     ordered_keys += [k for k in buckets.keys() if k not in ordered_keys]
 
     for k in ordered_keys:
@@ -2120,7 +2030,6 @@ async def fetch_theme_tag(name: str, identity: str) -> PageTheme:
         source_url=resources["tag_html_url"],
     )
 
-
 @app.get("/", response_model=Dict[str, str])
 async def root():
     """Root endpoint"""
@@ -2131,7 +2040,6 @@ async def root():
         "status": "/api/v1/status"
     }
 
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Render monitoring"""
@@ -2140,7 +2048,6 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat(),
         "service": "MTG Deckbuilding API"
     }
-
 
 @app.get("/api/v1/status", response_model=StatusResponse)
 async def get_status():
@@ -2167,17 +2074,13 @@ async def get_status():
         }
     )
 
-
 @app.get("/api/v1/cards/random", response_model=Card)
 async def get_random_card(client_id: str = Depends(get_client_identifier)):
     """Get a random card"""
     await check_rate_limit(client_id)
-
     url = "https://api.scryfall.com/cards/random"
     data = await make_scryfall_request(url)
-
     return Card(**data)
-
 
 @app.get("/api/v1/help/themes")
 async def get_themes_help():
@@ -2249,48 +2152,72 @@ async def get_themes_help():
         }
     }
 
-
 @app.get("/api/v1/themes/{theme_slug}", response_model=PageTheme)
 async def get_theme(theme_slug: str):
     """
-    Fetch theme data from EDHRec using theme slug format: {theme_name}-{color_identity}
-    Example: prowess-jeskai, storm-temur, control-mono-white.
+    Fetch theme data from EDHRec.
 
-    This endpoint delegates to `fetch_theme_tag`, which scrapes the EDHRec tag
-    page and builds a normalized `PageTheme` response.
+    Supports:
+    - Base theme:    "aristocrats"           -> https://edhrec.com/tags/aristocrats
+    - Theme + color: "aristocrats-orzhov"    -> https://edhrec.com/tags/aristocrats/orzhov
+
+    For base slugs we do NOT default to any color identity – we use the color-agnostic
+    EDHRec theme page.
     """
-    # Basic validation: require a hyphen-separated theme + color identity
-    if "-" not in theme_slug:
-        raise HTTPException(
-            status_code=400,
-            detail="Theme slug must contain '-' separator (e.g., prowess-jeskai)",
-        )
+    sanitized_slug = _sanitize_theme_slug(theme_slug)
 
-    theme_name, color_identity = theme_slug.rsplit("-", 1)
-    theme_name = theme_name.strip()
-    color_identity = color_identity.strip()
+    theme_name: Optional[str] = None
+    color_identity: Optional[str] = None
+    color_label: Optional[str] = None
 
-    if not theme_name or not color_identity:
-        raise HTTPException(status_code=400, detail="Invalid theme slug format")
+    # Try to interpret as [theme]-[color] *only if* the last segment is a valid color identity
+    if "-" in sanitized_slug:
+        tentative_theme, tentative_color = sanitized_slug.rsplit("-", 1)
+        tentative_theme = tentative_theme.strip()
+        tentative_color = tentative_color.strip()
+        if tentative_theme and tentative_color:
+            try:
+                _, color_label, _ = canonicalize_identity(tentative_color)
+                theme_name = tentative_theme
+                color_identity = tentative_color
+            except ValueError:
+                # Not a recognized color identity; treat the whole slug as a base theme
+                theme_name = None
+                color_identity = None
+                color_label = None
 
-    # Validate color identity early so callers get a 400 instead of a generic 500
-    try:
-        _, color_label, _ = canonicalize_identity(color_identity)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid color identity: {exc}",
-        ) from exc
+    # If we successfully parsed theme + color, use the tag-based scraper
+    if theme_name and color_identity:
+        page_theme = await fetch_theme_tag(theme_name, color_identity)
+        if not page_theme.header:
+            if color_label:
+                page_theme.header = f"{color_label} {theme_name.title()} Theme"
+            else:
+                page_theme.header = f"{theme_name.title()} Theme"
+        return page_theme
 
-    # Use the shared EDHRec theme scraper, which returns a PageTheme instance
-    page_theme = await fetch_theme_tag(theme_name, color_identity)
+    # Otherwise, treat it as a base theme slug (no color identity):
+    theme_url, next_data, metadata, _sections_preview = await _fetch_theme_document(sanitized_slug)
 
-    # Ensure we have a reasonable header; if the scraper didn't set one, synthesize it
-    if not page_theme.header:
-        page_theme.header = f"{color_label} {theme_name.title()} Theme"
+    # Build collections heuristically from the Next.js payload
+    buckets = _walk_for_named_arrays(next_data)
+    collections: List[ThemeCollection] = []
+    for header, names in buckets.items():
+        items = [ThemeItem(name=n) for n in names]
+        collections.append(ThemeCollection(header=header, items=items))
 
-    return page_theme
+    tags = _extract_theme_tags_from_payload(next_data)
 
+    header = metadata.get("theme_name") or sanitized_slug.replace("-", " ").title()
+    description = metadata.get("description") or ""
+
+    return PageTheme(
+        header=header,
+        description=description,
+        tags=tags,
+        container=ThemeContainer(collections=collections),
+        source_url=theme_url,
+    )
 
 @app.get("/api/v1/cards/search", response_model=CardsResponse)
 async def search_cards(
@@ -2325,7 +2252,6 @@ async def search_cards(
     
     return CardsResponse(**data)
 
-
 @app.get("/api/v1/cards/{card_id}", response_model=Card)
 async def get_card(
     card_id: str,
@@ -2333,12 +2259,9 @@ async def get_card(
 ):
     """Get a specific card by Scryfall ID"""
     await check_rate_limit(client_id)
-    
     url = f"https://api.scryfall.com/cards/{card_id}"
     data = await make_scryfall_request(url)
-    
     return Card(**data)
-
 
 @app.get("/api/v1/cards/collection", response_model=CardsResponse)
 async def get_cards_collection(
@@ -2360,17 +2283,13 @@ async def get_cards_collection(
     
     return CardsResponse(**data)
 
-
 @app.get("/api/v1/sets", response_model=Dict[str, Any])
 async def get_sets(client_id: str = Depends(get_client_identifier)):
     """Get all sets"""
     await check_rate_limit(client_id)
-    
     url = "https://api.scryfall.com/sets"
     data = await make_scryfall_request(url)
-    
     return data
-
 
 @app.get("/api/v1/sets/{set_code}", response_model=Dict[str, Any])
 async def get_set(
@@ -2379,34 +2298,25 @@ async def get_set(
 ):
     """Get a specific set"""
     await check_rate_limit(client_id)
-    
     url = f"https://api.scryfall.com/sets/{set_code.lower()}"
     data = await make_scryfall_request(url)
-    
     return data
-
 
 @app.get("/api/v1/symbology/ Mana", response_model=Dict[str, Any])
 async def get_mana_symbology(client_id: str = Depends(get_client_identifier)):
     """Get mana symbol reference data"""
     await check_rate_limit(client_id)
-    
     url = "https://api.scryfall.com/symbology"
     data = await make_scryfall_request(url)
-    
     return data
-
 
 @app.get("/api/v1/names", response_model=Dict[str, Any])
 async def get_names(client_id: str = Depends(get_client_identifier)):
     """Get all card names"""
     await check_rate_limit(client_id)
-    
     url = "https://api.scryfall.com/names"
     data = await make_scryfall_request(url)
-    
     return data
-
 
 @app.get("/api/v1/rulings/{card_id}", response_model=Dict[str, Any])
 async def get_rulings(
@@ -2415,12 +2325,9 @@ async def get_rulings(
 ):
     """Get rulings for a specific card"""
     await check_rate_limit(client_id)
-    
     url = f"https://api.scryfall.com/cards/{card_id}/rulings"
     data = await make_scryfall_request(url)
-    
     return data
-
 
 @app.get("/api/v1/commander/summary", response_model=Dict[str, Any])
 async def get_commander_summary(
@@ -2433,7 +2340,6 @@ async def get_commander_summary(
     """
     await check_rate_limit(client_id)
     
-    # Validate EDHRec URL format
     parsed_commander_url = urlparse(commander_url)
     if (
         parsed_commander_url.scheme != "https"
@@ -2444,23 +2350,17 @@ async def get_commander_summary(
             detail="commander_url must be a valid EDHREC URL starting with https://edhrec.com/"
         )
     
-    # Extract commander name from URL for caching
     commander_name = extract_commander_name_from_url(commander_url)
     cache_key = f"commander_summary:{commander_name}:{hash(commander_url)}"
     
-    # Check cache first
     if cache_key in cache:
         logger.info(f"Returning cached commander summary for {commander_name}")
         return cache[cache_key]
     
     try:
-        # Scrape EDHRec page
         commander_data = await scrape_edhrec_commander_page(commander_url)
-        
-        # Cache the result for 30 minutes (data changes infrequently)
         cache[cache_key] = commander_data
         logger.info(f"Generated and cached commander analysis for {commander_name}")
-        
         return commander_data
         
     except Exception as e:
@@ -2469,7 +2369,6 @@ async def get_commander_summary(
             status_code=500,
             detail=f"Unable to generate commander data: {str(e)}"
         )
-
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -2485,7 +2384,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         }
     )
 
-
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle general exceptions"""
@@ -2500,7 +2398,6 @@ async def general_exception_handler(request: Request, exc: Exception):
             }
         }
     )
-
 
 if __name__ == "__main__":
     uvicorn.run(
