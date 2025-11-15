@@ -604,12 +604,27 @@ def extract_theme_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         page_props = payload.get("pageProps", {})
+        
+        # Check for redirects (themes redirect to tags)
+        if "__N_REDIRECT" in page_props:
+            logger.info(f"Theme redirects to: {page_props['__N_REDIRECT']}")
+            return metadata
+            
         data = page_props.get("data", {})
         container = data.get("container", {})
         seo = data.get("seo", {})
 
-        theme_name = data.get("theme_name") or container.get("title") or seo.get("title")
+        # Try multiple sources for theme name
+        theme_name = (
+            data.get("theme_name") or 
+            data.get("tag_name") or
+            data.get("title") or
+            container.get("title") or 
+            seo.get("title")
+        )
+        
         if not theme_name:
+            # Try breadcrumbs
             breadcrumbs = container.get("breadcrumb", [])
             if breadcrumbs:
                 last = breadcrumbs[-1]
@@ -622,9 +637,15 @@ def extract_theme_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         metadata["theme_name"] = theme_name
 
-        description = container.get("description") or data.get("description") or seo.get("description")
+        # Extract description
+        description = (
+            container.get("description") or 
+            data.get("description") or 
+            seo.get("description")
+        )
         metadata["description"] = description
 
+        # Extract color identity
         color_identity = data.get("color_identity") or data.get("colorIdentity") or []
         if isinstance(color_identity, str):
             color_identity = [color_identity]
@@ -632,17 +653,20 @@ def extract_theme_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
             color_identity = []
         metadata["color_identity"] = color_identity
 
+        # Extract statistics
         metadata["total_decks"] = _safe_int(data.get("num_decks") or data.get("num_decks_avg") or data.get("deck_count"))
         metadata["average_deck_size"] = _safe_int(data.get("deck_size") or data.get("deckSize"))
         metadata["popularity_rank"] = _safe_int(data.get("rank") or data.get("popularity_rank") or data.get("popularityRank"))
 
+        # Extract commanders
         commanders_section = data.get("commanders") or data.get("top_commanders") or data.get("popular_commanders")
         commander_names = _gather_section_card_names(commanders_section)
         metadata["top_commanders"] = [
             {"name": name, "rank": index + 1}
-            for index, name in enumerate(commander_names)
+            for index, name in enumerate(commander_names[:10])  # Limit to top 10
         ]
 
+        # Extract related themes
         related = data.get("similar_themes") or data.get("similarThemes") or data.get("related_themes") or data.get("similar")
         metadata["related_themes"] = _simplify_related_entries(related)
 
@@ -802,6 +826,12 @@ def _build_theme_route_candidates(sanitized_slug: str) -> List[Dict[str, str]]:
             "json_path": f"tags/{theme_part}/{color_slug}.json"
         })
 
+    # Try tags first (themes redirect to tags)
+    candidates.append({
+        "page_path": f"tags/{sanitized_slug}",
+        "json_path": f"tags/{sanitized_slug}.json"
+    })
+
     candidates.append({
         "page_path": f"themes/{sanitized_slug}",
         "json_path": f"themes/{sanitized_slug}.json"
@@ -954,8 +984,8 @@ SCRYFALL_HEADERS = {
     "Accept": "application/json;q=0.9,*/*;q=0.8"
 }
 
-# Rate limiter: 10 requests per second per client (Scryfall limit)
-rate_limiter = AsyncLimiter(max_rate=10, time_period=1.0)
+# Rate limiter: REMOVED - No longer limiting EDHRec requests
+# rate_limiter = AsyncLimiter(max_rate=10, time_period=1.0)
 
 # Cache for Scryfall responses (1 hour TTL for 80-90% hit rate)
 cache = TTLCache(maxsize=1000, ttl=3600)
@@ -1027,20 +1057,19 @@ async def check_rate_limit(client_id: str):
         if now - timestamp < 1.0
     ]
     
-    # Check if at limit
-    if len(client_rate_limits[client_id]) >= 10:  # 10 requests per second
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded. Maximum 10 requests per second per client."
-        )
+    # Check if at limit - REMOVED RATE LIMITING
+    # if len(client_rate_limits[client_id]) >= 10:  # 10 requests per second
+    #     raise HTTPException(
+    #         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+    #         detail="Rate limit exceeded. Maximum 10 requests per second per client."
+    #     )
     
     # Record this request
     client_rate_limits[client_id].append(now)
 
 
 async def make_scryfall_request(url: str, method: str = "GET", **kwargs) -> Dict[str, Any]:
-    """Make rate-limited request to Scryfall with proper error handling"""
-    await rate_limiter.acquire()
+    """Make request to Scryfall with proper error handling - NO RATE LIMITING for EDHRec"""
     
     # Check cache for GET requests
     if method == "GET":
@@ -1293,13 +1322,14 @@ async def get_theme(
         "auto",
         regex="^(auto|full|metadata)$",
         description="Response format: 'auto' (auto-size), 'full' (all data), 'metadata' (categories only)"
-    ),
-    _client_id: str = Depends(get_client_identifier)
+    )
+    # Removed rate limiting dependency for EDHRec
 ):
     """Retrieve structured information for an EDHRec theme.
     
     This endpoint automatically manages response size to prevent server errors.
     Use max_cards parameter to control data volume, especially for large themes.
+    NO RATE LIMITING - EDHRec scraping is unthrottled.
     """
     # Handle metadata-only requests
     if response_format == "metadata":
