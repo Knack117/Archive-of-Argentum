@@ -409,14 +409,16 @@ def extract_commander_top_tags_from_json(payload: Dict[str, Any]) -> List[Dict[s
 
 
 def _estimate_response_size(theme_data: Dict[str, Any]) -> int:
-    """Estimate the size of a theme response in bytes."""
+    """Estimate the size of a theme response in bytes using JSON serialization."""
     try:
-        import sys
-        return len(sys.getsizeof(theme_data))
-    except Exception:
-        # Fallback estimation based on JSON string length
         import json
-        return len(json.dumps(theme_data, separators=(',', ':')))
+        # Use compact JSON to get accurate byte size
+        json_str = json.dumps(theme_data, separators=(',', ':'))
+        return len(json_str.encode('utf-8'))
+    except Exception as e:
+        # Fallback estimation
+        logger.warning(f"Failed to estimate response size: {e}")
+        return 0
 
 
 def _create_categories_summary(sections: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -781,11 +783,40 @@ _SORTED_COLOR_IDENTITY_SLUGS = sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=Tru
 
 DEFAULT_THEME_CARD_LIMIT = 60
 MAX_THEME_CARD_LIMIT = 200
+LARGE_THEME_CARD_LIMIT = 30  # For themes with many categories
 
 # Response size management
 MAX_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024  # 8MB
 SMALL_RESPONSE_SIZE_BYTES = 4 * 1024 * 1024  # 4MB
 LARGE_RESPONSE_THRESHOLD = 50  # categories with more than this many cards total
+
+
+def _get_adaptive_card_limit(theme_slug: str, sections: Dict[str, Any], requested_limit: Optional[int] = None) -> int:
+    """Get an appropriate card limit based on theme size and requested limit."""
+    
+    # If user explicitly requested a limit, respect it
+    if requested_limit is not None:
+        try:
+            value = int(requested_limit)
+            if value > 0:
+                return min(value, MAX_THEME_CARD_LIMIT)
+        except (TypeError, ValueError):
+            pass
+    
+    # Auto-detect large themes and apply conservative limits
+    category_count = len(sections)
+    total_cards_estimate = sum(
+        section_data.get("total_cards", 0) 
+        for section_data in sections.values() 
+        if isinstance(section_data, dict)
+    )
+    
+    # For very large themes (many categories or cards), use conservative limits
+    if category_count > 12 or total_cards_estimate > 500:
+        logger.info(f"Large theme detected: {theme_slug} ({category_count} categories, ~{total_cards_estimate} cards) - using conservative limit")
+        return LARGE_THEME_CARD_LIMIT
+    
+    return DEFAULT_THEME_CARD_LIMIT
 
 
 def _resolve_theme_card_limit(requested_limit: Optional[int]) -> Optional[int]:
@@ -912,6 +943,11 @@ async def scrape_edhrec_theme_page(
     route_candidates = _build_theme_route_candidates(sanitized_slug)
     last_error: Optional[str] = None
     card_limit = _resolve_theme_card_limit(max_cards_per_category)
+    
+    # First pass: try with a conservative limit for large themes
+    if max_cards_per_category is None:
+        # We'll determine the appropriate limit after seeing the data structure
+        pass
 
     for candidate in route_candidates:
         theme_url = urljoin(EDHREC_BASE_URL, candidate["page_path"])
@@ -1355,6 +1391,61 @@ async def get_random_card(client_id: str = Depends(get_client_identifier)):
     return Card(**data)
 
 
+@app.get("/api/v1/help/themes")
+async def get_themes_help():
+    """Get help information about EDHRec theme patterns and usage."""
+    return {
+        "title": "EDHRec Theme API Help",
+        "theme_patterns": {
+            "description": "EDHRec uses specific URL patterns for themes",
+            "basic_theme": {
+                "pattern": "/tags/[theme-name]",
+                "example": "/tags/spellslinger",
+                "valid_themes": [
+                    "spellslinger", "voltron", "tokens", "graveyard", "battles",
+                    "lifegain", "counters", "enchantments", "artifacts", "reanimator"
+                ]
+            },
+            "color_themed": {
+                "pattern": "/tags/[theme-name]/[color-scheme]",
+                "example": "/tags/spellslinger/temur",
+                "description": "Filter a theme by color identity",
+                "color_schemes": sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=True)
+            }
+        },
+        "common_mistakes": {
+            "compound_themes": {
+                "wrong": "temur-spellslinger-commanders",
+                "correct": "spellslinger" or "temur-spellslinger",
+                "explanation": "EDHRec doesn't support compound theme names like 'spellslinger-commanders'"
+            },
+            "color_order": {
+                "wrong": "spellslinger-temur",
+                "correct": "temur-spellslinger", 
+                "explanation": "Colors should be the prefix, theme should be the suffix"
+            }
+        },
+        "response_optimization": {
+            "max_cards_parameter": {
+                "description": "Control response size by limiting cards per category",
+                "default": f"{DEFAULT_THEME_CARD_LIMIT} cards per category",
+                "large_themes": f"For very large themes, API automatically uses {LARGE_THEME_CARD_LIMIT} cards per category",
+                "manual_control": "Use ?max_cards=N to specify exact limit"
+            },
+            "response_format": {
+                "metadata": "Get only theme metadata (categories, no cards)",
+                "auto": "Automatically sized response (recommended)",
+                "full": "Full data (may be large)"
+            }
+        },
+        "error_handling": {
+            "theme_not_found": "If theme doesn't exist, API returns helpful suggestions",
+            "large_responses": "API automatically manages response size to prevent errors",
+            "size_recommendations": "For large themes, consider using max_cards parameter"
+        }
+    }
+
+
 @app.get("/api/v1/themes/{theme_slug}", response_model=Union[ThemeResponse, ThemeMetadataResponse])
 async def get_theme(
     theme_slug: str,
@@ -1377,27 +1468,34 @@ async def get_theme(
     """Retrieve structured information for an EDHRec theme.
     
     This endpoint automatically manages response size to prevent server errors.
-    Use max_cards parameter to control data volume, especially for large themes.
+    For large themes, it will automatically apply appropriate card limits.
     NO RATE LIMITING - EDHRec scraping is unthrottled.
     """
+    
     # Handle metadata-only requests
     if response_format == "metadata":
-        # Temporarily set max_cards to 0 to get metadata only
-        card_limit = 0
-    else:
-        card_limit = max_cards
-
-    theme_data = await scrape_edhrec_theme_page(
-        theme_slug,
-        max_cards_per_category=card_limit
-    )
-    
-    # Check response type and return appropriate model
-    if "categories" not in theme_data or not theme_data["categories"]:
-        # This is a metadata-only response
+        # Get metadata only
+        theme_data = await scrape_edhrec_theme_page(theme_slug, max_cards_per_category=0)
         return ThemeMetadataResponse(**theme_data)
+    
+    # Smart card limit handling for large themes
+    if max_cards is None:
+        # First pass with conservative limit to get theme structure
+        theme_data = await scrape_edhrec_theme_page(theme_slug, max_cards_per_category=LARGE_THEME_CARD_LIMIT)
+        
+        # Check if we have meaningful data and can expand
+        if "categories" in theme_data and theme_data["categories"]:
+            adaptive_limit = _get_adaptive_card_limit(theme_slug, theme_data["categories"])
+            
+            # If adaptive limit is higher than what we used, re-fetch with higher limit
+            if adaptive_limit > LARGE_THEME_CARD_LIMIT:
+                logger.info(f"Theme {theme_slug} is smaller than expected, expanding limit to {adaptive_limit}")
+                theme_data = await scrape_edhrec_theme_page(theme_slug, max_cards_per_category=adaptive_limit)
+        
+        return ThemeResponse(**theme_data)
     else:
-        # This is a full response
+        # User specified a limit
+        theme_data = await scrape_edhrec_theme_page(theme_slug, max_cards_per_category=max_cards)
         return ThemeResponse(**theme_data)
 
 
