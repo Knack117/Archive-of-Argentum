@@ -347,17 +347,27 @@ def extract_commander_json_data(soup: BeautifulSoup, build_id: str) -> Dict[str,
                         for card_data in cardviews:
                             if isinstance(card_data, dict):
                                 card_name = card_data.get('name', 'Unknown')
-                                inclusion = card_data.get('inclusion', 0)
+                                num_decks = card_data.get('num_decks', 0)
+                                potential_decks = card_data.get('potential_decks', 0)
                                 synergy = card_data.get('synergy', 0)
                                 
-                                # Convert numeric percentages to percentage strings
-                                inclusion_pct = f"{inclusion}%" if isinstance(inclusion, (int, float)) else str(inclusion)
-                                synergy_pct = f"{synergy}%" if isinstance(synergy, (int, float)) else str(synergy)
+                                # Calculate inclusion percentage: (num_decks / potential_decks) * 100
+                                if potential_decks > 0:
+                                    inclusion_pct = round((num_decks / potential_decks) * 100, 1)
+                                else:
+                                    inclusion_pct = 0
+                                
+                                # Convert synergy to percentage: 0.58 -> 58%
+                                synergy_pct = round(synergy * 100, 1) if isinstance(synergy, (int, float)) else 0
                                 
                                 cards.append({
                                     "name": card_name,
+                                    "num_decks": num_decks,
+                                    "potential_decks": potential_decks,
                                     "inclusion_percentage": inclusion_pct,
-                                    "synergy_percentage": synergy_pct
+                                    "synergy_percentage": synergy_pct,
+                                    "card_url": card_data.get('url', ''),
+                                    "sanitized_name": card_data.get('sanitized', '')
                                 })
                         
                         categories[tag] = {
@@ -745,6 +755,9 @@ class ThemeItem(BaseModel):
     name: str
     id: Optional[str] = None
     image: Optional[str] = None
+    num_decks: Optional[int] = None
+    sanitized_name: Optional[str] = None
+    card_url: Optional[str] = None
 
 class ThemeCollection(BaseModel):
     header: str
@@ -838,7 +851,14 @@ async def fetch_theme_tag(theme_name: str, color_identity: Optional[str] = None)
                         for card_data in cardviews:
                             if isinstance(card_data, dict):
                                 card_name = card_data.get('name', 'Unknown')
-                                items.append(ThemeItem(name=card_name))
+                                num_decks = card_data.get('num_decks', 0)
+                                
+                                items.append(ThemeItem(
+                                    name=card_name,
+                                    num_decks=num_decks,
+                                    sanitized_name=card_data.get('sanitized', ''),
+                                    card_url=card_data.get('url', '')
+                                ))
                         
                         if items:
                             collections.append(ThemeCollection(
