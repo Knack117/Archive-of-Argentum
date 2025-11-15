@@ -9,6 +9,7 @@ pydantic==2.7.3
 # Async HTTP client and database
 httpx==0.25.2
 motor==3.7.1  # Async MongoDB driver for Beanie ODM
+aiohttp==3.9.1  # For HTTP sessions and rate limiting
 
 # Utilities
 python-multipart==0.0.6
@@ -23,3 +24,6 @@ starlette==0.27.0
 # Development and testing (optional)
 pytest==8.2.2
 pytest-asyncio==0.21.1
+
+# Additional for rate limiting (optional - in-memory is default)
+# redis==5.0.1  # For distributed rate limiting in production
