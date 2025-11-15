@@ -9,7 +9,7 @@ import logging
 import time
 import json
 from contextlib import asynccontextmanager
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -408,6 +408,30 @@ def extract_commander_top_tags_from_json(payload: Dict[str, Any]) -> List[Dict[s
     return top_tags
 
 
+def _estimate_response_size(theme_data: Dict[str, Any]) -> int:
+    """Estimate the size of a theme response in bytes."""
+    try:
+        import sys
+        return len(sys.getsizeof(theme_data))
+    except Exception:
+        # Fallback estimation based on JSON string length
+        import json
+        return len(json.dumps(theme_data, separators=(',', ':')))
+
+
+def _create_categories_summary(sections: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Create a summary of categories without full card data."""
+    summary = {}
+    for category_key, category_data in sections.items():
+        summary[category_key] = {
+            "category_name": category_data.get("category_name"),
+            "total_cards": category_data.get("total_cards"),
+            "available_cards": category_data.get("available_cards"),
+            "is_truncated": category_data.get("is_truncated", False),
+        }
+    return summary
+
+
 def _convert_cardview_to_theme_card(card: Dict[str, Any], position: int) -> Optional[Dict[str, Any]]:
     """Convert EDHRec cardview entry into a normalized theme card structure."""
     if not isinstance(card, dict):
@@ -456,9 +480,14 @@ def _convert_cardview_to_theme_card(card: Dict[str, Any], position: int) -> Opti
 
 def extract_theme_sections_from_json(
     payload: Dict[str, Any],
-    max_cards_per_category: Optional[int] = None
-) -> Dict[str, Dict[str, Any]]:
-    """Extract theme card sections from EDHRec Next.js payload."""
+    max_cards_per_category: Optional[int] = None,
+    force_summary: bool = False
+) -> Tuple[Dict[str, Dict[str, Any]], bool]:
+    """Extract theme card sections from EDHRec Next.js payload.
+    
+    Returns:
+        Tuple of (sections_dict, is_summary)
+    """
     sections: Dict[str, Dict[str, Any]] = {}
 
     try:
@@ -472,6 +501,20 @@ def extract_theme_sections_from_json(
         if isinstance(max_cards_per_category, int) and max_cards_per_category > 0:
             limit = max_cards_per_category
 
+        total_cards_estimated = 0
+        cards_with_data = []
+
+        # First pass: count cards and estimate size
+        for cardlist in cardlists:
+            if isinstance(cardlist, dict) and "cardviews" in cardlist:
+                total_cards_estimated += len(cardlist["cardviews"])
+
+        # If we expect too many cards, create summary mode
+        if force_summary or total_cards_estimated > LARGE_RESPONSE_THRESHOLD * (limit or DEFAULT_THEME_CARD_LIMIT):
+            logger.info(f"Large dataset detected ({total_cards_estimated} cards), creating summary")
+            return {}, True
+
+        # Second pass: extract actual data
         for cardlist in cardlists:
             if not isinstance(cardlist, dict):
                 continue
@@ -494,6 +537,7 @@ def extract_theme_sections_from_json(
                 converted = _convert_cardview_to_theme_card(card, idx)
                 if converted:
                     cards.append(converted)
+                    cards_with_data.append(converted)
 
             sections[key] = {
                 "category_name": header,
@@ -508,7 +552,7 @@ def extract_theme_sections_from_json(
     except Exception as exc:
         logger.warning(f"Failed to extract theme sections: {exc}")
 
-    return sections
+    return sections, False
 
 
 def _simplify_related_entries(entries: Any) -> List[Dict[str, Any]]:
@@ -714,6 +758,11 @@ _SORTED_COLOR_IDENTITY_SLUGS = sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=Tru
 DEFAULT_THEME_CARD_LIMIT = 60
 MAX_THEME_CARD_LIMIT = 200
 
+# Response size management
+MAX_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024  # 8MB
+SMALL_RESPONSE_SIZE_BYTES = 4 * 1024 * 1024  # 4MB
+LARGE_RESPONSE_THRESHOLD = 50  # categories with more than this many cards total
+
 
 def _resolve_theme_card_limit(requested_limit: Optional[int]) -> Optional[int]:
     """Normalize the requested per-category card limit."""
@@ -826,7 +875,7 @@ async def scrape_edhrec_theme_page(
             continue
 
         metadata = extract_theme_metadata(json_data)
-        sections = extract_theme_sections_from_json(
+        sections, is_summary = extract_theme_sections_from_json(
             json_data,
             max_cards_per_category=card_limit
         )
@@ -845,6 +894,47 @@ async def scrape_edhrec_theme_page(
             "top_commanders": metadata.get("top_commanders", []),
             "related_themes": metadata.get("related_themes", []),
         }
+
+        # Check response size and potentially truncate
+        estimated_size = _estimate_response_size(result)
+        response_info = {}
+        
+        if estimated_size > MAX_RESPONSE_SIZE_BYTES:
+            logger.warning(f"Response too large ({estimated_size} bytes), creating summary")
+            
+            # Create summary version
+            summary_result = {
+                "theme_slug": sanitized_slug,
+                "theme_url": theme_url,
+                "timestamp": datetime.utcnow().isoformat(),
+                "theme_name": metadata.get("theme_name"),
+                "description": metadata.get("description"),
+                "color_identity": metadata.get("color_identity", []),
+                "total_decks": metadata.get("total_decks"),
+                "average_deck_size": metadata.get("average_deck_size"),
+                "popularity_rank": metadata.get("popularity_rank"),
+                "top_commanders": metadata.get("top_commanders", []),
+                "related_themes": metadata.get("related_themes", []),
+                "categories_summary": _create_categories_summary(sections)
+            }
+            
+            response_info = {
+                "response_type": "summary",
+                "original_size_estimate": estimated_size,
+                "reason": "Response exceeded size limit",
+                "use_full_endpoint": "Use max_cards parameter to reduce data size"
+            }
+            
+            summary_result["response_info"] = response_info
+            return summary_result
+        
+        if estimated_size > SMALL_RESPONSE_SIZE_BYTES:
+            response_info = {
+                "response_type": "full",
+                "size_estimate": estimated_size,
+                "recommendation": "Consider using max_cards parameter for better performance"
+            }
+            result["response_info"] = response_info
 
         return result
 
@@ -1110,6 +1200,23 @@ class ThemeResponse(BaseModel):
     popularity_rank: Optional[int] = None
     top_commanders: List[Dict[str, Any]] = Field(default_factory=list)
     related_themes: List[Dict[str, Any]] = Field(default_factory=list)
+    response_info: Optional[Dict[str, Any]] = None
+
+
+class ThemeMetadataResponse(BaseModel):
+    """Simplified response for large datasets"""
+    theme_slug: str
+    theme_url: str
+    timestamp: str
+    theme_name: Optional[str] = None
+    description: Optional[str] = None
+    color_identity: List[str] = Field(default_factory=list)
+    total_decks: Optional[int] = None
+    average_deck_size: Optional[int] = None
+    popularity_rank: Optional[int] = None
+    top_commanders: List[Dict[str, Any]] = Field(default_factory=list)
+    related_themes: List[Dict[str, Any]] = Field(default_factory=list)
+    categories_summary: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
 @app.get("/", response_model=Dict[str, str])
@@ -1170,7 +1277,7 @@ async def get_random_card(client_id: str = Depends(get_client_identifier)):
     return Card(**data)
 
 
-@app.get("/api/v1/themes/{theme_slug}", response_model=ThemeResponse)
+@app.get("/api/v1/themes/{theme_slug}", response_model=Union[ThemeResponse, ThemeMetadataResponse])
 async def get_theme(
     theme_slug: str,
     max_cards: Optional[int] = Query(
@@ -1179,12 +1286,21 @@ async def get_theme(
         le=MAX_THEME_CARD_LIMIT,
         description=(
             "Maximum number of cards to include per category. "
-            "Pass 0 to return the full dataset."
+            "Pass 0 to return the full dataset. Lower values recommended for better performance."
         ),
+    ),
+    response_format: Optional[str] = Query(
+        "auto",
+        regex="^(auto|full|metadata)$",
+        description="Response format: 'auto' (auto-size), 'full' (all data), 'metadata' (categories only)"
     ),
     client_id: str = Depends(get_client_identifier)
 ): 
-    """Retrieve structured information for an EDHRec theme."""
+    """Retrieve structured information for an EDHRec theme.
+    
+    This endpoint automatically manages response size to prevent server errors.
+    Use max_cards parameter to control data volume, especially for large themes.
+    """
     await check_rate_limit(client_id)
 
     if not rate_limiter:
@@ -1193,12 +1309,26 @@ async def get_theme(
             detail="Rate limiter not ready"
         )
 
+    # Handle metadata-only requests
+    if response_format == "metadata":
+        # Temporarily set max_cards to 0 to get metadata only
+        card_limit = 0
+    else:
+        card_limit = max_cards
+
     async with rate_limiter:
         theme_data = await scrape_edhrec_theme_page(
             theme_slug,
-            max_cards_per_category=max_cards
+            max_cards_per_category=card_limit
         )
-    return ThemeResponse(**theme_data)
+    
+    # Check response type and return appropriate model
+    if "categories" not in theme_data or not theme_data["categories"]:
+        # This is a metadata-only response
+        return ThemeMetadataResponse(**theme_data)
+    else:
+        # This is a full response
+        return ThemeResponse(**theme_data)
 
 
 @app.get("/api/v1/cards/search", response_model=CardsResponse)
