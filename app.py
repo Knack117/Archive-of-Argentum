@@ -55,6 +55,7 @@ def extract_build_id_from_html(html: str) -> Optional[str]:
         return match.group(1)
     return None
 
+
 def normalize_commander_tags(values: list) -> List[str]:
     """Clean and deduplicate commander tags while preserving order."""
     seen = set()
@@ -77,6 +78,7 @@ def normalize_commander_tags(values: list) -> List[str]:
     
     return result
 
+
 def extract_commander_name_from_url(url: str) -> str:
     """Extract commander name from an EDHREC commander URL."""
     try:
@@ -97,12 +99,14 @@ def extract_commander_name_from_url(url: str) -> str:
     except Exception:
         return "unknown"
 
+
 def _clean_text(value: str) -> str:
     """Clean HTML text content"""
     from html import unescape
     cleaned = unescape(value or "")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip()
+
 
 def _gather_section_card_names(source: Any) -> List[str]:
     """Extract card names from JSON source"""
@@ -198,6 +202,7 @@ def _safe_float(value: Any) -> Optional[float]:
         return float(value)
     except (ValueError, TypeError):
         return None
+
 
 def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """Extract commander card sections from the EDHREC Next.js payload."""
@@ -316,6 +321,7 @@ def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, D
         logger.warning(f"Error extracting commander sections: {e}")
 
     return sections
+
 
 def extract_commander_tags_from_html(html: str) -> List[str]:
     """Extract commander tags from HTML content using BeautifulSoup."""
@@ -727,6 +733,7 @@ def extract_theme_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     return metadata
 
+
 async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
     """
     Scrape EDHRec commander page using Next.js JSON approach
@@ -1113,6 +1120,7 @@ def _walk_for_named_arrays(obj: Any) -> Dict[str, List[str]]:
     Returns {'Cardviews': [...names], 'Cards': [...names], ...}
     """
     buckets: Dict[str, List[str]] = {}
+
     def walk(node: Any, current_key: Optional[str] = None):
         if isinstance(node, dict):
             for k, v in node.items():
@@ -1134,6 +1142,7 @@ def _walk_for_named_arrays(obj: Any) -> Dict[str, List[str]]:
             for el in node:
                 walk(el, current_key)
         # primitives are ignored
+
     walk(obj)
     # de-dup while preserving order
     for k, vals in list(buckets.items()):
@@ -1653,6 +1662,7 @@ async def _get_available_theme_slugs(force_refresh: bool = False) -> Set[str]:
 
         return set(slugs)
 
+
 def _validate_theme_slug_against_catalog(sanitized_slug: str, available_themes: Set[str]) -> None:
     """Validate a sanitized theme slug against the catalog of known themes."""
 
@@ -1760,7 +1770,6 @@ async def _fetch_theme_document(
 
     error_detail = _create_theme_error_message(sanitized_slug, last_error, available_themes)
     raise HTTPException(status_code=404, detail=error_detail)
-
 
 
 # Configure logging
@@ -1921,12 +1930,15 @@ class ThemeItem(BaseModel):
     id: Optional[str] = None
     image: Optional[str] = None
 
+
 class ThemeCollection(BaseModel):
     header: str
     items: List[ThemeItem] = Field(default_factory=list)
 
+
 class ThemeContainer(BaseModel):
     collections: List[ThemeCollection] = Field(default_factory=list)
+
 
 class PageTheme(BaseModel):
     header: str
@@ -1935,6 +1947,7 @@ class PageTheme(BaseModel):
     container: ThemeContainer
     source_url: Optional[str] = None
     error: Optional[str] = None
+
 
 class Card(BaseModel):
     id: str
@@ -2237,72 +2250,46 @@ async def get_themes_help():
     }
 
 
-
-
-
-@app.get("/api/v1/themes/{theme_slug}")
+@app.get("/api/v1/themes/{theme_slug}", response_model=PageTheme)
 async def get_theme(theme_slug: str):
     """
     Fetch theme data from EDHRec using theme slug format: {theme_name}-{color_identity}
-    Example: prowess-jeskai, storm-temur, control-mono-white
-    
-    This endpoint uses the proven working implementation from mtg-mightstone-gpt.
+    Example: prowess-jeskai, storm-temur, control-mono-white.
+
+    This endpoint delegates to `fetch_theme_tag`, which scrapes the EDHRec tag
+    page and builds a normalized `PageTheme` response.
     """
-    # Parse theme slug to extract theme name and color identity
-    if '-' not in theme_slug:
-        raise HTTPException(status_code=400, detail="Theme slug must contain '-' separator (e.g., prowess-jeskai)")
-    
-    parts = theme_slug.rsplit('-', 1)  # Split from right to handle theme names with dashes
-    if len(parts) != 2:
+    # Basic validation: require a hyphen-separated theme + color identity
+    if "-" not in theme_slug:
+        raise HTTPException(
+            status_code=400,
+            detail="Theme slug must contain '-' separator (e.g., prowess-jeskai)",
+        )
+
+    theme_name, color_identity = theme_slug.rsplit("-", 1)
+    theme_name = theme_name.strip()
+    color_identity = color_identity.strip()
+
+    if not theme_name or not color_identity:
         raise HTTPException(status_code=400, detail="Invalid theme slug format")
-    
-    theme_name, color_identity = parts
-    
-    # Handle color identity canonicalization
+
+    # Validate color identity early so callers get a 400 instead of a generic 500
     try:
-        color_code, color_label, color_slug = canonicalize_identity(color_identity)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid color identity: {str(e)}")
-    
-    # Build EDHRec URL
-    tag_slug = theme_name.lower().replace(" ", "-").replace("&", "and").replace("'", "")
-    edhrec_url = f"https://edhrec.com/tags/{tag_slug}/{color_slug}"
-    
-    # Fetch data from EDHRec
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            response = await client.get(edhrec_url)
-            response.raise_for_status()
-            html_content = response.text
-        except httpx.RequestError as e:
-            raise HTTPException(status_code=500, detail=f"Failed to fetch theme data: {str(e)}")
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=404, detail=f"Theme '{theme_name}' with color identity '{color_identity}' not found")
-    
-    # Extract theme tags from HTML content
-    tags = extract_commander_tags_from_html(html_content)
-    
-    # Fetch card data for each tag
-    card_views = []
-    for tag in tags[:10]:  # Limit to first 10 tags for performance
-        try:
-            tag_data = await fetch_theme_tag(theme_name, color_slug)
-            card_views.append(tag_data)
-        except Exception as e:
-            print(f"Failed to fetch data for tag '{tag}': {e}")
-            continue
-    
-    # Return structured theme data
-    return PageTheme(
-        header=f"{color_label} {theme_name.title()} Theme",
-        description=f"Magic: The Gathering cards for {color_label} {theme_name} strategy from EDHRec",
-        tags=tags,
-        container=ThemeContainer(
-            theme=f"{theme_name}-{color_identity}",
-            items=[ThemeItem(cards=[]) for _ in card_views]  # Placeholder structure
-        ),
-        source_url=edhrec_url
-    )
+        _, color_label, _ = canonicalize_identity(color_identity)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid color identity: {exc}",
+        ) from exc
+
+    # Use the shared EDHRec theme scraper, which returns a PageTheme instance
+    page_theme = await fetch_theme_tag(theme_name, color_identity)
+
+    # Ensure we have a reasonable header; if the scraper didn't set one, synthesize it
+    if not page_theme.header:
+        page_theme.header = f"{color_label} {theme_name.title()} Theme"
+
+    return page_theme
 
 
 @app.get("/api/v1/cards/search", response_model=CardsResponse)
