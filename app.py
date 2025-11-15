@@ -21,10 +21,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from aiolimiter import AsyncLimiter
+# from aiolimiter import AsyncLimiter  # REMOVED - No longer rate limiting EDHRec requests
 from cachetools import TTLCache
 
-from mightstone.services import scryfall
+# from mightstone.services import scryfall  # REMOVED - unused import
 from config import settings
 from bs4 import BeautifulSoup
 import re
@@ -804,6 +804,51 @@ def _resolve_theme_card_limit(requested_limit: Optional[int]) -> Optional[int]:
     return min(value, MAX_THEME_CARD_LIMIT)
 
 
+def _is_valid_theme_data(metadata: Dict[str, Any], sections: Dict[str, Any]) -> bool:
+    """Check if the extracted theme data represents a valid theme."""
+    # Check if we have meaningful metadata
+    has_valid_metadata = (
+        metadata.get("theme_name") is not None or
+        metadata.get("description") is not None or
+        metadata.get("total_decks") is not None
+    )
+    
+    # Check if we have card sections
+    has_sections = bool(sections) and any(
+        section_data.get("cards") for section_data in sections.values()
+        if isinstance(section_data, dict)
+    )
+    
+    return has_valid_metadata or has_sections
+
+
+def _create_theme_error_message(sanitized_slug: str, last_error: Optional[str]) -> str:
+    """Create a helpful error message for invalid themes."""
+    
+    # Check if this looks like a color-prefixed theme
+    color_slug, theme_part = _split_color_prefixed_theme_slug(sanitized_slug)
+    if color_slug and theme_part:
+        # Suggest removing the theme suffix
+        suggestion = f"Did you mean '{theme_part}' or '{color_slug}'?"
+        color_hint = f"Colors on EDHRec: {', '.join(sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=True))}"
+    else:
+        suggestion = f"Try a common theme like 'spellslinger', 'voltron', 'tokens', 'graveyard', or 'battles'"
+        color_hint = f"Valid colors: {', '.join(sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=True))}"
+    
+    # Get examples of common themes
+    example_themes = [
+        "spellslinger", "voltron", "tokens", "graveyard", "battles",
+        "lifegain", "counters", "enchantments", "artifacts", "reanimator"
+    ]
+    
+    return (
+        f"Theme '{sanitized_slug}' not found on EDHRec. {suggestion}\n\n"
+        f"Common theme examples: {', '.join(example_themes)}\n"
+        f"{color_hint}\n\n"
+        f"Note: EDHRec uses format /tags/[theme] or /tags/[theme]/[color] (e.g., '/tags/spellslinger' or '/tags/spellslinger/temur')"
+    )
+
+
 def _split_color_prefixed_theme_slug(sanitized_slug: str) -> Tuple[Optional[str], Optional[str]]:
     """Split a slug into color identity and theme parts when prefixed by a color slug."""
     for color_slug in _SORTED_COLOR_IDENTITY_SLUGS:
@@ -910,6 +955,11 @@ async def scrape_edhrec_theme_page(
             max_cards_per_category=card_limit
         )
 
+        # Check if this is a valid theme by looking for meaningful data
+        if not _is_valid_theme_data(metadata, sections):
+            last_error = f"No valid theme data found at {theme_url}"
+            continue
+
         result: Dict[str, Any] = {
             "theme_slug": sanitized_slug,
             "theme_url": theme_url,
@@ -968,10 +1018,9 @@ async def scrape_edhrec_theme_page(
 
         return result
 
-    if last_error:
-        raise HTTPException(status_code=404, detail=last_error)
-
-    raise HTTPException(status_code=404, detail=f"Theme page not found: {sanitized_slug}")
+    # If we get here, no valid theme was found - provide helpful error message
+    error_detail = _create_theme_error_message(sanitized_slug, last_error)
+    raise HTTPException(status_code=404, detail=error_detail)
 
 
 # Configure logging
