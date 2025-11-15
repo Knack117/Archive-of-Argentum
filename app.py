@@ -775,6 +775,43 @@ class PageTheme(BaseModel):
     error: Optional[str] = None
 
 # --------------------------------------------------------------------
+# Commander Summary Models
+# --------------------------------------------------------------------
+
+class CommanderCard(BaseModel):
+    name: str
+    num_decks: Optional[int] = None
+    potential_decks: Optional[int] = None
+    inclusion_percentage: Optional[float] = None
+    synergy_percentage: Optional[float] = None
+    sanitized_name: Optional[str] = None
+    card_url: Optional[str] = None
+
+class CommanderTag(BaseModel):
+    tag: Optional[str] = None
+    count: Optional[int] = None
+    link: Optional[str] = None
+
+class CommanderCombo(BaseModel):
+    combo: Optional[str] = None
+    url: Optional[str] = None
+
+class SimilarCommander(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+
+class CommanderSummary(BaseModel):
+    commander_name: str
+    commander_url: Optional[str] = None
+    timestamp: Optional[str] = None
+    commander_tags: List[str] = Field(default_factory=list)
+    top_10_tags: List[str] = Field(default_factory=list)
+    all_tags: List[CommanderTag] = Field(default_factory=list)
+    combos: List[CommanderCombo] = Field(default_factory=list)
+    similar_commanders: List[SimilarCommander] = Field(default_factory=list)
+    categories: Dict[str, List[CommanderCard]] = Field(default_factory=dict)
+
+# --------------------------------------------------------------------
 # Theme Fetching Function
 # --------------------------------------------------------------------
 
@@ -1323,21 +1360,19 @@ async def root():
 # New simplified endpoints (replacing old ones)
 # ----------------------------------------------
 
-@app.get("/api/v1/commander/summary", response_model=PageTheme)
+@app.get("/api/v1/commander/summary", response_model=CommanderSummary)
 async def get_commander_summary(
     name: Optional[str] = Query(None),
     commander_url: Optional[str] = Query(None),
     api_key: str = Depends(verify_api_key)
-) -> PageTheme:
+) -> CommanderSummary:
     """
-    Fetches commander data for the given commander name and returns a simplified
-    PageTheme.  This implementation does not perform any response-size
-    trimming or rate limiting; it normalizes the commander name to an EDHRec
-    slug, fetches the commander page via the existing scrape helper, and maps
-    categories into a list of ThemeCollections containing only card names.
+    Fetches comprehensive commander data including all strategy tags, combos,
+    similar commanders, and card recommendations with statistics.
 
     :param name: Name of the commander (e.g. "Atraxa, Praetors' Voice")
-    :return: PageTheme with header, description, tags, container, and source_url.
+    :param commander_url: Full EDHRec commander URL
+    :return: CommanderSummary with complete analysis and statistics
     """
     # Determine slug from name or commander_url
     if name:
@@ -1349,6 +1384,7 @@ async def get_commander_summary(
     else:
         raise HTTPException(status_code=400, detail="Must provide either 'name' or 'commander_url'")
     commander_url_val = f"{EDHREC_BASE_URL}commanders/{slug}"
+    
     # Fetch commander data using existing helper
     try:
         commander_data = await scrape_edhrec_commander_page(commander_url_val)
@@ -1356,37 +1392,68 @@ async def get_commander_summary(
         # propagate any HTTP exceptions such as 404
         raise exc
 
-    # Build collections: each category becomes a ThemeCollection
-    collections: List[ThemeCollection] = []
-    for key, section in commander_data.get("categories", {}).items():
-        if not isinstance(section, dict):
+    # Build categories with full card data
+    categories_output: Dict[str, List[CommanderCard]] = {}
+    for category_key, category_data in commander_data.get("categories", {}).items():
+        if not isinstance(category_data, dict):
             continue
-        header = section.get("category_name") or key
-        cards = section.get("cards") or []
-        items: List[ThemeItem] = []
-        for card in cards:
+        
+        cards_data = category_data.get("cards", [])
+        card_objects = []
+        
+        for card in cards_data:
             if isinstance(card, dict):
-                card_name = card.get("name")
-                if card_name:
-                    items.append(ThemeItem(name=card_name))
-        if items:
-            collections.append(ThemeCollection(header=header, items=items))
+                card_objects.append(CommanderCard(
+                    name=card.get("name"),
+                    num_decks=card.get("num_decks"),
+                    potential_decks=card.get("potential_decks"),
+                    inclusion_percentage=card.get("inclusion_percentage"),
+                    synergy_percentage=card.get("synergy_percentage"),
+                    sanitized_name=card.get("sanitized_name"),
+                    card_url=card.get("card_url")
+                ))
+        
+        if card_objects:
+            categories_output[category_key] = card_objects
 
-    # Tags from commander_data
-    tags = commander_data.get("commander_tags", [])
+    # Build tags list
+    all_tags_output = []
+    for tag_data in commander_data.get("all_tags", []):
+        if isinstance(tag_data, dict):
+            all_tags_output.append(CommanderTag(
+                tag=tag_data.get("tag"),
+                count=tag_data.get("count"),
+                link=tag_data.get("link")
+            ))
 
-    header = commander_data.get("commander_name") or (
-        name if name else extract_commander_name_from_url(commander_url) if commander_url else name
-    )
-    description = ""
-    source_url = commander_data.get("commander_url") or commander_url_val
+    # Build combos list
+    combos_output = []
+    for combo_data in commander_data.get("combos", []):
+        if isinstance(combo_data, dict):
+            combos_output.append(CommanderCombo(
+                combo=combo_data.get("combo"),
+                url=combo_data.get("url")
+            ))
 
-    return PageTheme(
-        header=header,
-        description=description,
-        tags=tags,
-        container=ThemeContainer(collections=collections),
-        source_url=source_url,
+    # Build similar commanders list
+    similar_commanders_output = []
+    for sim_cmd in commander_data.get("similar_commanders", []):
+        if isinstance(sim_cmd, dict):
+            similar_commanders_output.append(SimilarCommander(
+                name=sim_cmd.get("name"),
+                url=sim_cmd.get("url")
+            ))
+
+    return CommanderSummary(
+        commander_name=commander_data.get("commander_name", ""),
+        commander_url=commander_data.get("commander_url"),
+        timestamp=commander_data.get("timestamp"),
+        commander_tags=commander_data.get("commander_tags", []),
+        top_10_tags=commander_data.get("top_10_tags", []),
+        all_tags=all_tags_output,
+        combos=combos_output,
+        similar_commanders=similar_commanders_output,
+        categories=categories_output
     )
 
 @app.get("/api/v1/themes/{theme_slug}", response_model=PageTheme)
