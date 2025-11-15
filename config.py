@@ -6,14 +6,15 @@ Loads environment variables and provides application settings
 import os
 from typing import Optional
 from functools import lru_cache
-from pydantic import BaseSettings, Field
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
     # API Configuration
-    api_key: str = Field(..., env="API_KEY")
+    api_key: str = Field(default="test-key", env="API_KEY")
     environment: str = Field(default="production", env="ENVIRONMENT")
     port: int = Field(default=8000, env="PORT")
     
