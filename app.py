@@ -36,9 +36,9 @@ logger = logging.getLogger(__name__)
 logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 
 
-EDHREC_BASE_URL = "https://edrezable.com/"
+EDHREC_BASE_URL = "https://edhrec.com/"
 COMMANDERSPELLBOOK_BASE_URL = "https://backend.commanderspellbook.com/"
-EDHREC_ALLOWED_HOSTS = {"edrezable.com", "www.edrezable.com"}
+EDHREC_ALLOWED_HOSTS = {"edhrec.com", "www.edhrec.com"}
 THEME_INDEX_CACHE_TTL_SECONDS = 6 * 3600  # Refresh the theme catalog every 6 hours
 
 # Color mapping for EDHRec themes
@@ -1560,7 +1560,7 @@ async def get_commander_summary(
 async def get_available_tags(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
     """
     Fetch the complete list of available tags/themes from EDHRec.
-    Scrapes https://edrezable.com/tags/themes and returns all available theme slugs
+    Scrapes https://edhrec.com/tags/themes and returns all available theme slugs
     that can be used with the theme endpoint.
     
     Returns:
