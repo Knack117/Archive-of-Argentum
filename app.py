@@ -1456,6 +1456,113 @@ async def get_commander_summary(
         categories=categories_output
     )
 
+@app.get("/api/v1/tags/available")
+async def get_available_tags(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
+    """
+    Fetch the complete list of available tags/themes from EDHRec.
+    Scrapes https://edhrec.com/tags and returns all available tag slugs
+    that can be used with the theme endpoint.
+    
+    Returns:
+        - tags: List of all available tag slugs (e.g., ["aristocrats", "tokens", "lands-matter"])
+        - count: Total number of tags
+        - color_identities: List of color identity codes that can be prefixed
+        - examples: Example usage patterns
+        - source_url: EDHRec tags page URL
+    """
+    tags_url = f"{EDHREC_BASE_URL}tags"
+    
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(tags_url, headers=headers)
+            response.raise_for_status()
+            
+            html_content = response.text
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Extract all tag slugs from links
+            tag_slugs = set()
+            
+            # Find all links that point to /tags/ pages
+            for link in soup.find_all('a', href=True):
+                href = link.get('href', '')
+                
+                # Match links to tag pages
+                if '/tags/' in href:
+                    # Extract the slug
+                    if href.startswith('http'):
+                        # Absolute URL
+                        parts = href.split('/tags/')
+                        if len(parts) > 1:
+                            slug = parts[-1]
+                        else:
+                            continue
+                    else:
+                        # Relative URL
+                        slug = href.replace('/tags/', '')
+                    
+                    # Clean up the slug
+                    slug = slug.split('?')[0].split('#')[0].strip('/')
+                    
+                    # Validate slug format - allow hyphens for compound tags
+                    if slug and re.match(r'^[a-z0-9]+(-[a-z0-9]+)*$', slug):
+                        # Exclude pure color identities
+                        if slug not in COLOR_SLUG_MAP:
+                            tag_slugs.add(slug)
+            
+            # Sort tags alphabetically
+            sorted_tags = sorted(list(tag_slugs))
+            
+            # Generate examples
+            examples = []
+            if sorted_tags:
+                # Base theme example
+                examples.append({
+                    "description": "Base theme (all colors)",
+                    "slug": sorted_tags[0] if sorted_tags else "aristocrats",
+                    "endpoint": f"/api/v1/themes/{sorted_tags[0] if sorted_tags else 'aristocrats'}"
+                })
+                
+                # Color-prefixed example
+                if len(sorted_tags) > 1:
+                    examples.append({
+                        "description": "Color-specific theme (e.g., Orzhov Aristocrats)",
+                        "slug": f"orzhov-{sorted_tags[0] if sorted_tags else 'aristocrats'}",
+                        "endpoint": f"/api/v1/themes/orzhov-{sorted_tags[0] if sorted_tags else 'aristocrats'}"
+                    })
+            
+            return {
+                "success": True,
+                "tags": sorted_tags,
+                "count": len(sorted_tags),
+                "color_identities": list(COLOR_SLUG_MAP.keys()),
+                "examples": examples,
+                "usage": {
+                    "base_theme": "Use tag slug directly (e.g., 'aristocrats', 'tokens')",
+                    "color_specific": "Prefix with color identity (e.g., 'orzhov-aristocrats', 'temur-spellslinger')",
+                    "available_colors": list(COLOR_SLUG_MAP.keys())
+                },
+                "source_url": tags_url,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+    except httpx.RequestError as exc:
+        logger.error(f"Error fetching tags page: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch tags from EDHRec: {str(exc)}"
+        )
+    except Exception as exc:
+        logger.error(f"Error processing tags page: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing tags data: {str(exc)}"
+        )
+
 @app.get("/api/v1/themes/{theme_slug}", response_model=PageTheme)
 async def get_theme(theme_slug: str, api_key: str = Depends(verify_api_key)) -> PageTheme:
     """
