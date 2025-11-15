@@ -1460,17 +1460,17 @@ async def get_commander_summary(
 async def get_available_tags(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
     """
     Fetch the complete list of available tags/themes from EDHRec.
-    Scrapes https://edhrec.com/tags and returns all available tag slugs
+    Scrapes https://edhrec.com/tags/themes and returns all available theme slugs
     that can be used with the theme endpoint.
     
     Returns:
-        - tags: List of all available tag slugs (e.g., ["aristocrats", "tokens", "lands-matter"])
-        - count: Total number of tags
+        - tags: List of all available theme slugs (e.g., ["aristocrats", "tokens", "lands-matter"])
+        - count: Total number of themes
         - color_identities: List of color identity codes that can be prefixed
         - examples: Example usage patterns
-        - source_url: EDHRec tags page URL
+        - source_url: EDHRec themes page URL
     """
-    tags_url = f"{EDHREC_BASE_URL}tags"
+    tags_url = f"{EDHREC_BASE_URL}tags/themes"
     
     try:
         headers = {
@@ -1484,65 +1484,64 @@ async def get_available_tags(api_key: str = Depends(verify_api_key)) -> Dict[str
             html_content = response.text
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            # Extract all tag slugs from links
-            tag_slugs = set()
+            # Extract theme data from Next.js JSON
+            theme_slugs = []
             
-            # Find all links that point to /tags/ pages
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
+            # Find the __NEXT_DATA__ script tag
+            next_data_script = soup.find('script', id='__NEXT_DATA__')
+            if next_data_script and next_data_script.string:
+                import json
+                json_data = json.loads(next_data_script.string)
                 
-                # Match links to tag pages
-                if '/tags/' in href:
-                    # Extract the slug
-                    if href.startswith('http'):
-                        # Absolute URL
-                        parts = href.split('/tags/')
-                        if len(parts) > 1:
-                            slug = parts[-1]
-                        else:
-                            continue
-                    else:
-                        # Relative URL
-                        slug = href.replace('/tags/', '')
-                    
-                    # Clean up the slug
-                    slug = slug.split('?')[0].split('#')[0].strip('/')
-                    
-                    # Validate slug format - allow hyphens for compound tags
-                    if slug and re.match(r'^[a-z0-9]+(-[a-z0-9]+)*$', slug):
-                        # Exclude pure color identities
-                        if slug not in COLOR_SLUG_MAP:
-                            tag_slugs.add(slug)
+                # Navigate to the cardlists data
+                if 'props' in json_data and 'pageProps' in json_data['props']:
+                    page_props = json_data['props']['pageProps']
+                    if 'data' in page_props and 'container' in page_props['data']:
+                        container = page_props['data']['container']
+                        if 'json_dict' in container and 'cardlists' in container['json_dict']:
+                            cardlists = container['json_dict']['cardlists']
+                            
+                            # Extract themes from cardviews
+                            for cardlist in cardlists:
+                                if 'cardviews' in cardlist:
+                                    for cardview in cardlist['cardviews']:
+                                        # Extract slug from URL (e.g., "/tags/aristocrats" -> "aristocrats")
+                                        url = cardview.get('url', '')
+                                        if url:
+                                            slug = url.replace('/tags/', '').strip('/')
+                                            if slug and re.match(r'^[a-z0-9]+(-[a-z0-9]+)*$', slug):
+                                                theme_slugs.append(slug)
             
-            # Sort tags alphabetically
-            sorted_tags = sorted(list(tag_slugs))
+            # Sort themes alphabetically
+            sorted_themes = sorted(theme_slugs)
             
             # Generate examples
-            examples = []
-            if sorted_tags:
-                # Base theme example
-                examples.append({
+            examples = [
+                {
                     "description": "Base theme (all colors)",
-                    "slug": sorted_tags[0] if sorted_tags else "aristocrats",
-                    "endpoint": f"/api/v1/themes/{sorted_tags[0] if sorted_tags else 'aristocrats'}"
-                })
-                
-                # Color-prefixed example
-                if len(sorted_tags) > 1:
-                    examples.append({
-                        "description": "Color-specific theme (e.g., Orzhov Aristocrats)",
-                        "slug": f"orzhov-{sorted_tags[0] if sorted_tags else 'aristocrats'}",
-                        "endpoint": f"/api/v1/themes/orzhov-{sorted_tags[0] if sorted_tags else 'aristocrats'}"
-                    })
+                    "slug": "aristocrats",
+                    "endpoint": "/api/v1/themes/aristocrats"
+                },
+                {
+                    "description": "Color-specific theme (Orzhov Aristocrats)",
+                    "slug": "orzhov-aristocrats",
+                    "endpoint": "/api/v1/themes/orzhov-aristocrats"
+                },
+                {
+                    "description": "Another color-specific example (Temur Spellslinger)",
+                    "slug": "temur-spellslinger",
+                    "endpoint": "/api/v1/themes/temur-spellslinger"
+                }
+            ]
             
             return {
                 "success": True,
-                "tags": sorted_tags,
-                "count": len(sorted_tags),
+                "themes": sorted_themes,
+                "count": len(sorted_themes),
                 "color_identities": list(COLOR_SLUG_MAP.keys()),
                 "examples": examples,
                 "usage": {
-                    "base_theme": "Use tag slug directly (e.g., 'aristocrats', 'tokens')",
+                    "base_theme": "Use theme slug directly (e.g., 'aristocrats', 'tokens', 'voltron')",
                     "color_specific": "Prefix with color identity (e.g., 'orzhov-aristocrats', 'temur-spellslinger')",
                     "available_colors": list(COLOR_SLUG_MAP.keys())
                 },
@@ -1551,16 +1550,16 @@ async def get_available_tags(api_key: str = Depends(verify_api_key)) -> Dict[str
             }
             
     except httpx.RequestError as exc:
-        logger.error(f"Error fetching tags page: {exc}")
+        logger.error(f"Error fetching themes page: {exc}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch tags from EDHRec: {str(exc)}"
+            detail=f"Failed to fetch themes from EDHRec: {str(exc)}"
         )
     except Exception as exc:
-        logger.error(f"Error processing tags page: {exc}")
+        logger.error(f"Error processing themes page: {exc}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error processing tags data: {str(exc)}"
+            detail=f"Error processing themes data: {str(exc)}"
         )
 
 @app.get("/api/v1/themes/{theme_slug}", response_model=PageTheme)
