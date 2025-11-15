@@ -2,11 +2,14 @@ import pytest
 
 from app import (
     _build_theme_route_candidates,
+    _parse_theme_slugs_from_html,
     _resolve_theme_card_limit,
     _split_color_prefixed_theme_slug,
+    _validate_theme_slug_against_catalog,
     extract_theme_sections_from_json,
     normalize_theme_colors,
 )
+from fastapi import HTTPException
 
 
 def test_split_color_prefixed_theme_slug_with_color_prefix():
@@ -112,3 +115,33 @@ def test_normalize_theme_colors_handles_aliases():
     assert profile["codes"] == ["W", "U", "R", "G"]
     assert profile["slug"] == "sans-black"
     assert profile["symbol"] == "WURG"
+
+
+def test_parse_theme_slugs_from_html_extracts_unique_theme_names():
+    html = """
+    <html>
+        <body>
+            <a href="/tags/spellslinger">Spellslinger</a>
+            <a href="https://edhrec.com/tags/tokens">Tokens</a>
+            <a href="/tags/tokens/azorius">Tokens Azorius</a>
+            <a href="/tags/azorius">Azorius Colors</a>
+        </body>
+    </html>
+    """
+
+    slugs = _parse_theme_slugs_from_html(html)
+    assert slugs == {"spellslinger", "tokens"}
+
+
+def test_validate_theme_slug_against_catalog_allows_color_variants():
+    catalog = {"spellslinger", "tokens"}
+    _validate_theme_slug_against_catalog("temur-spellslinger", catalog)
+
+
+def test_validate_theme_slug_against_catalog_rejects_unknown_theme():
+    catalog = {"spellslinger"}
+    with pytest.raises(HTTPException) as exc:
+        _validate_theme_slug_against_catalog("orzhov-aristocrats", catalog)
+
+    assert exc.value.status_code == 404
+    assert "aristocrats" in exc.value.detail

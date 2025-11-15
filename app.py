@@ -9,7 +9,7 @@ import logging
 import time
 import json
 from contextlib import asynccontextmanager
-from typing import List, Optional, Dict, Any, Tuple, Union
+from typing import List, Optional, Dict, Any, Tuple, Union, Set
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -33,6 +33,14 @@ from urllib.parse import urlparse, unquote, urljoin, quote_plus
 
 EDHREC_BASE_URL = "https://edhrec.com/"
 EDHREC_ALLOWED_HOSTS = {"edhrec.com", "www.edhrec.com"}
+THEME_INDEX_CACHE_TTL_SECONDS = 6 * 3600  # Refresh the theme catalog every 6 hours
+
+
+_theme_catalog_cache: Dict[str, Any] = {
+    "timestamp": 0.0,
+    "slugs": set(),
+}
+_theme_catalog_lock = asyncio.Lock()
 
 # EDHRec helper functions (adapted from user's working implementation)
 def extract_build_id_from_html(html: str) -> Optional[str]:
@@ -1137,9 +1145,13 @@ def _is_valid_theme_data(metadata: Dict[str, Any], sections: Dict[str, Any]) -> 
     return has_valid_metadata or has_sections
 
 
-def _create_theme_error_message(sanitized_slug: str, last_error: Optional[str]) -> str:
+def _create_theme_error_message(
+    sanitized_slug: str,
+    last_error: Optional[str],
+    available_themes: Optional[Set[str]] = None,
+) -> str:
     """Create a helpful error message for invalid themes."""
-    
+
     # Check if this looks like a color-prefixed theme
     color_slug, theme_part = _split_color_prefixed_theme_slug(sanitized_slug)
     if color_slug and theme_part:
@@ -1149,19 +1161,36 @@ def _create_theme_error_message(sanitized_slug: str, last_error: Optional[str]) 
     else:
         suggestion = f"Try a common theme like 'spellslinger', 'voltron', 'tokens', 'graveyard', or 'battles'"
         color_hint = f"Valid colors: {', '.join(sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=True))}"
-    
+
     # Get examples of common themes
     example_themes = [
         "spellslinger", "voltron", "tokens", "graveyard", "battles",
         "lifegain", "counters", "enchantments", "artifacts", "reanimator"
     ]
-    
-    return (
-        f"Theme '{sanitized_slug}' not found on EDHRec. {suggestion}\n\n"
-        f"Common theme examples: {', '.join(example_themes)}\n"
-        f"{color_hint}\n\n"
-        f"Note: EDHRec uses format /tags/[theme] or /tags/[theme]/[color] (e.g., '/tags/spellslinger' or '/tags/spellslinger/temur')"
-    )
+
+    message_parts = [
+        f"Theme '{sanitized_slug}' not found on EDHRec. {suggestion}",
+        f"Common theme examples: {', '.join(example_themes)}",
+        color_hint,
+        "",
+        "Note: EDHRec uses format /tags/[theme] or /tags/[theme]/[color] (e.g., '/tags/spellslinger' or '/tags/spellslinger/temur')",
+    ]
+
+    if available_themes:
+        sorted_catalog = sorted(available_themes)
+        preview = ", ".join(sorted_catalog[:20])
+        message_parts.extend([
+            "",
+            f"Known EDHRec themes ({len(sorted_catalog)} total): {preview}",
+        ])
+
+    if last_error:
+        message_parts.extend([
+            "",
+            f"Last attempt: {last_error}",
+        ])
+
+    return "\n".join(part for part in message_parts if part is not None)
 
 
 def _split_color_prefixed_theme_slug(sanitized_slug: str) -> Tuple[Optional[str], Optional[str]]:
@@ -1208,6 +1237,162 @@ def _build_theme_route_candidates(sanitized_slug: str) -> List[Dict[str, str]]:
     return unique_candidates
 
 
+def _parse_theme_slugs_from_html(html_content: str) -> Set[str]:
+    """Extract theme slugs from the EDHRec tags index HTML page."""
+
+    slugs: Set[str] = set()
+
+    if not html_content:
+        return slugs
+
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+    except Exception as exc:
+        logger.warning(f"Failed to parse tags HTML for theme catalog: {exc}")
+        return slugs
+
+    for link in soup.find_all("a", href=True):
+        href = link.get("href", "")
+        if not href:
+            continue
+
+        parsed = urlparse(href)
+        if parsed.scheme and parsed.netloc and parsed.netloc not in EDHREC_ALLOWED_HOSTS:
+            continue
+
+        path = parsed.path if parsed.scheme else href
+        if not path:
+            continue
+
+        if not path.startswith("/"):
+            path = f"/{path}"
+
+        if not path.startswith("/tags/"):
+            continue
+
+        segments = [segment for segment in path.split("/") if segment]
+        if len(segments) < 2:
+            continue
+
+        candidate = segments[1].strip().lower()
+        candidate = re.sub(r"[^a-z0-9\-]+", "-", candidate).strip("-")
+        if not candidate:
+            continue
+
+        if candidate in COLOR_IDENTITY_SLUGS:
+            # Skip color identity collections
+            continue
+
+        slugs.add(candidate)
+
+    return slugs
+
+
+async def _get_available_theme_slugs(force_refresh: bool = False) -> Set[str]:
+    """Fetch and cache the list of available EDHRec theme slugs from the tags index."""
+
+    return sanitized_slug
+
+
+def _extract_next_data_from_html(html_content: str) -> Optional[Dict[str, Any]]:
+    """Extract the Next.js data blob embedded in EDHRec theme pages."""
+    if not html_content:
+        return None
+
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+        script_tag = soup.find("script", id="__NEXT_DATA__")
+        if not script_tag or not script_tag.string:
+            return None
+
+        return json.loads(script_tag.string)
+    except json.JSONDecodeError as exc:
+        logger.warning(f"Failed to decode __NEXT_DATA__ JSON: {exc}")
+        return None
+    except Exception as exc:
+        logger.warning(f"Failed to extract __NEXT_DATA__ from theme page: {exc}")
+        return None
+
+
+async def _fetch_theme_document(
+    sanitized_slug: str,
+) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    """Fetch and validate theme data directly from the EDHRec HTML page."""
+
+    if not http_session:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="HTTP session not available")
+
+    now = time.time()
+    cached_slugs: Set[str] = _theme_catalog_cache.get("slugs", set())
+    cache_age = now - _theme_catalog_cache.get("timestamp", 0.0)
+
+    if cached_slugs and not force_refresh and cache_age < THEME_INDEX_CACHE_TTL_SECONDS:
+        return set(cached_slugs)
+
+    async with _theme_catalog_lock:
+        cached_slugs = _theme_catalog_cache.get("slugs", set())
+        cache_age = now - _theme_catalog_cache.get("timestamp", 0.0)
+
+        if cached_slugs and not force_refresh and cache_age < THEME_INDEX_CACHE_TTL_SECONDS:
+            return set(cached_slugs)
+
+        tags_url = urljoin(EDHREC_BASE_URL, "tags")
+
+        try:
+            async with http_session.get(tags_url, headers=SCRYFALL_HEADERS) as response:
+                if response.status != 200:
+                    logger.warning(f"Failed to fetch theme catalog: status {response.status}")
+                    if cached_slugs:
+                        return set(cached_slugs)
+                    raise HTTPException(status_code=response.status, detail="Unable to load theme catalog from EDHRec")
+
+                html_content = await response.text()
+        except aiohttp.ClientError as exc:
+            logger.warning(f"Error fetching theme catalog: {exc}")
+            if cached_slugs:
+                return set(cached_slugs)
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Failed to retrieve theme catalog from EDHRec")
+
+        slugs = _parse_theme_slugs_from_html(html_content)
+        if not slugs:
+            logger.warning("Theme catalog scrape returned no slugs")
+            if cached_slugs:
+                return set(cached_slugs)
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to parse theme catalog from EDHRec")
+
+        _theme_catalog_cache["timestamp"] = now
+        _theme_catalog_cache["slugs"] = slugs
+
+        return set(slugs)
+
+
+def _validate_theme_slug_against_catalog(sanitized_slug: str, available_themes: Set[str]) -> None:
+    """Validate a sanitized theme slug against the catalog of known themes."""
+
+    if sanitized_slug in available_themes:
+        return
+
+    color_slug, theme_part = _split_color_prefixed_theme_slug(sanitized_slug)
+
+    if color_slug and color_slug not in COLOR_IDENTITY_SLUGS:
+        detail = _create_theme_error_message(
+            sanitized_slug,
+            f"Color prefix '{color_slug}' is not recognized by EDHRec",
+            available_themes,
+        )
+        raise HTTPException(status_code=404, detail=detail)
+
+    if color_slug and theme_part and theme_part in available_themes:
+        return
+
+    detail = _create_theme_error_message(
+        sanitized_slug,
+        f"Theme '{theme_part or sanitized_slug}' is not listed on EDHRec" if theme_part or sanitized_slug else None,
+        available_themes,
+    )
+    raise HTTPException(status_code=404, detail=detail)
+
+
 def _sanitize_theme_slug(theme_slug: str) -> str:
     """Normalize a user-provided theme slug for EDHRec lookups."""
     if not theme_slug:
@@ -1244,6 +1429,7 @@ def _extract_next_data_from_html(html_content: str) -> Optional[Dict[str, Any]]:
 
 async def _fetch_theme_document(
     sanitized_slug: str,
+    available_themes: Optional[Set[str]] = None,
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
     """Fetch and validate theme data directly from the EDHRec HTML page."""
 
@@ -1285,7 +1471,7 @@ async def _fetch_theme_document(
 
         return theme_url, next_data, metadata, sections_preview
 
-    error_detail = _create_theme_error_message(sanitized_slug, last_error)
+    error_detail = _create_theme_error_message(sanitized_slug, last_error, available_themes)
     raise HTTPException(status_code=404, detail=error_detail)
 
 
@@ -1637,6 +1823,15 @@ async def get_random_card(client_id: str = Depends(get_client_identifier)):
 @app.get("/api/v1/help/themes")
 async def get_themes_help():
     """Get help information about EDHRec theme patterns and usage."""
+
+    try:
+        theme_catalog = sorted(await _get_available_theme_slugs())
+    except HTTPException:
+        theme_catalog = []
+    except Exception as exc:
+        logger.warning(f"Failed to load theme catalog for help endpoint: {exc}")
+        theme_catalog = []
+
     return {
         "title": "EDHRec Theme API Help",
         "theme_patterns": {
@@ -1644,7 +1839,7 @@ async def get_themes_help():
             "basic_theme": {
                 "pattern": "/tags/[theme-name]",
                 "example": "/tags/spellslinger",
-                "valid_themes": [
+                "valid_themes": theme_catalog[:25] if theme_catalog else [
                     "spellslinger", "voltron", "tokens", "graveyard", "battles",
                     "lifegain", "counters", "enchantments", "artifacts", "reanimator"
                 ]
@@ -1685,6 +1880,13 @@ async def get_themes_help():
             "theme_not_found": "If theme doesn't exist, API returns helpful suggestions",
             "large_responses": "API automatically manages response size to prevent errors",
             "size_recommendations": "For large themes, consider using max_cards parameter"
+        },
+        "theme_catalog": {
+            "total": len(theme_catalog),
+            "sample": theme_catalog[:50],
+        } if theme_catalog else {
+            "total": 0,
+            "sample": [],
         }
     }
 
@@ -1716,7 +1918,12 @@ async def get_theme(
     """
 
     sanitized_slug = _sanitize_theme_slug(theme_slug)
-    theme_url, raw_theme_data, metadata, preview_sections = await _fetch_theme_document(sanitized_slug)
+    available_theme_slugs = await _get_available_theme_slugs()
+    _validate_theme_slug_against_catalog(sanitized_slug, available_theme_slugs)
+    theme_url, raw_theme_data, metadata, preview_sections = await _fetch_theme_document(
+        sanitized_slug,
+        available_theme_slugs,
+    )
 
     def build_metadata_payload(reason: str, applied_limit: Optional[int], estimated_size: Optional[int]) -> Dict[str, Any]:
         payload = _assemble_theme_payload(sanitized_slug, theme_url, metadata)
