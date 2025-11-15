@@ -28,7 +28,11 @@ from mightstone.services import scryfall
 from config import settings
 from bs4 import BeautifulSoup
 import re
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, urljoin
+
+
+EDHREC_BASE_URL = "https://edhrec.com/"
+EDHREC_ALLOWED_HOSTS = {"edhrec.com", "www.edhrec.com"}
 
 # EDHRec helper functions (adapted from user's working implementation)
 def extract_build_id_from_html(html: str) -> Optional[str]:
@@ -64,19 +68,23 @@ def normalize_commander_tags(values: list) -> List[str]:
     return result
 
 def extract_commander_name_from_url(url: str) -> str:
-    """Extract commander name from EDHRec URL"""
+    """Extract commander name from an EDHREC commander URL."""
     try:
-        # URL format: https://.edhrec.com/commanders/the-ur-dragon
-        if "/commanders/" in url:
-            name_part = url.split("/commanders/")[-1]
-            # Remove any query parameters
-            name_part = name_part.split("?")[0]
-            # Convert URL slug to readable name
-            name_part = name_part.replace("-", " ").replace("_", " ")
-            # Capitalize each word
-            return " ".join(word.capitalize() for word in name_part.split())
-        return url.split("/")[-1].replace("-", " ")
-    except:
+        parsed = urlparse(url)
+        path = parsed.path or ""
+        path = path.split("?")[0].split("#")[0]
+        if path.startswith("/"):
+            path = path[1:]
+
+        if path.startswith("commanders/"):
+            slug = path.split("commanders/", 1)[1]
+        else:
+            slug = path.split("/")[-1]
+
+        slug = slug.strip("/")
+        slug = slug.replace("-", " ").replace("_", " ")
+        return " ".join(word.capitalize() for word in slug.split()) or "unknown"
+    except Exception:
         return "unknown"
 
 def _clean_text(value: str) -> str:
@@ -328,7 +336,7 @@ async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
     # Remove any non-alphanumeric characters for the slug
     commander_slug = re.sub(r'[^a-z0-9\-]', '', commander_slug)
     
-    json_url = f"https://edhrec.com/_next/data/{build_id}/commanders/{commander_slug}.json"
+    json_url = urljoin(EDHREC_BASE_URL, f"_next/data/{build_id}/commanders/{commander_slug}.json")
     logger.info(f"Fetching Next.js JSON data from: {json_url}")
     
     async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
@@ -823,10 +831,14 @@ async def get_commander_summary(
     await check_rate_limit(client_id)
     
     # Validate EDHRec URL format
-    if not commander_url.startswith("https://"):
+    parsed_commander_url = urlparse(commander_url)
+    if (
+        parsed_commander_url.scheme != "https"
+        or parsed_commander_url.netloc not in EDHREC_ALLOWED_HOSTS
+    ):
         raise HTTPException(
-            status_code=400, 
-            detail="commander_url must be a valid URL starting with https://"
+            status_code=400,
+            detail="commander_url must be a valid EDHREC URL starting with https://edhrec.com/"
         )
     
     # Extract commander name from URL for caching
@@ -857,13 +869,23 @@ async def get_commander_summary(
 
 
 def extract_commander_name_from_url(url: str) -> str:
-    """Extract commander name from EDHRec URL"""
+    """Extract commander name from an EDHREC commander URL."""
     try:
-        # URL format: https://.edhrec.com/commanders/the-ur-dragon
-        if "/commanders/" in url:
-            return url.split("/commanders/")[-1].replace("-", " ")
-        return url.split("/")[-1].replace("-", " ")
-    except:
+        parsed = urlparse(url)
+        path = parsed.path or ""
+        path = path.split("?")[0].split("#")[0]
+        if path.startswith("/"):
+            path = path[1:]
+
+        if path.startswith("commanders/"):
+            slug = path.split("commanders/", 1)[1]
+        else:
+            slug = path.split("/")[-1]
+
+        slug = slug.strip("/")
+        slug = slug.replace("-", " ").replace("_", " ")
+        return " ".join(word.capitalize() for word in slug.split()) or "unknown"
+    except Exception:
         return "unknown"
 
 
@@ -893,7 +915,7 @@ async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
     # Remove any non-alphanumeric characters for the slug
     commander_slug = re.sub(r'[^a-z0-9\-]', '', commander_slug)
     
-    json_url = f"https://edhrec.com/_next/data/{build_id}/commanders/{commander_slug}.json"
+    json_url = urljoin(EDHREC_BASE_URL, f"_next/data/{build_id}/commanders/{commander_slug}.json")
     logger.info(f"Fetching Next.js JSON data from: {json_url}")
     
     async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
