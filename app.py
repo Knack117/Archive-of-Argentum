@@ -9,7 +9,7 @@ import logging
 import time
 import json
 from contextlib import asynccontextmanager
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -655,6 +655,82 @@ async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
     return result
 
 
+COLOR_IDENTITY_SLUGS = [
+    "five-color",
+    "sans-white",
+    "sans-blue",
+    "sans-black",
+    "sans-red",
+    "sans-green",
+    "azorius",
+    "dimir",
+    "rakdos",
+    "gruul",
+    "selesnya",
+    "orzhov",
+    "izzet",
+    "simic",
+    "golgari",
+    "boros",
+    "abzan",
+    "bant",
+    "esper",
+    "grixis",
+    "jeskai",
+    "jund",
+    "mardu",
+    "naya",
+    "sultai",
+    "temur",
+    "white",
+    "blue",
+    "black",
+    "red",
+    "green",
+    "colorless",
+]
+
+_SORTED_COLOR_IDENTITY_SLUGS = sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=True)
+
+
+def _split_color_prefixed_theme_slug(sanitized_slug: str) -> Tuple[Optional[str], Optional[str]]:
+    """Split a slug into color identity and theme parts when prefixed by a color slug."""
+    for color_slug in _SORTED_COLOR_IDENTITY_SLUGS:
+        prefix = f"{color_slug}-"
+        if sanitized_slug.startswith(prefix):
+            theme_part = sanitized_slug[len(prefix):]
+            if theme_part:
+                return color_slug, theme_part
+    return None, None
+
+
+def _build_theme_route_candidates(sanitized_slug: str) -> List[Dict[str, str]]:
+    """Build possible EDHRec routes for a given theme slug."""
+    candidates: List[Dict[str, str]] = []
+
+    color_slug, theme_part = _split_color_prefixed_theme_slug(sanitized_slug)
+    if color_slug and theme_part:
+        candidates.append({
+            "page_path": f"tags/{theme_part}/{color_slug}",
+            "json_path": f"tags/{theme_part}/{color_slug}.json"
+        })
+
+    candidates.append({
+        "page_path": f"themes/{sanitized_slug}",
+        "json_path": f"themes/{sanitized_slug}.json"
+    })
+
+    unique_candidates: List[Dict[str, str]] = []
+    seen_paths = set()
+    for candidate in candidates:
+        page_path = candidate["page_path"]
+        if page_path not in seen_paths:
+            seen_paths.add(page_path)
+            unique_candidates.append(candidate)
+
+    return unique_candidates
+
+
 async def scrape_edhrec_theme_page(theme_slug: str) -> Dict[str, Any]:
     """Scrape EDHRec theme page and return structured deckbuilding data."""
     if not theme_slug:
@@ -668,45 +744,69 @@ async def scrape_edhrec_theme_page(theme_slug: str) -> Dict[str, Any]:
     if not http_session:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="HTTP session not available")
 
-    theme_url = urljoin(EDHREC_BASE_URL, f"themes/{sanitized_slug}")
+    route_candidates = _build_theme_route_candidates(sanitized_slug)
+    last_error: Optional[str] = None
 
-    async with http_session.get(theme_url, headers=SCRYFALL_HEADERS) as response:
-        if response.status != 200:
-            raise HTTPException(status_code=404, detail=f"Theme page not found: {sanitized_slug}")
+    for candidate in route_candidates:
+        theme_url = urljoin(EDHREC_BASE_URL, candidate["page_path"])
 
-        html_content = await response.text()
+        try:
+            async with http_session.get(theme_url, headers=SCRYFALL_HEADERS) as response:
+                if response.status != 200:
+                    last_error = f"Theme page returned status {response.status} for {theme_url}"
+                    continue
 
-    build_id = extract_build_id_from_html(html_content)
-    if not build_id:
-        raise HTTPException(status_code=500, detail="Could not extract Next.js build ID from theme page")
+                html_content = await response.text()
+        except aiohttp.ClientError as exc:
+            last_error = f"HTTP error fetching theme page {theme_url}: {exc}"
+            continue
 
-    json_url = urljoin(EDHREC_BASE_URL, f"_next/data/{build_id}/themes/{sanitized_slug}.json")
+        build_id = extract_build_id_from_html(html_content)
+        if not build_id:
+            last_error = f"Could not extract Next.js build ID from theme page {theme_url}"
+            continue
 
-    async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
-        if response.status != 200:
-            raise HTTPException(status_code=404, detail=f"Could not fetch theme data from: {json_url}")
+        json_path = candidate["json_path"]
+        json_url = urljoin(EDHREC_BASE_URL, f"_next/data/{build_id}/{json_path}")
 
-        json_data = await response.json()
+        try:
+            async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
+                if response.status != 200:
+                    last_error = f"Could not fetch theme data from: {json_url} (status {response.status})"
+                    continue
 
-    metadata = extract_theme_metadata(json_data)
-    sections = extract_theme_sections_from_json(json_data)
+                json_data = await response.json()
+        except aiohttp.ClientError as exc:
+            last_error = f"HTTP error fetching theme JSON {json_url}: {exc}"
+            continue
+        except aiohttp.ContentTypeError as exc:
+            last_error = f"Invalid JSON content from {json_url}: {exc}"
+            continue
 
-    result: Dict[str, Any] = {
-        "theme_slug": sanitized_slug,
-        "theme_url": theme_url,
-        "timestamp": datetime.utcnow().isoformat(),
-        "categories": sections,
-        "theme_name": metadata.get("theme_name"),
-        "description": metadata.get("description"),
-        "color_identity": metadata.get("color_identity", []),
-        "total_decks": metadata.get("total_decks"),
-        "average_deck_size": metadata.get("average_deck_size"),
-        "popularity_rank": metadata.get("popularity_rank"),
-        "top_commanders": metadata.get("top_commanders", []),
-        "related_themes": metadata.get("related_themes", []),
-    }
+        metadata = extract_theme_metadata(json_data)
+        sections = extract_theme_sections_from_json(json_data)
 
-    return result
+        result: Dict[str, Any] = {
+            "theme_slug": sanitized_slug,
+            "theme_url": theme_url,
+            "timestamp": datetime.utcnow().isoformat(),
+            "categories": sections,
+            "theme_name": metadata.get("theme_name"),
+            "description": metadata.get("description"),
+            "color_identity": metadata.get("color_identity", []),
+            "total_decks": metadata.get("total_decks"),
+            "average_deck_size": metadata.get("average_deck_size"),
+            "popularity_rank": metadata.get("popularity_rank"),
+            "top_commanders": metadata.get("top_commanders", []),
+            "related_themes": metadata.get("related_themes", []),
+        }
+
+        return result
+
+    if last_error:
+        raise HTTPException(status_code=404, detail=last_error)
+
+    raise HTTPException(status_code=404, detail=f"Theme page not found: {sanitized_slug}")
 
 
 # Configure logging
