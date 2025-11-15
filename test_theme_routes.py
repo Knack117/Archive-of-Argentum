@@ -5,6 +5,7 @@ from app import (
     _parse_theme_slugs_from_html,
     _resolve_theme_card_limit,
     _split_color_prefixed_theme_slug,
+    _split_theme_slug,
     _validate_theme_slug_against_catalog,
     extract_theme_sections_from_json,
     normalize_theme_colors,
@@ -47,6 +48,19 @@ def test_build_theme_route_candidates_handles_five_color_slug():
     candidates = _build_theme_route_candidates("five-color-gates")
     assert candidates[0]["page_path"] == "tags/gates/five-color"
     assert candidates[0]["json_path"] == "tags/gates/five-color.json"
+
+
+def test_build_theme_route_candidates_handles_color_suffix_slug():
+    candidates = _build_theme_route_candidates("goblins-mono-red")
+    assert candidates[0]["page_path"] == "tags/goblins/mono-red"
+    assert any(candidate["page_path"] == "themes/goblins-mono-red" for candidate in candidates)
+
+
+def test_split_theme_slug_detects_suffix_color():
+    theme, color, position = _split_theme_slug("goblins-mono-red")
+    assert theme == "goblins"
+    assert color == "mono-red"
+    assert position == "suffix"
 
 
 def test_resolve_theme_card_limit_defaults_and_caps():
