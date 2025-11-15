@@ -261,59 +261,77 @@ async def scrape_edhrec_commander_page(commander_url: str) -> Dict[str, Any]:
 
 def extract_commander_json_data(soup: BeautifulSoup, build_id: str) -> Dict[str, Any]:
     """
-    Extract commander data from page JSON
+    Extract commander data from page JSON using the correct Next.js structure
     """
     try:
-        # Look for the JSON data in script tags
-        scripts = soup.find_all('script', {'type': 'application/json'})
-        for script in scripts:
+        # Look for the JSON data in script tags with id="__NEXT_DATA__"
+        next_data_script = soup.find('script', {'id': '__NEXT_DATA__', 'type': 'application/json'})
+        
+        if next_data_script and next_data_script.string:
             try:
-                json_text = script.string
-                if json_text and 'commander' in json_text.lower():
-                    data = json.loads(json_text)
-                    
-                    # Extract commander tags
-                    commander_tags = []
-                    if 'commander' in data:
-                        commander_data = data['commander']
-                        if 'tags' in commander_data:
-                            tags = commander_data['tags']
-                            if isinstance(tags, list):
-                                commander_tags = [tag.get('name', '') for tag in tags if isinstance(tag, dict)]
-                            elif isinstance(tags, str):
-                                commander_tags = tags.split(',')
-                    
-                    # Extract categories and cards
-                    categories = {}
-                    if 'cards' in data:
-                        cards_data = data['cards']
-                        if isinstance(cards_data, dict):
-                            for category_key, category_data in cards_data.items():
-                                if isinstance(category_data, dict):
-                                    category_name = category_data.get('name', category_key.title())
-                                    cards = []
-                                    
-                                    if 'cards' in category_data:
-                                        for card_data in category_data['cards']:
-                                            if isinstance(card_data, dict):
-                                                cards.append({
-                                                    "name": card_data.get('name', 'Unknown'),
-                                                    "inclusion_percentage": card_data.get('inclusion', '0%'),
-                                                    "synergy_percentage": card_data.get('synergy', '0%')
-                                                })
-                                    
-                                    categories[category_key] = {
-                                        "category_name": category_name,
-                                        "cards": cards,
-                                        "total_cards": len(cards)
-                                    }
-                    
-                    return {
-                        "commander_tags": commander_tags,
-                        "categories": categories
-                    }
-            except (json.JSONDecodeError, KeyError):
-                continue
+                data = json.loads(next_data_script.string)
+                
+                # Get the data object
+                page_data = data.get('props', {}).get('pageProps', {}).get('data', {})
+                
+                # Extract commander tags from panels.taglinks
+                panels = page_data.get('panels', {})
+                commander_tags = []
+                taglinks = panels.get('taglinks', [])
+                if isinstance(taglinks, list):
+                    # Get top 10 tags sorted by count
+                    sorted_tags = sorted(taglinks, key=lambda x: x.get('count', 0), reverse=True)[:10]
+                    commander_tags = [tag.get('value', '') for tag in sorted_tags if tag.get('value')]
+                
+                # Extract categories and cards from container.json_dict.cardlists
+                container = page_data.get('container', {})
+                json_dict = container.get('json_dict', {})
+                cardlists = json_dict.get('cardlists', [])
+                
+                categories = {}
+                if isinstance(cardlists, list):
+                    for cardlist in cardlists:
+                        if not isinstance(cardlist, dict):
+                            continue
+                        
+                        header = cardlist.get('header', 'Unknown')
+                        tag = cardlist.get('tag', header.lower().replace(' ', ''))
+                        cardviews = cardlist.get('cardviews', [])
+                        
+                        if not cardviews:
+                            continue
+                        
+                        cards = []
+                        for card_data in cardviews:
+                            if isinstance(card_data, dict):
+                                card_name = card_data.get('name', 'Unknown')
+                                inclusion = card_data.get('inclusion', 0)
+                                synergy = card_data.get('synergy', 0)
+                                
+                                # Convert numeric percentages to percentage strings
+                                inclusion_pct = f"{inclusion}%" if isinstance(inclusion, (int, float)) else str(inclusion)
+                                synergy_pct = f"{synergy}%" if isinstance(synergy, (int, float)) else str(synergy)
+                                
+                                cards.append({
+                                    "name": card_name,
+                                    "inclusion_percentage": inclusion_pct,
+                                    "synergy_percentage": synergy_pct
+                                })
+                        
+                        categories[tag] = {
+                            "category_name": header,
+                            "cards": cards,
+                            "total_cards": len(cards)
+                        }
+                
+                return {
+                    "commander_tags": commander_tags,
+                    "top_10_tags": commander_tags,  # Same as commander_tags for now
+                    "categories": categories
+                }
+                
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.error(f"Error parsing __NEXT_DATA__ JSON: {e}")
                 
         # Fallback: extract from HTML elements
         return extract_commander_fallback_data(soup)
