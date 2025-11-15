@@ -9,14 +9,14 @@ import logging
 import time
 import json
 from contextlib import asynccontextmanager
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from collections import defaultdict
 from datetime import datetime, timedelta
 
 import uvicorn
 import aiohttp
 from aiohttp import ClientSession, ClientTimeout
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -454,7 +454,10 @@ def _convert_cardview_to_theme_card(card: Dict[str, Any], position: int) -> Opti
     return result
 
 
-def extract_theme_sections_from_json(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def extract_theme_sections_from_json(
+    payload: Dict[str, Any],
+    max_cards_per_category: Optional[int] = None
+) -> Dict[str, Dict[str, Any]]:
     """Extract theme card sections from EDHRec Next.js payload."""
     sections: Dict[str, Dict[str, Any]] = {}
 
@@ -464,6 +467,10 @@ def extract_theme_sections_from_json(payload: Dict[str, Any]) -> Dict[str, Dict[
         container = data.get("container", {})
         json_dict = container.get("json_dict", {})
         cardlists = json_dict.get("cardlists", [])
+
+        limit = None
+        if isinstance(max_cards_per_category, int) and max_cards_per_category > 0:
+            limit = max_cards_per_category
 
         for cardlist in cardlists:
             if not isinstance(cardlist, dict):
@@ -475,8 +482,15 @@ def extract_theme_sections_from_json(payload: Dict[str, Any]) -> Dict[str, Dict[
 
             key = re.sub(r"[^a-z0-9]+", "_", header.lower()).strip("_") or "cards"
 
+            total_available = len(cardlist.get("cardviews", []))
             cards: List[Dict[str, Any]] = []
+            is_truncated = False
+
             for idx, card in enumerate(cardlist.get("cardviews", []), start=1):
+                if limit is not None and len(cards) >= limit:
+                    is_truncated = True
+                    break
+
                 converted = _convert_cardview_to_theme_card(card, idx)
                 if converted:
                     cards.append(converted)
@@ -485,7 +499,11 @@ def extract_theme_sections_from_json(payload: Dict[str, Any]) -> Dict[str, Dict[
                 "category_name": header,
                 "total_cards": len(cards),
                 "cards": cards,
+                "is_truncated": is_truncated,
             }
+
+            if is_truncated or total_available != len(cards):
+                sections[key]["available_cards"] = total_available
 
     except Exception as exc:
         logger.warning(f"Failed to extract theme sections: {exc}")
@@ -655,7 +673,106 @@ async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
     return result
 
 
-async def scrape_edhrec_theme_page(theme_slug: str) -> Dict[str, Any]:
+COLOR_IDENTITY_SLUGS = [
+    "five-color",
+    "sans-white",
+    "sans-blue",
+    "sans-black",
+    "sans-red",
+    "sans-green",
+    "azorius",
+    "dimir",
+    "rakdos",
+    "gruul",
+    "selesnya",
+    "orzhov",
+    "izzet",
+    "simic",
+    "golgari",
+    "boros",
+    "abzan",
+    "bant",
+    "esper",
+    "grixis",
+    "jeskai",
+    "jund",
+    "mardu",
+    "naya",
+    "sultai",
+    "temur",
+    "white",
+    "blue",
+    "black",
+    "red",
+    "green",
+    "colorless",
+]
+
+_SORTED_COLOR_IDENTITY_SLUGS = sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=True)
+
+
+DEFAULT_THEME_CARD_LIMIT = 60
+MAX_THEME_CARD_LIMIT = 200
+
+
+def _resolve_theme_card_limit(requested_limit: Optional[int]) -> Optional[int]:
+    """Normalize the requested per-category card limit."""
+    if requested_limit is None:
+        return DEFAULT_THEME_CARD_LIMIT
+
+    try:
+        value = int(requested_limit)
+    except (TypeError, ValueError):
+        return DEFAULT_THEME_CARD_LIMIT
+
+    if value <= 0:
+        return None
+
+    return min(value, MAX_THEME_CARD_LIMIT)
+
+
+def _split_color_prefixed_theme_slug(sanitized_slug: str) -> Tuple[Optional[str], Optional[str]]:
+    """Split a slug into color identity and theme parts when prefixed by a color slug."""
+    for color_slug in _SORTED_COLOR_IDENTITY_SLUGS:
+        prefix = f"{color_slug}-"
+        if sanitized_slug.startswith(prefix):
+            theme_part = sanitized_slug[len(prefix):]
+            if theme_part:
+                return color_slug, theme_part
+    return None, None
+
+
+def _build_theme_route_candidates(sanitized_slug: str) -> List[Dict[str, str]]:
+    """Build possible EDHRec routes for a given theme slug."""
+    candidates: List[Dict[str, str]] = []
+
+    color_slug, theme_part = _split_color_prefixed_theme_slug(sanitized_slug)
+    if color_slug and theme_part:
+        candidates.append({
+            "page_path": f"tags/{theme_part}/{color_slug}",
+            "json_path": f"tags/{theme_part}/{color_slug}.json"
+        })
+
+    candidates.append({
+        "page_path": f"themes/{sanitized_slug}",
+        "json_path": f"themes/{sanitized_slug}.json"
+    })
+
+    unique_candidates: List[Dict[str, str]] = []
+    seen_paths = set()
+    for candidate in candidates:
+        page_path = candidate["page_path"]
+        if page_path not in seen_paths:
+            seen_paths.add(page_path)
+            unique_candidates.append(candidate)
+
+    return unique_candidates
+
+
+async def scrape_edhrec_theme_page(
+    theme_slug: str,
+    max_cards_per_category: Optional[int] = None
+) -> Dict[str, Any]:
     """Scrape EDHRec theme page and return structured deckbuilding data."""
     if not theme_slug:
         raise HTTPException(status_code=400, detail="Theme slug is required")
@@ -668,45 +785,73 @@ async def scrape_edhrec_theme_page(theme_slug: str) -> Dict[str, Any]:
     if not http_session:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="HTTP session not available")
 
-    theme_url = urljoin(EDHREC_BASE_URL, f"themes/{sanitized_slug}")
+    route_candidates = _build_theme_route_candidates(sanitized_slug)
+    last_error: Optional[str] = None
+    card_limit = _resolve_theme_card_limit(max_cards_per_category)
 
-    async with http_session.get(theme_url, headers=SCRYFALL_HEADERS) as response:
-        if response.status != 200:
-            raise HTTPException(status_code=404, detail=f"Theme page not found: {sanitized_slug}")
+    for candidate in route_candidates:
+        theme_url = urljoin(EDHREC_BASE_URL, candidate["page_path"])
 
-        html_content = await response.text()
+        try:
+            async with http_session.get(theme_url, headers=SCRYFALL_HEADERS) as response:
+                if response.status != 200:
+                    last_error = f"Theme page returned status {response.status} for {theme_url}"
+                    continue
 
-    build_id = extract_build_id_from_html(html_content)
-    if not build_id:
-        raise HTTPException(status_code=500, detail="Could not extract Next.js build ID from theme page")
+                html_content = await response.text()
+        except aiohttp.ClientError as exc:
+            last_error = f"HTTP error fetching theme page {theme_url}: {exc}"
+            continue
 
-    json_url = urljoin(EDHREC_BASE_URL, f"_next/data/{build_id}/themes/{sanitized_slug}.json")
+        build_id = extract_build_id_from_html(html_content)
+        if not build_id:
+            last_error = f"Could not extract Next.js build ID from theme page {theme_url}"
+            continue
 
-    async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
-        if response.status != 200:
-            raise HTTPException(status_code=404, detail=f"Could not fetch theme data from: {json_url}")
+        json_path = candidate["json_path"]
+        json_url = urljoin(EDHREC_BASE_URL, f"_next/data/{build_id}/{json_path}")
 
-        json_data = await response.json()
+        try:
+            async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
+                if response.status != 200:
+                    last_error = f"Could not fetch theme data from: {json_url} (status {response.status})"
+                    continue
 
-    metadata = extract_theme_metadata(json_data)
-    sections = extract_theme_sections_from_json(json_data)
+                json_data = await response.json()
+        except aiohttp.ClientError as exc:
+            last_error = f"HTTP error fetching theme JSON {json_url}: {exc}"
+            continue
+        except aiohttp.ContentTypeError as exc:
+            last_error = f"Invalid JSON content from {json_url}: {exc}"
+            continue
 
-    result: Dict[str, Any] = {
-        "theme_slug": sanitized_slug,
-        "theme_url": theme_url,
-        "timestamp": datetime.utcnow().isoformat(),
-        "categories": sections,
-        "theme_name": metadata.get("theme_name"),
-        "description": metadata.get("description"),
-        "color_identity": metadata.get("color_identity", []),
-        "total_decks": metadata.get("total_decks"),
-        "average_deck_size": metadata.get("average_deck_size"),
-        "popularity_rank": metadata.get("popularity_rank"),
-        "top_commanders": metadata.get("top_commanders", []),
-        "related_themes": metadata.get("related_themes", []),
-    }
+        metadata = extract_theme_metadata(json_data)
+        sections = extract_theme_sections_from_json(
+            json_data,
+            max_cards_per_category=card_limit
+        )
 
-    return result
+        result: Dict[str, Any] = {
+            "theme_slug": sanitized_slug,
+            "theme_url": theme_url,
+            "timestamp": datetime.utcnow().isoformat(),
+            "categories": sections,
+            "theme_name": metadata.get("theme_name"),
+            "description": metadata.get("description"),
+            "color_identity": metadata.get("color_identity", []),
+            "total_decks": metadata.get("total_decks"),
+            "average_deck_size": metadata.get("average_deck_size"),
+            "popularity_rank": metadata.get("popularity_rank"),
+            "top_commanders": metadata.get("top_commanders", []),
+            "related_themes": metadata.get("related_themes", []),
+        }
+
+        return result
+
+    if last_error:
+        raise HTTPException(status_code=404, detail=last_error)
+
+    raise HTTPException(status_code=404, detail=f"Theme page not found: {sanitized_slug}")
 
 
 # Configure logging
@@ -948,6 +1093,8 @@ class ThemeCategory(BaseModel):
     category_name: str
     total_cards: int
     cards: List[ThemeCard]
+    available_cards: Optional[int] = None
+    is_truncated: bool = False
 
 
 class ThemeResponse(BaseModel):
@@ -1024,11 +1171,33 @@ async def get_random_card(client_id: str = Depends(get_client_identifier)):
 
 
 @app.get("/api/v1/themes/{theme_slug}", response_model=ThemeResponse)
-async def get_theme(theme_slug: str, client_id: str = Depends(get_client_identifier)):
+async def get_theme(
+    theme_slug: str,
+    max_cards: Optional[int] = Query(
+        None,
+        ge=0,
+        le=MAX_THEME_CARD_LIMIT,
+        description=(
+            "Maximum number of cards to include per category. "
+            "Pass 0 to return the full dataset."
+        ),
+    ),
+    client_id: str = Depends(get_client_identifier)
+): 
     """Retrieve structured information for an EDHRec theme."""
     await check_rate_limit(client_id)
 
-    theme_data = await scrape_edhrec_theme_page(theme_slug)
+    if not rate_limiter:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Rate limiter not ready"
+        )
+
+    async with rate_limiter:
+        theme_data = await scrape_edhrec_theme_page(
+            theme_slug,
+            max_cards_per_category=max_cards
+        )
     return ThemeResponse(**theme_data)
 
 
