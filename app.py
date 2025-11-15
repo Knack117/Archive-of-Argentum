@@ -30,7 +30,6 @@ from cachetools import TTLCache
 from config import settings
 from bs4 import BeautifulSoup
 import re
-from urllib.parse import urlparse, unquote, urljoin, quote_plus
 
 
 EDHREC_BASE_URL = "https://edhrec.com/"
@@ -55,7 +54,6 @@ def extract_build_id_from_html(html: str) -> Optional[str]:
         return match.group(1)
     return None
 
-
 def normalize_commander_tags(values: list) -> List[str]:
     """Clean and deduplicate commander tags while preserving order."""
     seen = set()
@@ -78,7 +76,6 @@ def normalize_commander_tags(values: list) -> List[str]:
     
     return result
 
-
 def extract_commander_name_from_url(url: str) -> str:
     """Extract commander name from an EDHREC commander URL."""
     try:
@@ -99,14 +96,12 @@ def extract_commander_name_from_url(url: str) -> str:
     except Exception:
         return "unknown"
 
-
 def _clean_text(value: str) -> str:
     """Clean HTML text content"""
     from html import unescape
     cleaned = unescape(value or "")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip()
-
 
 def _gather_section_card_names(source: Any) -> List[str]:
     """Extract card names from JSON source"""
@@ -203,16 +198,8 @@ def _safe_float(value: Any) -> Optional[float]:
     except (ValueError, TypeError):
         return None
 
-
-def extract_commander_sections_from_json(
-    payload: Dict[str, Any],
-    max_cards_per_category: Optional[int] = None,
-) -> Dict[str, Dict[str, Any]]:
-    """Extract commander card sections from the EDHREC Next.js payload.
-
-    This version is size-aware: each category can be truncated to keep responses
-    small enough for downstream consumers (like GPT actions).
-    """
+def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Extract commander card sections from the EDHREC Next.js payload."""
 
     sections: Dict[str, Dict[str, Any]] = {}
 
@@ -228,21 +215,6 @@ def extract_commander_sections_from_json(
         total_known_decks = _safe_int(data.get("num_decks_avg"))
 
         logger.info(f"Found {len(cardlists)} card sections to process")
-
-        # Determine per-category limit
-        limit: Optional[int]
-        if max_cards_per_category is None:
-            limit = DEFAULT_COMMANDER_CARD_LIMIT
-        else:
-            try:
-                value = int(max_cards_per_category)
-                if value <= 0:
-                    # <= 0 explicitly disables truncation
-                    limit = None
-                else:
-                    limit = min(value, MAX_COMMANDER_CARD_LIMIT)
-            except (TypeError, ValueError):
-                limit = DEFAULT_COMMANDER_CARD_LIMIT
 
         section_map = {
             "creatures": "Creatures",
@@ -290,15 +262,8 @@ def extract_commander_sections_from_json(
                 logger.debug(f"Skipping unknown commander section header '{header}'")
                 continue
 
-            total_available = len(cardviews)
             cards: List[Dict[str, Any]] = []
-            is_truncated = False
-
             for idx, card in enumerate(cardviews, start=1):
-                if limit is not None and len(cards) >= limit:
-                    is_truncated = True
-                    break
-
                 if not isinstance(card, dict):
                     continue
 
@@ -322,9 +287,7 @@ def extract_commander_sections_from_json(
                     except ZeroDivisionError:
                         inclusion_percentage = None
 
-                synergy_value = _safe_float(
-                    card.get("synergy") or card.get("synergy_score") or card.get("synergy_delta")
-                )
+                synergy_value = _safe_float(card.get("synergy") or card.get("synergy_score") or card.get("synergy_delta"))
                 synergy_percentage = None
                 if synergy_value is not None:
                     synergy_percentage = synergy_value * 100
@@ -336,33 +299,22 @@ def extract_commander_sections_from_json(
                     "scryfall_uri": f"https://scryfall.com/search?q={quote_plus(name)}",
                     "inclusion_count": inclusion_count,
                     "potential_decks": potential_decks,
-                    "inclusion_percentage": f"{inclusion_percentage:.1f}%"
-                    if inclusion_percentage is not None
-                    else None,
-                    "synergy_percentage": f"{synergy_percentage:.1f}%"
-                    if synergy_percentage is not None
-                    else None,
+                    "inclusion_percentage": f"{inclusion_percentage:.1f}%" if inclusion_percentage is not None else None,
+                    "synergy_percentage": f"{synergy_percentage:.1f}%" if synergy_percentage is not None else None,
                     "decks_included": f"{inclusion_count:,}" if inclusion_count is not None else None,
                     "total_decks_sample": f"{potential_decks:,}" if potential_decks is not None else None,
                 })
 
-            section_entry: Dict[str, Any] = {
+            sections[target_section] = {
                 "category_name": target_section,
                 "total_cards": len(cards),
                 "cards": cards,
             }
 
-            if total_available != len(cards):
-                section_entry["available_cards"] = total_available
-                section_entry["is_truncated"] = is_truncated
-
-            sections[target_section] = section_entry
-
     except Exception as e:
         logger.warning(f"Error extracting commander sections: {e}")
 
     return sections
-
 
 def extract_commander_tags_from_html(html: str) -> List[str]:
     """Extract commander tags from HTML content using BeautifulSoup."""
@@ -486,7 +438,7 @@ def extract_commander_top_tags_from_json(payload: Dict[str, Any]) -> List[Dict[s
 
 
 def _estimate_response_size(theme_data: Dict[str, Any]) -> int:
-    """Estimate the size of a response in bytes using JSON serialization."""
+    """Estimate the size of a theme response in bytes using JSON serialization."""
     try:
         # Use compact JSON to get accurate byte size
         json_str = json.dumps(theme_data, separators=(',', ':'))
@@ -508,6 +460,48 @@ def _create_categories_summary(sections: Dict[str, Dict[str, Any]]) -> Dict[str,
             "is_truncated": category_data.get("is_truncated", False),
         }
     return summary
+
+
+def _trim_commander_categories(
+    commander_data: Dict[str, Any],
+    per_category_limit: int,
+) -> Dict[str, Any]:
+    """
+    Return a copy of commander_data where each category's cards list is trimmed
+    to at most per_category_limit, and categories_summary is populated.
+    """
+    categories = commander_data.get("categories", {})
+    if not isinstance(categories, dict):
+        # Nothing to trim
+        return dict(commander_data)
+
+    trimmed_categories: Dict[str, Dict[str, Any]] = {}
+
+    for key, section in categories.items():
+        if not isinstance(section, dict):
+            continue
+
+        cards = section.get("cards") or []
+        if not isinstance(cards, list):
+            cards = []
+
+        total_available = len(cards)
+        trimmed_cards = cards[:per_category_limit]
+
+        section_copy = dict(section)
+        section_copy["cards"] = trimmed_cards
+        section_copy["total_cards"] = len(trimmed_cards)
+        section_copy["available_cards"] = total_available
+        section_copy["is_truncated"] = total_available > len(trimmed_cards)
+
+        trimmed_categories[key] = section_copy
+
+    categories_summary = _create_categories_summary(trimmed_categories)
+
+    result = dict(commander_data)
+    result["categories"] = trimmed_categories
+    result["categories_summary"] = categories_summary
+    return result
 
 
 def _convert_cardview_to_theme_card(card: Dict[str, Any], position: int) -> Optional[Dict[str, Any]]:
@@ -773,180 +767,70 @@ def extract_theme_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     return metadata
 
-
-async def scrape_edhrec_commander_page(
-    url: str,
-    max_cards_per_category: Optional[int] = None,
-) -> Dict[str, Any]:
+async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
     """
-    Scrape EDHRec commander page using Next.js JSON approach.
-
-    This function is size-aware: it progressively reduces the number of cards
-    per category until the estimated payload fits under MAX_COMMANDER_RESPONSE_BYTES.
-    If that still isn't enough, it falls back to a metadata-only summary with a
-    categories overview instead of full card lists.
+    Scrape EDHRec commander page using Next.js JSON approach
     """
     commander_name = extract_commander_name_from_url(url)
     logger.info(f"Processing commander: {commander_name} from {url}")
-
-    if not http_session:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="HTTP session not available",
-        )
-
+    
     async with http_session.get(url, headers=SCRYFALL_HEADERS) as response:
         if response.status != 200:
             raise HTTPException(status_code=404, detail=f"Commander page not found: {url}")
-
+        
         html_content = await response.text()
-
+    
     # Extract the Next.js build ID from HTML
     build_id = extract_build_id_from_html(html_content)
     if not build_id:
         raise HTTPException(status_code=500, detail="Could not extract Next.js build ID from page")
-
+    
     logger.info(f"Found build ID: {build_id}")
-
+    
     # Construct the Next.js JSON URL
+    # Extract commander slug from the original URL
     commander_slug = extract_commander_name_from_url(url).lower().replace(" ", "-")
     # Remove any non-alphanumeric characters for the slug
     commander_slug = re.sub(r'[^a-z0-9\-]', '', commander_slug)
-
+    
     json_url = urljoin(EDHREC_BASE_URL, f"_next/data/{build_id}/commanders/{commander_slug}.json")
     logger.info(f"Fetching Next.js JSON data from: {json_url}")
-
+    
     async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
         if response.status != 200:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Could not fetch commander data from: {json_url}",
-            )
-
+            raise HTTPException(status_code=404, detail=f"Could not fetch commander data from: {json_url}")
+        
         json_data = await response.json()
-
+    
     # Extract commander name and tags from JSON
     commander_title = commander_name
     commander_tags = extract_commander_tags_from_json(json_data)
     top_tags = extract_commander_top_tags_from_json(json_data)
+    card_sections = extract_commander_sections_from_json(json_data)
 
     data = json_data.get("pageProps", {}).get("data", {})
     total_decks = _safe_int(data.get("num_decks_avg"))
 
-    # Build a small list of limits to try (largest to smallest)
-    limits_to_try: List[int] = []
-
-    if max_cards_per_category is not None:
-        try:
-            value = int(max_cards_per_category)
-            if value <= 0:
-                # 0 means "metadata only" – we handle that in the loop below
-                limits_to_try.append(0)
-            else:
-                limits_to_try.append(min(value, MAX_COMMANDER_CARD_LIMIT))
-        except (TypeError, ValueError):
-            # Fall back to defaults
-            pass
-
-    if not limits_to_try:
-        # Reasonable descending defaults for rich but safe responses
-        limits_to_try.extend([40, 25, 15, 10, 5, 0])
-
-    # Deduplicate while preserving order and clamp to valid range
-    normalized_limits: List[int] = []
-    seen_limits: Set[int] = set()
-    for limit in limits_to_try:
-        clamped = max(0, min(int(limit), MAX_COMMANDER_CARD_LIMIT))
-        if clamped not in seen_limits:
-            seen_limits.add(clamped)
-            normalized_limits.append(clamped)
-
-    last_sections: Optional[Dict[str, Dict[str, Any]]] = None
-    last_result: Optional[Dict[str, Any]] = None
-    last_limit: Optional[int] = None
-
-    for limit in normalized_limits:
-        # 0 => metadata-only attempt (no card lists)
-        if limit == 0:
-            sections: Dict[str, Dict[str, Any]] = {}
-        else:
-            sections = extract_commander_sections_from_json(
-                json_data,
-                max_cards_per_category=limit,
-            )
-
-        result: Dict[str, Any] = {
-            "commander_url": url,
-            "commander_name": commander_title,
-            "commander_tags": commander_tags,
-            "top_10_tags": top_tags[:10],
-            "categories": {},
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-
-        if total_decks is not None:
-            result["total_known_decks"] = total_decks
-
-        for section_name, section_data in sections.items():
-            category_key = re.sub(r"[^a-z0-9]+", "_", section_name.lower()).strip("_")
-            if not category_key and isinstance(section_data, dict) and section_data.get("category_name"):
-                category_key = re.sub(
-                    r"[^a-z0-9]+",
-                    "_",
-                    str(section_data["category_name"]).lower(),
-                ).strip("_")
-
-            if not category_key:
-                category_key = "section"
-
-            result["categories"][category_key] = section_data
-
-        estimated_bytes = _estimate_response_size(result)
-        logger.info(
-            "Commander summary for %s with limit=%s estimated at %s bytes",
-            commander_title,
-            limit,
-            estimated_bytes,
-        )
-
-        if estimated_bytes <= MAX_COMMANDER_RESPONSE_BYTES:
-            result.setdefault("response_info", {})
-            result["response_info"].update(
-                {
-                    "mode": "full" if limit > 0 else "metadata",
-                    "max_cards_per_category": limit,
-                    "estimated_bytes": estimated_bytes,
-                }
-            )
-            return result
-
-        last_sections = sections
-        last_result = result
-        last_limit = limit
-
-    # If we get here, even the smallest attempt was too large – return metadata only
-    metadata_only: Dict[str, Any] = {
+    result = {
         "commander_url": url,
         "commander_name": commander_title,
         "commander_tags": commander_tags,
         "top_10_tags": top_tags[:10],
+        "categories": {},
         "timestamp": datetime.utcnow().isoformat(),
     }
 
     if total_decks is not None:
-        metadata_only["total_known_decks"] = total_decks
+        result["total_known_decks"] = total_decks
 
-    if last_sections:
-        metadata_only["categories_summary"] = _create_categories_summary(last_sections)
+    for section_name, section_data in card_sections.items():
+        category_key = re.sub(r"[^a-z0-9]+", "_", section_name.lower()).strip("_")
+        if not category_key:
+            category_key = re.sub(r"[^a-z0-9]+", "_", section_data["category_name"].lower()).strip("_")
 
-    metadata_only["response_info"] = {
-        "mode": "metadata",
-        "max_cards_per_category": 0,
-        "estimated_bytes_full": _estimate_response_size(last_result) if last_result else None,
-        "last_attempted_limit": last_limit,
-    }
+        result["categories"][category_key] = section_data
 
-    return metadata_only
+    return result
 
 
 COLOR_IDENTITY_SLUGS = [
@@ -1459,13 +1343,7 @@ DEFAULT_THEME_CARD_LIMIT = 60
 MAX_THEME_CARD_LIMIT = 200
 LARGE_THEME_CARD_LIMIT = 30  # For themes with many categories
 
-# Commander size controls
-DEFAULT_COMMANDER_CARD_LIMIT = 40
-MAX_COMMANDER_CARD_LIMIT = 200
-MAX_COMMANDER_RESPONSE_BYTES = 512 * 1024  # 512 KB
-
-
-# Response size management for themes
+# Response size management
 MAX_RESPONSE_SIZE_BYTES = 8 * 1024 * 1024  # 8MB
 SMALL_RESPONSE_SIZE_BYTES = 4 * 1024 * 1024  # 4MB
 LARGE_RESPONSE_THRESHOLD = 50  # categories with more than this many cards total
@@ -1815,7 +1693,6 @@ async def _get_available_theme_slugs(force_refresh: bool = False) -> Set[str]:
 
         return set(slugs)
 
-
 def _validate_theme_slug_against_catalog(sanitized_slug: str, available_themes: Set[str]) -> None:
     """Validate a sanitized theme slug against the catalog of known themes."""
 
@@ -1936,6 +1813,9 @@ SCRYFALL_HEADERS = {
     "Accept": "application/json;q=0.9,*/*;q=0.8"
 }
 
+# Rate limiter: REMOVED - No longer limiting EDHRec requests
+# rate_limiter = AsyncLimiter(max_rate=10, time_period=1.0)
+
 # Cache for Scryfall responses (1 hour TTL for 80-90% hit rate)
 cache = TTLCache(maxsize=1000, ttl=3600)
 
@@ -2006,7 +1886,14 @@ async def check_rate_limit(client_id: str):
         if now - timestamp < 1.0
     ]
     
-    # Record this request (actual limit enforcement removed)
+    # Check if at limit - REMOVED RATE LIMITING
+    # if len(client_rate_limits[client_id]) >= 10:  # 10 requests per second
+    #     raise HTTPException(
+    #         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+    #         detail="Rate limit exceeded. Maximum 10 requests per second per client."
+    #     )
+    
+    # Record this request
     client_rate_limits[client_id].append(now)
 
 
@@ -2074,15 +1961,12 @@ class ThemeItem(BaseModel):
     id: Optional[str] = None
     image: Optional[str] = None
 
-
 class ThemeCollection(BaseModel):
     header: str
     items: List[ThemeItem] = Field(default_factory=list)
 
-
 class ThemeContainer(BaseModel):
     collections: List[ThemeCollection] = Field(default_factory=list)
-
 
 class PageTheme(BaseModel):
     header: str
@@ -2091,7 +1975,6 @@ class PageTheme(BaseModel):
     container: ThemeContainer
     source_url: Optional[str] = None
     error: Optional[str] = None
-
 
 class Card(BaseModel):
     id: str
@@ -2265,6 +2148,26 @@ async def fetch_theme_tag(name: str, identity: str) -> PageTheme:
     )
 
 
+def _split_theme_and_color_suffix(sanitized_slug: str) -> Tuple[str, Optional[str]]:
+    """
+    Split a slug into (theme_part, color_identity_suffix) when the color identity
+    is at the end, e.g. 'aristocrats-orzhov' -> ('aristocrats', 'orzhov').
+
+    If no valid color suffix is found, returns (sanitized_slug, None).
+    """
+    parts = sanitized_slug.rsplit("-", 1)
+    if len(parts) != 2:
+        return sanitized_slug, None
+
+    maybe_theme, maybe_color = parts
+    try:
+        # Will raise if not a recognized color identity
+        canonicalize_identity(maybe_color)
+        return maybe_theme, maybe_color
+    except ValueError:
+        return sanitized_slug, None
+
+
 @app.get("/", response_model=Dict[str, str])
 async def root():
     """Root endpoint"""
@@ -2325,18 +2228,15 @@ async def get_random_card(client_id: str = Depends(get_client_identifier)):
 
 @app.get("/api/v1/cards/autocomplete", response_model=Dict[str, Any])
 async def autocomplete_cards(
-    q: str = Query(..., description="Partial card name to autocomplete using Scryfall."),
-    include_extras: Optional[bool] = Query(
-        False,
-        description="If true, include funny cards and others that are usually excluded.",
-    ),
-    include_multilingual: Optional[bool] = Query(
-        False,
-        description="If true, include multilingual card names.",
-    ),
+    q: str = Query(..., description="Partial card name to autocomplete"),
+    include_extras: Optional[bool] = None,
+    include_multilingual: Optional[bool] = None,
     client_id: str = Depends(get_client_identifier),
 ):
-    """Autocomplete card names using Scryfall's /cards/autocomplete endpoint."""
+    """
+    Autocomplete card names using Scryfall's /cards/autocomplete endpoint.
+    Use when the user has typed a partial card name and you want candidate names.
+    """
     await check_rate_limit(client_id)
 
     params: Dict[str, Any] = {"q": q}
@@ -2424,56 +2324,53 @@ async def get_themes_help():
 @app.get("/api/v1/themes/{theme_slug}", response_model=PageTheme)
 async def get_theme(theme_slug: str):
     """
-    Fetch theme data from EDHRec.
+    Fetch EDHRec theme/tag data.
 
     Supports:
-    - Base theme:    "aristocrats"           -> https://edhrec.com/tags/aristocrats
-    - Theme + color: "aristocrats-orzhov"    -> https://edhrec.com/tags/aristocrats/orzhov
+    - Base theme: "aristocrats" -> /tags/aristocrats
+    - Theme + color: "aristocrats-orzhov" -> /tags/aristocrats/orzhov
 
-    For base slugs we do NOT default to any color identity – we use the color-agnostic
-    EDHRec theme page.
+    When only a base slug is given, no color identity is assumed.
     """
     sanitized_slug = _sanitize_theme_slug(theme_slug)
 
-    theme_name: Optional[str] = None
-    color_identity: Optional[str] = None
-    color_label: Optional[str] = None
+    # Check for [theme]-[color] pattern using a color-identity suffix
+    theme_part, color_identity = _split_theme_and_color_suffix(sanitized_slug)
 
-    # Try to interpret as [theme]-[color] *only if* the last segment is a valid color identity
-    if "-" in sanitized_slug:
-        tentative_theme, tentative_color = sanitized_slug.rsplit("-", 1)
-        tentative_theme = tentative_theme.strip()
-        tentative_color = tentative_color.strip()
-        if tentative_theme and tentative_color:
-            try:
-                _, color_label, _ = canonicalize_identity(tentative_color)
-                theme_name = tentative_theme
-                color_identity = tentative_color
-            except ValueError:
-                # Not a recognized color identity; treat the whole slug as a base theme
-                theme_name = None
-                color_identity = None
-                color_label = None
-
-    # If we successfully parsed theme + color, use the tag-based scraper
-    if theme_name and color_identity:
-        page_theme = await fetch_theme_tag(theme_name, color_identity)
-        if not page_theme.header:
-            if color_label:
-                page_theme.header = f"{color_label} {theme_name.title()} Theme"
-            else:
-                page_theme.header = f"{theme_name.title()} Theme"
+    # If we have a valid color suffix, use the tag+color pipeline
+    if color_identity is not None:
+        page_theme = await fetch_theme_tag(theme_part, color_identity)
         return page_theme
 
-    # Otherwise, treat it as a base theme slug (no color identity):
-    theme_url, next_data, metadata, _sections_preview = await _fetch_theme_document(sanitized_slug)
+    # Otherwise, treat as a base theme (no color identity)
+    try:
+        theme_url, next_data, metadata, sections_preview = await _fetch_theme_document(
+            sanitized_slug
+        )
+    except HTTPException:
+        raise
 
-    # Build collections heuristically from the Next.js payload
-    buckets = _walk_for_named_arrays(next_data)
+    # Build lightweight collections from the preview sections (names only)
     collections: List[ThemeCollection] = []
-    for header, names in buckets.items():
-        items = [ThemeItem(name=n) for n in names]
-        collections.append(ThemeCollection(header=header, items=items))
+    for key, section in sections_preview.items():
+        if not isinstance(section, dict):
+            continue
+
+        header = section.get("category_name") or key
+        cards = section.get("cards") or []
+        if not isinstance(cards, list):
+            cards = []
+
+        items: List[ThemeItem] = []
+        for card in cards:
+            if not isinstance(card, dict):
+                continue
+            name = card.get("name")
+            if isinstance(name, str) and name.strip():
+                items.append(ThemeItem(name=name))
+
+        if items:
+            collections.append(ThemeCollection(header=header, items=items))
 
     tags = _extract_theme_tags_from_payload(next_data)
 
@@ -2625,12 +2522,11 @@ async def get_commander_summary(
     client_id: str = Depends(get_client_identifier)
 ):
     """
-    Scrape EDHRec commander page and extract comprehensive commander data including
-    tags, categorized cards with inclusion percentages, deck counts, and synergy data.
+    Scrape EDHRec commander page and return a size-aware summary.
 
-    This endpoint is size-aware and will automatically shrink large responses to
-    avoid exceeding tool limits. In extreme cases it returns a metadata-only
-    summary with categories_summary.
+    For very popular commanders, this endpoint trims the number of cards
+    per category and, if needed, falls back to a metadata-only view
+    with categories_summary to stay within GPT Action response limits.
     """
     await check_rate_limit(client_id)
     
@@ -2655,15 +2551,99 @@ async def get_commander_summary(
         return cache[cache_key]
     
     try:
-        # Scrape EDHRec page with adaptive limits
+        # Scrape EDHRec page (full data)
         commander_data = await scrape_edhrec_commander_page(commander_url)
+
+        # Estimate size of the full payload
+        full_size = _estimate_response_size(commander_data)
+        logger.info(
+            f"Full commander summary for {commander_name} estimated at {full_size} bytes"
+        )
+
+        # Try progressively smaller per-category card limits
+        limit_plan = [40, 30, 20, 12, 8, 5, 3, 1]
+        chosen_payload: Optional[Dict[str, Any]] = None
+        chosen_size: Optional[int] = None
+        chosen_limit: Optional[int] = None
+
+        for limit in limit_plan:
+            candidate = _trim_commander_categories(commander_data, limit)
+            candidate_size = _estimate_response_size(candidate)
+            logger.info(
+                f"Commander {commander_name}: "
+                f"limit={limit}, estimated_size={candidate_size} bytes"
+            )
+
+            # If we find something comfortably under the small-response threshold, use it
+            if candidate_size <= SMALL_RESPONSE_SIZE_BYTES:
+                chosen_payload = candidate
+                chosen_size = candidate_size
+                chosen_limit = limit
+                break
+
+            # Track the smallest candidate as a fallback
+            if chosen_payload is None or candidate_size < chosen_size:
+                chosen_payload = candidate
+                chosen_size = candidate_size
+                chosen_limit = limit
+
+        if chosen_payload is None:
+            # Shouldn't happen, but guard anyway
+            chosen_payload = dict(commander_data)
+            chosen_size = full_size
+            chosen_limit = None
+
+        # If even the smallest trimmed payload is still too large,
+        # fall back to metadata + categories_summary only (no full cards lists).
+        if chosen_size is not None and chosen_size > SMALL_RESPONSE_SIZE_BYTES:
+            metadata_only = dict(chosen_payload)
+            raw_categories = metadata_only.pop("categories", {})
+            if isinstance(raw_categories, dict):
+                categories_summary = _create_categories_summary(raw_categories)
+            else:
+                categories_summary = {}
+
+            metadata_only["categories_summary"] = categories_summary
+            meta_size = _estimate_response_size(metadata_only)
+
+            metadata_only["response_info"] = {
+                "mode": "metadata",
+                "max_cards_per_category": chosen_limit,
+                "estimated_bytes": meta_size,
+                "estimated_bytes_full": full_size,
+                "last_attempted_limit": chosen_limit,
+            }
+
+            # Cache metadata-only result (TTL controlled by global cache)
+            cache[cache_key] = metadata_only
+            logger.info(
+                f"Cached metadata-only commander summary for {commander_name} "
+                f"(size={meta_size} bytes)"
+            )
+            return metadata_only
+
+        # Otherwise, chosen_payload is within safe size limits
+        chosen_payload.setdefault("response_info", {})
+        chosen_payload["response_info"].update({
+            "mode": "full",
+            "max_cards_per_category": chosen_limit,
+            "estimated_bytes": chosen_size,
+            "estimated_bytes_full": full_size,
+            "last_attempted_limit": chosen_limit,
+        })
+
+        # Cache the trimmed result (TTL controlled by global cache)
+        cache[cache_key] = chosen_payload
+        logger.info(
+            f"Generated and cached commander analysis for {commander_name} "
+            f"(limit={chosen_limit}, size={chosen_size} bytes)"
+        )
+
+        return chosen_payload
         
-        # Cache the result for 30 minutes (data changes infrequently)
-        cache[cache_key] = commander_data
-        logger.info(f"Generated and cached commander analysis for {commander_name}")
-        
-        return commander_data
-        
+    except HTTPException:
+        # Let explicit HTTPExceptions through
+        raise
     except Exception as e:
         logger.error(f"Error generating commander data: {e}")
         raise HTTPException(
