@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: mtg-deckbuilding-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PORT
+        value: 10000
+      - key: LOG_LEVEL
+        value: INFO
+      - key: API_KEY
+        generateValue: true
+      - key: MONGODB_URL
+        fromDatabase:
+          name: mtg-database
+          property: connectionString
+    database:
+      name: mtg-database
+      plan: development
+      version: "6.0"
+
+# Alternative: If you want to use Docker deployment
+# services:
+#   - type: web
+#     name: mtg-deckbuilding-api
+#     dockerfilePath: Dockerfile
+#     buildCommand: echo "Using Docker build"
+#     startCommand: python -m uvicorn app:app --host 0.0.0.0 --port $PORT
+#     envVars:
+#       - key: ENVIRONMENT
+#         value: production
+#       - key: PORT
+#         value: 10000
+#       - key: LOG_LEVEL
+#         value: INFO
+#       - key: API_KEY
+#         generateValue: true
+#       - key: MONGODB_URL
+#         fromDatabase:
+#           name: mtg-database
+#           property: connectionString
+#     database:
+#       name: mtg-database
+#       plan: development
+#       version: "6.0"
