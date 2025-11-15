@@ -38,6 +38,9 @@ logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 
 EDHREC_BASE_URL = "https://edhrec.com/"
 COMMANDERSPELLBOOK_BASE_URL = "https://backend.commanderspellbook.com/"
+# Public search base URL for Commander Spellbook.
+# Use this front-end URL to direct users to a human‑friendly search results page.
+COMMANDERSPELLBOOK_PUBLIC_SEARCH_URL = "https://commanderspellbook.com/search/?q="
 EDHREC_ALLOWED_HOSTS = {"edhrec.com", "www.edhrec.com"}
 THEME_INDEX_CACHE_TTL_SECONDS = 6 * 3600  # Refresh the theme catalog every 6 hours
 
@@ -1696,7 +1699,7 @@ async def fetch_commander_combos(query: str, search_type: str = "commander") -> 
     clean_query = query.strip()
     encoded_query = quote_plus(clean_query)
     
-    # Build API URL using variants endpoint with q parameter
+       # Build API URL using variants endpoint with q parameter
     api_url = f"{COMMANDERSPELLBOOK_BASE_URL}variants?q={encoded_query}"
     
     try:
@@ -1705,20 +1708,34 @@ async def fetch_commander_combos(query: str, search_type: str = "commander") -> 
             response.raise_for_status()
             
             data = response.json()
-            combo_results = []
+            combo_results: List[ComboResult] = []
             
-            # Parse the API response
+            # Parse the API response from the backend
             if isinstance(data, dict) and 'results' in data:
-                for variant in data['results']:
+                for variant in data.get('results', []):
                     combo_result = parse_variant_to_combo_result(variant)
                     if combo_result:
                         combo_results.append(combo_result)
+            
+            # If the API didn't return results, fall back to parsing the public search page.
+            if not combo_results:
+                search_url = f"{COMMANDERSPELLBOOK_PUBLIC_SEARCH_URL}{encoded_query}"
+                try:
+                    # Fetch the public search page and parse combos from the HTML.
+                    html_resp = await client.get(search_url)
+                    html_resp.raise_for_status()
+                    html_content = html_resp.text
+                    combo_results = await parse_combo_results_from_html(html_content)
+                except Exception as html_exc:
+                    logger.error(f"Error fetching combos from search page for {query}: {html_exc}")
+                    # If parsing fails, return the empty list
             
             return combo_results
             
     except Exception as e:
         logger.error(f"Error fetching combos for {query}: {e}")
         return []
+
 
 def parse_variant_to_combo_result(variant: Dict[str, Any]) -> Optional[ComboResult]:
     """
@@ -2189,9 +2206,9 @@ async def get_commander_combos(
         # Build search query that was used
         search_query = commander_name
         
-        # Create source URL pointing to API
+        # Use public search page for the source URL
         encoded_commander = quote_plus(commander_name)
-        source_url = f"{COMMANDERSPELLBOOK_BASE_URL}variants?q={encoded_commander}"
+        source_url = f"{COMMANDERSPELLBOOK_PUBLIC_SEARCH_URL}{encoded_commander}"
         
         return ComboSearchResponse(
             success=True,
@@ -2240,9 +2257,9 @@ async def search_combos_by_card(
         # Build search query that was used
         search_query = card_name
         
-        # Create source URL pointing to API
+        # Use public search page for the source URL
         encoded_card = quote_plus(card_name)
-        source_url = f"{COMMANDERSPELLBOOK_BASE_URL}variants?q={encoded_card}"
+        source_url = f"{COMMANDERSPELLBOOK_PUBLIC_SEARCH_URL}{encoded_card}"
         
         return ComboSearchResponse(
             success=True,
