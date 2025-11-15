@@ -189,102 +189,122 @@ def _safe_float(value: Any) -> Optional[float]:
     except (ValueError, TypeError):
         return None
 
-def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, List[str]]:
-    """Extract commander card sections from Next.js JSON payload using correct EDHRec structure"""
-    sections = {
-        "New Cards": [],
-        "High Synergy Cards": [],
-        "Top Cards": [],
-        "Game Changers": [],
-        "Creatures": [],
-        "Instants": [],
-        "Sorceries": [],
-        "Utility Artifacts": [],
-        "Enchantments": [],
-        "Battles": [],
-        "Planeswalkers": [],
-        "Utility Lands": [],
-        "Mana Artifacts": [],
-        "Lands": []
-    }
-    
+def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Extract commander card sections from the EDHREC Next.js payload."""
+
+    sections: Dict[str, Dict[str, Any]] = {}
+
     if not payload:
         return sections
-    
-    # Navigate to the correct path: pageProps -> data -> container -> json_dict -> cardlists
+
     try:
         page_props = payload.get("pageProps", {})
         data = page_props.get("data", {})
         container = data.get("container", {})
         json_dict = container.get("json_dict", {})
         cardlists = json_dict.get("cardlists", [])
-        
+        total_known_decks = _safe_int(data.get("num_decks_avg"))
+
         logger.info(f"Found {len(cardlists)} card sections to process")
-        
-        # Process each card section
+
+        section_map = {
+            "creatures": "Creatures",
+            "instants": "Instants",
+            "sorceries": "Sorceries",
+            "utility artifacts": "Utility Artifacts",
+            "enchantments": "Enchantments",
+            "battles": "Battles",
+            "planeswalkers": "Planeswalkers",
+            "utility lands": "Utility Lands",
+            "mana artifacts": "Mana Artifacts",
+            "lands": "Lands",
+            "high synergy cards": "High Synergy Cards",
+            "top cards": "Top Cards",
+            "game changers": "Game Changers",
+            "new cards": "New Cards",
+        }
+
         for section in cardlists:
             if not isinstance(section, dict):
                 continue
-                
-            header = section.get("header", "").strip()
+
+            header = _clean_text(section.get("header") or "")
             cardviews = section.get("cardviews", [])
-            
+
             if not header or not cardviews:
                 continue
-                
-            logger.info(f"Processing section: '{header}' with {len(cardviews)} cards")
-                
-            # Map section headers to our internal category names
-            section_map = {
-                "creatures": "Creatures",
-                "instants": "Instants", 
-                "sorceries": "Sorceries",
-                "utility artifacts": "Utility Artifacts",
-                "enchantments": "Enchantments",
-                "battles": "Battles",
-                "planeswalkers": "Planeswalkers",
-                "utility lands": "Utility Lands",
-                "mana artifacts": "Mana Artifacts",
-                "lands": "Lands",
-                "high synergy cards": "High Synergy Cards",
-                "top cards": "Top Cards",
-                "game changers": "Game Changers",
-                "new cards": "New Cards"
-            }
-            
-            # Normalize header for matching
-            normalized_header = header.lower().strip()
-            
-            # Find matching section
+
+            normalized_header = header.lower()
             target_section = None
+
             for key, section_name in section_map.items():
                 if key in normalized_header:
                     target_section = section_name
                     break
-            
+
             if not target_section:
-                # Check if it's already a direct match
-                for section_name in sections.keys():
+                # Fall back to direct header comparison when possible
+                for section_name in section_map.values():
                     if section_name.lower() == normalized_header:
                         target_section = section_name
                         break
-            
-            if target_section:
-                # Extract card names from cardviews
-                cards_added = 0
-                for card in cardviews:
-                    if not isinstance(card, dict):
-                        continue
-                    card_name = card.get("name", "").strip()
-                    if card_name:
-                        sections[target_section].append(card_name)
-                        cards_added += 1
-                
-                logger.info(f"Added {cards_added} cards to section '{target_section}'")
-    
+
+            if not target_section:
+                logger.debug(f"Skipping unknown commander section header '{header}'")
+                continue
+
+            cards: List[Dict[str, Any]] = []
+            for idx, card in enumerate(cardviews, start=1):
+                if not isinstance(card, dict):
+                    continue
+
+                name = _clean_text(card.get("name") or card.get("label") or "")
+                if not name:
+                    continue
+
+                edhrec_url = card.get("url")
+                if edhrec_url:
+                    edhrec_url = urljoin(EDHREC_BASE_URL, edhrec_url.lstrip("/"))
+
+                inclusion_count = _safe_int(card.get("num_decks") or card.get("inclusion"))
+                potential_decks = _safe_int(card.get("potential_decks") or card.get("sample_size"))
+                if potential_decks is None:
+                    potential_decks = total_known_decks
+
+                inclusion_percentage = None
+                if inclusion_count is not None and potential_decks:
+                    try:
+                        inclusion_percentage = (inclusion_count / max(potential_decks, 1)) * 100
+                    except ZeroDivisionError:
+                        inclusion_percentage = None
+
+                synergy_value = _safe_float(card.get("synergy") or card.get("synergy_score") or card.get("synergy_delta"))
+                synergy_percentage = None
+                if synergy_value is not None:
+                    synergy_percentage = synergy_value * 100
+
+                cards.append({
+                    "name": name,
+                    "rank": idx,
+                    "edhrec_url": edhrec_url,
+                    "scryfall_uri": f"https://scryfall.com/search?q={quote_plus(name)}",
+                    "inclusion_count": inclusion_count,
+                    "potential_decks": potential_decks,
+                    "inclusion_percentage": f"{inclusion_percentage:.1f}%" if inclusion_percentage is not None else None,
+                    "synergy_percentage": f"{synergy_percentage:.1f}%" if synergy_percentage is not None else None,
+                    "decks_included": f"{inclusion_count:,}" if inclusion_count is not None else None,
+                    "total_decks_sample": f"{potential_decks:,}" if potential_decks is not None else None,
+                })
+
+            sections[target_section] = {
+                "category_name": target_section,
+                "total_cards": len(cards),
+                "cards": cards,
+            }
+
     except Exception as e:
         logger.warning(f"Error extracting commander sections: {e}")
-    
+
     return sections
 
 def extract_commander_tags_from_json(payload: Dict[str, Any]) -> List[str]:
@@ -342,6 +362,50 @@ def extract_commander_tags_from_json(payload: Dict[str, Any]) -> List[str]:
 
     logger.info(f"Total tags extracted: {len(tags)}")
     return normalize_commander_tags(tags)
+
+
+def extract_commander_top_tags_from_json(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Extract the ranked commander tags with deck counts from the EDHREC payload."""
+
+    top_tags: List[Dict[str, Any]] = []
+
+    try:
+        page_props = payload.get("pageProps", {})
+        data = page_props.get("data", {})
+        panels = data.get("panels", {})
+        taglinks = panels.get("taglinks", [])
+        total_decks = _safe_int(data.get("num_decks_avg"))
+
+        for index, entry in enumerate(taglinks, start=1):
+            if not isinstance(entry, dict):
+                continue
+
+            tag_name = entry.get("value")
+            slug = entry.get("slug")
+            count = _safe_int(entry.get("count"))
+
+            if not tag_name or count is None:
+                continue
+
+            percentage = None
+            if total_decks:
+                try:
+                    percentage = (count / max(total_decks, 1)) * 100
+                except ZeroDivisionError:
+                    percentage = None
+
+            top_tags.append({
+                "tag": tag_name,
+                "slug": slug,
+                "count": count,
+                "rank": index,
+                "percentage": f"{percentage:.1f}%" if percentage is not None else None,
+            })
+
+    except Exception as exc:
+        logger.warning(f"Error extracting commander top tags: {exc}")
+
+    return top_tags
 
 
 def _convert_cardview_to_theme_card(card: Dict[str, Any], position: int) -> Optional[Dict[str, Any]]:
@@ -563,65 +627,31 @@ async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
     # Extract commander name and tags from JSON
     commander_title = commander_name
     commander_tags = extract_commander_tags_from_json(json_data)
-    
-    # Extract card sections from JSON
+    top_tags = extract_commander_top_tags_from_json(json_data)
     card_sections = extract_commander_sections_from_json(json_data)
-    
-    # Create the result structure
+
+    data = json_data.get("pageProps", {}).get("data", {})
+    total_decks = _safe_int(data.get("num_decks_avg"))
+
     result = {
         "commander_url": url,
         "commander_name": commander_title,
         "commander_tags": commander_tags,
-        "top_10_tags": [],  # Will be populated from full tag list
+        "top_10_tags": top_tags[:10],
         "categories": {},
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
     }
-    
-    # Process top 10 tags (take first 10 from commander tags)
-    for i, tag in enumerate(commander_tags[:10]):
-        percentage = max(88 - (i * 4), 55)  # Generate realistic percentages
-        result["top_10_tags"].append({
-            "tag": tag,
-            "percentage": f"{percentage}%",
-            "rank": i + 1
-        })
-    
-    # Process each card category
-    for category_name, card_names in card_sections.items():
-        category_key = category_name.lower().replace(" ", "_")
-        
-        cards = []
-        for i, card_name in enumerate(card_names):
-            # Generate realistic statistics
-            if category_name == "Top Cards":
-                inclusion_pct = max(60 - (i * 3), 35)
-                synergy_pct = max(98 - (i * 2), 75)
-            elif category_name == "High Synergy Cards":
-                inclusion_pct = max(65 - (i * 4), 25)
-                synergy_pct = max(95 - (i * 3), 70)
-            elif category_name == "Game Changers":
-                inclusion_pct = max(35 - (i * 3), 10)
-                synergy_pct = max(99 - (i * 1), 85)
-            else:
-                inclusion_pct = max(45 - (i * 2), 15)
-                synergy_pct = max(90 - (i * 2), 65)
-            
-            cards.append({
-                "name": card_name,
-                "inclusion_percentage": f"{inclusion_pct}%",
-                "decks_included": f"{inclusion_pct * 100:,.0f}",  # Simulated count
-                "total_decks_sample": "25,000",  # Simulated total
-                "synergy_percentage": f"{synergy_pct}%",
-                "scryfall_uri": f"https://scryfall.com/search?q={card_name.replace(' ', '+')}",
-                "rank": i + 1
-            })
-        
-        result["categories"][category_key] = {
-            "category_name": category_name,
-            "total_cards": len(cards),
-            "cards": cards
-        }
-    
+
+    if total_decks is not None:
+        result["total_known_decks"] = total_decks
+
+    for section_name, section_data in card_sections.items():
+        category_key = re.sub(r"[^a-z0-9]+", "_", section_name.lower()).strip("_")
+        if not category_key:
+            category_key = re.sub(r"[^a-z0-9]+", "_", section_data["category_name"].lower()).strip("_")
+
+        result["categories"][category_key] = section_data
+
     return result
 
 
@@ -1179,529 +1209,6 @@ async def get_commander_summary(
             status_code=500,
             detail=f"Unable to generate commander data: {str(e)}"
         )
-
-
-def extract_commander_name_from_url(url: str) -> str:
-    """Extract commander name from an EDHREC commander URL."""
-    try:
-        parsed = urlparse(url)
-        path = parsed.path or ""
-        path = path.split("?")[0].split("#")[0]
-        if path.startswith("/"):
-            path = path[1:]
-
-        if path.startswith("commanders/"):
-            slug = path.split("commanders/", 1)[1]
-        else:
-            slug = path.split("/")[-1]
-
-        slug = slug.strip("/")
-        slug = slug.replace("-", " ").replace("_", " ")
-        return " ".join(word.capitalize() for word in slug.split()) or "unknown"
-    except Exception:
-        return "unknown"
-
-
-async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
-    """
-    Scrape EDHRec commander page using Next.js JSON approach
-    """
-    commander_name = extract_commander_name_from_url(url)
-    logger.info(f"Processing commander: {commander_name} from {url}")
-    
-    async with http_session.get(url, headers=SCRYFALL_HEADERS) as response:
-        if response.status != 200:
-            raise HTTPException(status_code=404, detail=f"Commander page not found: {url}")
-        
-        html_content = await response.text()
-    
-    # Extract the Next.js build ID from HTML
-    build_id = extract_build_id_from_html(html_content)
-    if not build_id:
-        raise HTTPException(status_code=500, detail="Could not extract Next.js build ID from page")
-    
-    logger.info(f"Found build ID: {build_id}")
-    
-    # Construct the Next.js JSON URL
-    # Extract commander slug from the original URL
-    commander_slug = extract_commander_name_from_url(url).lower().replace(" ", "-")
-    # Remove any non-alphanumeric characters for the slug
-    commander_slug = re.sub(r'[^a-z0-9\-]', '', commander_slug)
-    
-    json_url = urljoin(EDHREC_BASE_URL, f"_next/data/{build_id}/commanders/{commander_slug}.json")
-    logger.info(f"Fetching Next.js JSON data from: {json_url}")
-    
-    async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
-        if response.status != 200:
-            raise HTTPException(status_code=404, detail=f"Could not fetch commander data from: {json_url}")
-        
-        json_data = await response.json()
-    
-    # Extract commander name and tags from JSON
-    commander_title = commander_name
-    commander_tags = extract_commander_tags_from_json(json_data)
-    
-    # Extract card sections from JSON
-    card_sections = extract_commander_sections_from_json(json_data)
-    
-    # Create the result structure
-    result = {
-        "commander_url": url,
-        "commander_name": commander_title,
-        "commander_tags": commander_tags,
-        "top_10_tags": [],  # Will be populated from full tag list
-        "categories": {},
-        "timestamp": datetime.utcnow().isoformat()
-    }
-    
-    # Process top 10 tags (take first 10 from commander tags)
-    for i, tag in enumerate(commander_tags[:10]):
-        percentage = max(88 - (i * 4), 55)  # Generate realistic percentages
-        result["top_10_tags"].append({
-            "tag": tag,
-            "percentage": f"{percentage}%",
-            "rank": i + 1
-        })
-    
-    # Process each card category
-    for category_name, card_names in card_sections.items():
-        category_key = category_name.lower().replace(" ", "_")
-        
-        cards = []
-        for i, card_name in enumerate(card_names):
-            # Generate realistic statistics
-            if category_name == "Top Cards":
-                inclusion_pct = max(60 - (i * 3), 35)
-                synergy_pct = max(98 - (i * 2), 75)
-            elif category_name == "High Synergy Cards":
-                inclusion_pct = max(65 - (i * 4), 25)
-                synergy_pct = max(95 - (i * 3), 70)
-            elif category_name == "Game Changers":
-                inclusion_pct = max(35 - (i * 3), 10)
-                synergy_pct = max(99 - (i * 1), 85)
-            else:
-                inclusion_pct = max(45 - (i * 2), 15)
-                synergy_pct = max(90 - (i * 2), 65)
-            
-            cards.append({
-                "name": card_name,
-                "inclusion_percentage": f"{inclusion_pct}%",
-                "decks_included": f"{inclusion_pct * 100:,.0f}",  # Simulated count
-                "total_decks_sample": "25,000",  # Simulated total
-                "synergy_percentage": f"{synergy_pct}%",
-                "scryfall_uri": f"https://scryfall.com/search?q={card_name.replace(' ', '+')}",
-                "rank": i + 1
-            })
-        
-        result["categories"][category_key] = {
-            "category_name": category_name,
-            "total_cards": len(cards),
-            "cards": cards
-        }
-    
-    return result
-    
-    commander_lower = commander_name.lower()
-    
-    # Analyze commander name to determine type and generate appropriate data
-    if any(name in commander_lower for name in ["gwenom", "remorseless", "vampire", "blood", "drana", "sorin", "vampyr"]):
-        # Vampire tribal commander
-        result["commander_tags"] = [
-            "Vampire Tribal", "Aristocrats", "Blood Sacrifice", "Undead", 
-            "Aristocratic", "Blood", "Mill", "Life Loss", "Smallpox"
-        ]
-        archetype = "Vampire Aristocrats"
-        
-        mock_creatures = ["Vampire Nocturnus", "Bishop of Wings", "Drana, Kalastria Bloodchief", "Vizkopa Guildmage", "Bloodghast"]
-        mock_synergy = ["Vampiric Rites", "Blood Artist", "Fleshbag Marauder", "Zulaport Cutthroat", "Campaign of Vengeance"]
-        
-    elif any(name in commander_lower for name in ["ur", "dragon", "sarkhan", "atarka", "lathliss"]):
-        # Dragon tribal commander
-        result["commander_tags"] = [
-            "Dragon Tribal", "Expensive", "Big Mana", "Land Ramp", 
-            "Flying", "Legendary Creature", "Eldrazi", "CMC 8", "Devotion"
-        ]
-        archetype = "Dragon Tribal"
-        
-        mock_creatures = ["Elder Gargarul", "Void Winnower", "Ulamog, the Ceaseless Hunger", "Kozilek, the Great Distortion", "Crucible of Worlds"]
-        mock_synergy = ["Dragon's Approach", "Sarkhan the Masterless", "Atarka, World Render", "Lathliss, Dragon Queen"]
-        
-    elif any(name in commander_lower for name in ["aesi", "agamo", "aurora", "simic", "landfall", "merfolk"]):
-        # Simic commander - likely landfall/merfolk
-        result["commander_tags"] = [
-            "Simic", "Landfall", "Merfolk Tribal", "Land Ramp", 
-            "Counter Spells", "Tapped Lands", "Reanimation", "Token Generation"
-        ]
-        archetype = "Simic Landfall"
-        
-        mock_creatures = ["Aesi, Gyre Seer", "Avenger of Zendikar", "Primeval Titan", "Myr Battlesphere"]
-        mock_synergy = ["Awakening of Vitu-Ghazi", "Tatyova, Benthic Druid", "Courser of Kruphix"]
-        
-    else:
-        # Generic analysis - look for clues in the name
-        if any(word in commander_lower for word in ["control", "counterspell", "blue"]):
-            result["commander_tags"] = ["Control", "Counterspells", "Card Draw", "Blue", "Reactive"]
-            archetype = "Control"
-        elif any(word in commander_lower for word in ["aggressive", "red", "burn", "damage"]):
-            result["commander_tags"] = ["Aggro", "Burn", "Direct Damage", "Red", "Fast"]
-            archetype = "Aggro"
-        elif any(word in commander_lower for word in ["combo", "infinite", "loop", "engine"]):
-            result["commander_tags"] = ["Combo", "Engine", "Infinite Loops", "Competitive", "Value"]
-            archetype = "Combo"
-        else:
-            result["commander_tags"] = ["Midrange", "Value", "Good Stuff", "Flexible", "Popular"]
-            archetype = "Midrange"
-        
-        mock_creatures = ["Eternal Scourge", "Primeval Titan", "Woodfall Primus", "Avenger of Zendikar"]
-        mock_synergy = ["Cyclonic Rift", "Vampiric Tutor", "Ad Nauseam", "Peer into the Abyss"]
-    
-    # Generate top 10 tags with realistic percentages
-    for i, tag in enumerate(result["commander_tags"][:10]):
-        percentage = max(88 - (i * 4), 55)
-        result["top_10_tags"].append({
-            "tag": tag,
-            "percentage": f"{percentage}%",
-            "rank": i + 1
-        })
-    
-    # Generate category-specific card lists based on archetype
-    category_samples = {
-        "New Cards": [
-            "The Wandering Emperor", "Nadu, Winged Wisdom", "Simic Ascendancy",
-            "Chrome Mox", "Phyrexian Processor", "Jeweled Lotus"
-        ],
-        "High Synergy Cards": mock_synergy + [
-            "From Beyond", "Puppeteer Clique", "Living Death", "Karmic Guide"
-        ],
-        "Top Cards": [
-            "Vampiric Tutor", "Demonic Tutor", "Cyclonic Rift", "Ad Nauseam", 
-            "Rhystic Study", "Mystic Remora", "Swords to Plowshares", "Counterspell"
-        ],
-        "Game Changers": [
-            "Ad Nauseam", "Peer into the Abyss", "Nexus of Fate", "Demonic Consultation",
-            "Temporal Manipulation", "Time Spiral", "Living End"
-        ],
-        "Creatures": mock_creatures + [
-            "Myr Battlesphere", "Woodfall Primus", "Woodfall Primus", "Avenger of Zendikar",
-            "Eternal Scourge", "Riptide Crab"
-        ],
-        "Instants": [
-            "Cyclonic Rift", "Vampiric Tutor", "Swords to Plowshares", "Force of Will", 
-            "Counterspell", "Path to Exile", "Swan Song"
-        ],
-        "Sorceries": [
-            "Demonic Tutor", "Temporal Manipulation", "Temporal Mastery", "Scheming Symmetry",
-            "Living Death", "Necromancy", "Rite of Replication"
-        ],
-        "Utility Artifacts": [
-            "Sol Ring", "Mana Vault", "Chrome Mox", "Mox Diamond", "Phyrexian Processor",
-            "Tawnos's Coffin", "Null Rod"
-        ],
-        "Enchantments": [
-            "Rhystic Study", "Mystic Remora", "Underworld Connections", "Pernicious Deed",
-            "Search for Azcanta", "As Foretold"
-        ],
-        "Battles": [
-            "Invasion of Zendikar", "March of the Multitudes", "The Wandering Emperor"
-        ],
-        "Planeswalkers": [
-            "Jace, the Mind Sculptor", "Ugin, the Spirit Dragon", "Nicol Bolas, Dragon-God",
-            "Venser, the Soaring Blade", "Tamiyo, Field Researcher"
-        ],
-        "Utility Lands": [
-            "Command Tower", "Exotic Orchard", "City of Brass", "Forbidden Orchard",
-            "Reflecting Pool", "Vesuva"
-        ],
-        "Mana Artifacts": [
-            "Sol Ring", "Mana Vault", "Chrome Mox", "Mox Diamond", "Mox Opal",
-            "Skullclamp", "Sensei's Divining Top"
-        ],
-        "Lands": [
-            "Reflecting Pool", "Vesuva", "Terrain Generator", "City of Brass",
-            "Riptide Laboratory", "Murmuring Bosk"
-        ]
-    }
-    
-    # Determine deck sample size based on commander recognition
-    if "ur" in commander_lower and "dragon" in commander_lower:
-        total_decks = random.randint(35000, 50000)  # Very popular
-    elif any(word in commander_lower for word in ["gwenom", "remorseless"]):
-        total_decks = random.randint(8000, 15000)  # Moderate popularity
-    else:
-        total_decks = random.randint(15000, 30000)  # Average
-    
-    # Generate realistic card data for each category
-    card_categories = [
-        "New Cards", "High Synergy Cards", "Top Cards", "Game Changers",
-        "Creatures", "Instants", "Sorceries", "Utility Artifacts", 
-        "Enchantments", "Battles", "Planeswalkers", "Utility Lands",
-        "Mana Artifacts", "Lands"
-    ]
-    
-    for category in card_categories:
-        category_key = category.lower().replace(" ", "_")
-        sample_cards = category_samples.get(category, ["Mock Card 1", "Mock Card 2", "Mock Card 3"])
-        
-        num_cards = random.randint(5, 8)
-        cards = []
-        
-        for i in range(num_cards):
-            card_name = random.choice(sample_cards)
-            
-            # Category-specific inclusion percentages
-            if category == "Top Cards":
-                inclusion_pct = random.randint(60, 85)
-                synergy_pct = random.randint(88, 98)
-            elif category == "High Synergy Cards":
-                inclusion_pct = random.randint(35, 65)
-                synergy_pct = random.randint(80, 95)
-            elif category == "Game Changers":
-                inclusion_pct = random.randint(15, 35)
-                synergy_pct = random.randint(92, 99)
-            elif category == "New Cards":
-                inclusion_pct = random.randint(10, 30)
-                synergy_pct = random.randint(70, 90)
-            else:
-                inclusion_pct = random.randint(20, max(25, 55 - (i * 2)))
-                synergy_pct = random.randint(75, 90)
-            
-            # Boost cards that match commander archetype
-            if archetype == "Vampire Aristocrats" and any(keyword in card_name.lower() for keyword in ["vampire", "blood", "sacrifice", "artist"]):
-                inclusion_pct = min(85, inclusion_pct + 20)
-                synergy_pct = min(95, synergy_pct + 10)
-            elif archetype == "Dragon Tribal" and any(keyword in card_name.lower() for keyword in ["dragon", "approach", "sarkhan"]):
-                inclusion_pct = min(80, inclusion_pct + 15)
-                synergy_pct = min(95, synergy_pct + 8)
-            elif archetype == "Simic Landfall" and any(keyword in card_name.lower() for keyword in ["landfall", "aesi", "simic", "titan"]):
-                inclusion_pct = min(80, inclusion_pct + 15)
-                synergy_pct = min(95, synergy_pct + 8)
-            
-            deck_count = int(total_decks * (inclusion_pct / 100))
-            
-            cards.append({
-                "name": card_name,
-                "inclusion_percentage": f"{inclusion_pct}%",
-                "decks_included": deck_count,
-                "total_decks_sample": total_decks,
-                "synergy_percentage": f"{synergy_pct}%",
-                "scryfall_uri": f"https://scryfall.com/search?q={card_name.replace(' ', '+')}",
-                "rank": i + 1
-            })
-        
-        result["categories"][category_key] = {
-            "category_name": category,
-            "archetype": archetype,
-            "total_cards": len(cards),
-            "cards": cards
-        }
-    
-    return result
-
-
-
-def parse_edhrec_commander_html(html_content: str, original_url: str) -> Dict[str, Any]:
-    """
-    Parse HTML content to extract commander information
-    Uses regex patterns to extract data from EDHRec HTML structure
-    """
-    import re
-    
-    result = {
-        "commander_url": original_url,
-        "timestamp": datetime.utcnow().isoformat(),
-        "commander_tags": [],
-        "top_10_tags": [],
-        "categories": {}
-    }
-    
-    # Extract commander name from URL
-    commander_name = extract_commander_name_from_url(original_url)
-    result["commander_name"] = commander_name.title()
-    
-    # Try to extract commander tags using various patterns
-    tag_patterns = [
-        r'<span[^>]*class="[^"]*tag[^"]*"[^>]*>([^<]+)</span>',
-        r'"tags"[^:]*:[^[]*\[([^\]]+)\]',
-        r'<div[^>]*class="[^"]*tag-container[^"]*"[^>]*>(.*?)</div>',
-    ]
-    
-    for pattern in tag_patterns:
-        matches = re.findall(pattern, html_content, re.IGNORECASE | re.DOTALL)
-        if matches:
-            for match in matches:
-                if isinstance(match, tuple):
-                    tag_text = match[0].strip() if match else ""
-                else:
-                    tag_text = match.strip()
-                
-                # Clean and validate tag
-                tag_clean = re.sub(r'<[^>]+>', '', tag_text).strip()
-                if tag_clean and len(tag_clean) < 50 and tag_clean not in result["commander_tags"]:
-                    result["commander_tags"].append(tag_clean)
-            
-            if result["commander_tags"]:
-                break
-    
-    # Generate commander tags based on commander name analysis
-    commander_lower = commander_name.lower()
-    if "gwenom" in commander_lower or "remorseless" in commander_lower:
-        result["commander_tags"] = [
-            "Vampire Tribal", "Aristocrats", "Blood Sacrifice", "Undead", 
-            "Aristocratic", "Blood", "Commander", "Legendary Creature"
-        ]
-    elif "ur" in commander_lower and "dragon" in commander_lower:
-        result["commander_tags"] = [
-            "Dragon Tribal", "Expensive", "Big Mana", "Land Ramp", 
-            "Flying", "Legendary Creature", "Eldrazi", "CMC 8"
-        ]
-    else:
-        result["commander_tags"] = [
-            "Legendary Creature", "Commander", "Powerful", "Competitive",
-            "Tribal", "Engine", "Value"
-        ]
-    
-    # Generate top 10 tags with commander-specific data
-    for i, tag in enumerate(result["commander_tags"][:10]):
-        # Higher percentages for more relevant tags
-        percentage = max(90 - (i * 3), 65)
-        result["top_10_tags"].append({
-            "tag": tag,
-            "percentage": f"{percentage}%",
-            "rank": i + 1
-        })
-    
-    # Fill remaining spots with generic competitive tags if needed
-    if len(result["top_10_tags"]) < 10:
-        generic_tags = ["Mana Curve", "Card Draw", "Board Wipes", "Ramp", "Removal"]
-        start_index = len(result["top_10_tags"])
-        for i, tag in enumerate(generic_tags[:10-start_index]):
-            percentage = max(70 - (i * 2), 45)
-            result["top_10_tags"].append({
-                "tag": tag,
-                "percentage": f"{percentage}%",
-                "rank": start_index + i + 1
-            })
-    
-    # Define the card categories we expect
-    card_categories = [
-        "New Cards", "High Synergy Cards", "Top Cards", "Game Changers",
-        "Creatures", "Instants", "Sorceries", "Utility Artifacts", 
-        "Enchantments", "Battles", "Planeswalkers", "Utility Lands",
-        "Mana Artifacts", "Lands"
-    ]
-    
-    # For each category, extract cards with inclusion data
-    for category in card_categories:
-        category_key = category.lower().replace(" ", "_")
-        
-        # Mock card data - in real implementation, this would be parsed from HTML
-        mock_cards = generate_mock_category_cards(category, commander_name)
-        
-        result["categories"][category_key] = {
-            "category_name": category,
-            "total_cards": len(mock_cards),
-            "cards": mock_cards
-        }
-    
-    return result
-
-
-def generate_mock_category_cards(category: str, commander_name: str) -> List[Dict[str, Any]]:
-    """Generate mock card data based on commander identity"""
-    import random
-    
-    cards = []
-    
-    # Commander-specific card pools based on name analysis
-    commander_lower = commander_name.lower()
-    
-    # Determine commander type/tribal identity
-    if "gwenom" in commander_lower or "remorseless" in commander_lower:
-        # Vampire/Demon tribal commander
-        commander_tags = ["Vampire Tribal", "Aristocrats", "Blood Sacrifice", "Undead", "Aristocratic", "Blood"]
-        commander_creatures = ["Vampire Nocturnus", "Bishop of Wings", "Drana, Kalastria Bloodchief", "Vizkopa Guildmage", "Bloodghast"]
-        commander_synergy_cards = ["Vampiric Rites", "Blood Artist", "Fleshbag Marauder", "Zulaport Cutthroat", "Puppeteer Clique"]
-    elif "ur" in commander_lower and "dragon" in commander_lower:
-        # Dragon tribal
-        commander_tags = ["Dragon Tribal", "Expensive", "Big Mana", "Land Ramp", "Flying", "Eldrazi"]
-        commander_creatures = ["Elder Gargarul", "Void Winnower", "Ulamog, the Ceaseless Hunger", "Kozilek, the Great Distortion"]
-        commander_synergy_cards = ["Dragon's Approach", "Sarkhan the Masterless", "Atarka, World Render", "Lathliss, Dragon Queen"]
-    else:
-        # Generic commander
-        commander_tags = ["Legendary Creature", "Commander", "Powerful", "Competitive"]
-        commander_creatures = ["Ancient Gold Dragon", "Primeval Titan", "Avenger of Zendikar", "Woodfall Primus"]
-        commander_synergy_cards = ["Coiling Oracle", "Woodfall Primus", "Sage of Ancient Ways", "Primordial Sage"]
-    
-    # Dynamic card pools based on commander type
-    category_samples = {
-        "New Cards": commander_creatures[:2] + ["The Wandering Emperor", "Nadu, Winged Wisdom", "Simic Ascendancy"],
-        "High Synergy Cards": commander_synergy_cards + ["Vampiric Rites", "From Beyond", "Puppeteer Clique"],
-        "Top Cards": ["Vampiric Tutor", "Demonic Tutor", "Cyclonic Rift", "Ad Nauseam", "Rhystic Study"],
-        "Game Changers": ["Ad Nauseam", "Peer into the Abyss", "Nexus of Fate", "Demonic Consultation"],
-        "Creatures": commander_creatures + ["Myr Battlesphere", "Woodfall Primus", "Avenger of Zendikar"],
-        "Instants": ["Cyclonic Rift", "Vampiric Tutor", "Swords to Plowshares", "Force of Will", "Counterspell"],
-        "Sorceries": ["Demonic Tutor", "Temporal Manipulation", "Temporal Mastery", "Scheming Symmetry"],
-        "Utility Artifacts": ["Sol Ring", "Mana Vault", "Phyrexian Processor", "Tawnos's Coffin"],
-        "Enchantments": ["Rhystic Study", "Mystic Remora", "Underworld Connections", "Pernicious Deed"],
-        "Battles": ["Invasion of Zendikar", "March of the Multitudes", "The Wandering Emperor"],
-        "Planeswalkers": ["Jace, the Mind Sculptor", "Venser, the Soaring Blade", "Ugin, the Spirit Dragon"],
-        "Utility Lands": ["Command Tower", "Exotic Orchard", "City of Brass", "Forbidden Orchard"],
-        "Mana Artifacts": ["Sol Ring", "Mana Vault", "Chrome Mox", "Mox Diamond"],
-        "Lands": ["Reflecting Pool", "Vesuva", "Terrain Generator", "City of Brass"]
-    }
-    
-    sample_cards = category_samples.get(category, ["Mock Card 1", "Mock Card 2", "Mock Card 3"])
-    
-    # Generate 5-8 mock cards per category
-    num_cards = random.randint(5, 8)
-    commander_lower = commander_name.lower()
-    
-    # Adjust deck counts based on commander popularity
-    if "gwenom" in commander_lower or "remorseless" in commander_lower:
-        # Vampire commander - less popular, smaller sample
-        total_decks = random.randint(8000, 15000)
-    elif "ur" in commander_lower and "dragon" in commander_lower:
-        # Popular dragon commander
-        total_decks = random.randint(25000, 45000)
-    else:
-        # Generic commander
-        total_decks = random.randint(15000, 30000)
-    
-    for i in range(num_cards):
-        card_name = random.choice(sample_cards)
-        
-        # More realistic inclusion percentages based on category
-        if category == "Top Cards":
-            inclusion_pct = random.randint(60, 85)
-            synergy_pct = random.randint(85, 98)
-        elif category == "High Synergy Cards":
-            inclusion_pct = random.randint(35, 65)
-            synergy_pct = random.randint(80, 95)
-        elif category == "Game Changers":
-            inclusion_pct = random.randint(15, 35)
-            synergy_pct = random.randint(90, 99)
-        else:
-            inclusion_pct = random.randint(20, max(20, 55 - (i * 3)))
-            synergy_pct = random.randint(70, 90)
-        
-        # Adjust for commander-specific synergies
-        if any(keyword in card_name.lower() for keyword in ["vampire", "blood", "sacrifice"]) and "gwenom" in commander_lower:
-            inclusion_pct = min(85, inclusion_pct + 15)  # Boost vampire synergy cards
-            synergy_pct = min(95, synergy_pct + 10)
-        
-        deck_count = int(total_decks * (inclusion_pct / 100))
-        
-        cards.append({
-            "name": card_name,
-            "inclusion_percentage": f"{inclusion_pct}%",
-            "decks_included": deck_count,
-            "total_decks_sample": total_decks,
-            "synergy_percentage": f"{synergy_pct}%",
-            "scryfall_uri": f"https://scryfall.com/search?q={card_name.replace(' ', '+')}",
-            "rank": i + 1
-        })
-    
-    return cards
 
 
 @app.exception_handler(HTTPException)
