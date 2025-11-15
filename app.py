@@ -1291,36 +1291,11 @@ def _parse_theme_slugs_from_html(html_content: str) -> Set[str]:
 async def _get_available_theme_slugs(force_refresh: bool = False) -> Set[str]:
     """Fetch and cache the list of available EDHRec theme slugs from the tags index."""
 
-    return sanitized_slug
-
-
-def _extract_next_data_from_html(html_content: str) -> Optional[Dict[str, Any]]:
-    """Extract the Next.js data blob embedded in EDHRec theme pages."""
-    if not html_content:
-        return None
-
-    try:
-        soup = BeautifulSoup(html_content, "html.parser")
-        script_tag = soup.find("script", id="__NEXT_DATA__")
-        if not script_tag or not script_tag.string:
-            return None
-
-        return json.loads(script_tag.string)
-    except json.JSONDecodeError as exc:
-        logger.warning(f"Failed to decode __NEXT_DATA__ JSON: {exc}")
-        return None
-    except Exception as exc:
-        logger.warning(f"Failed to extract __NEXT_DATA__ from theme page: {exc}")
-        return None
-
-
-async def _fetch_theme_document(
-    sanitized_slug: str,
-) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
-    """Fetch and validate theme data directly from the EDHRec HTML page."""
-
     if not http_session:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="HTTP session not available")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="HTTP session not available",
+        )
 
     now = time.time()
     cached_slugs: Set[str] = _theme_catalog_cache.get("slugs", set())
@@ -1341,30 +1316,40 @@ async def _fetch_theme_document(
         try:
             async with http_session.get(tags_url, headers=SCRYFALL_HEADERS) as response:
                 if response.status != 200:
-                    logger.warning(f"Failed to fetch theme catalog: status {response.status}")
+                    logger.warning(
+                        f"Failed to fetch theme catalog: status {response.status}"
+                    )
                     if cached_slugs:
                         return set(cached_slugs)
-                    raise HTTPException(status_code=response.status, detail="Unable to load theme catalog from EDHRec")
+                    raise HTTPException(
+                        status_code=response.status,
+                        detail="Unable to load theme catalog from EDHRec",
+                    )
 
                 html_content = await response.text()
         except aiohttp.ClientError as exc:
             logger.warning(f"Error fetching theme catalog: {exc}")
             if cached_slugs:
                 return set(cached_slugs)
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Failed to retrieve theme catalog from EDHRec")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Failed to retrieve theme catalog from EDHRec",
+            )
 
         slugs = _parse_theme_slugs_from_html(html_content)
         if not slugs:
             logger.warning("Theme catalog scrape returned no slugs")
             if cached_slugs:
                 return set(cached_slugs)
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to parse theme catalog from EDHRec")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Unable to parse theme catalog from EDHRec",
+            )
 
         _theme_catalog_cache["timestamp"] = now
         _theme_catalog_cache["slugs"] = slugs
 
         return set(slugs)
-
 
 def _validate_theme_slug_against_catalog(sanitized_slug: str, available_themes: Set[str]) -> None:
     """Validate a sanitized theme slug against the catalog of known themes."""
