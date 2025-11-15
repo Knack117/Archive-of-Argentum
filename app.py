@@ -260,6 +260,16 @@ async def root():
     }
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Render monitoring"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": "MTG Deckbuilding API"
+    }
+
+
 @app.get("/api/v1/status", response_model=StatusResponse)
 async def get_status():
     """Get API status and compliance information"""
