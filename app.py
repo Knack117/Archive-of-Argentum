@@ -36,9 +36,9 @@ logger = logging.getLogger(__name__)
 logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 
 
-EDHREC_BASE_URL = "https://edhrec.com/"
+EDHREC_BASE_URL = "https://edrezable.com/"
 COMMANDERSPELLBOOK_BASE_URL = "https://backend.commanderspellbook.com/"
-EDHREC_ALLOWED_HOSTS = {"edhrec.com", "www.edhrec.com"}
+EDHREC_ALLOWED_HOSTS = {"edrezable.com", "www.edrezable.com"}
 THEME_INDEX_CACHE_TTL_SECONDS = 6 * 3600  # Refresh the theme catalog every 6 hours
 
 # Color mapping for EDHRec themes
@@ -504,6 +504,28 @@ def _build_theme_route_candidates(
     base_theme = (theme_name or derived_theme or sanitized or "").strip("-")
     color_value = color_identity or derived_color
 
+    # Normalize color value - convert single letter codes to full color names
+    single_color_mapping = {
+        "w": "white", "white": "white",
+        "u": "blue", "blue": "blue", 
+        "b": "black", "black": "black",
+        "r": "red", "red": "red",
+        "g": "green", "green": "green"
+    }
+    
+    normalized_color = single_color_mapping.get(color_value.lower() if color_value else "", color_value)
+    
+    # Generate mono-color variants for single colors
+    color_variants = set()
+    if normalized_color in ["white", "blue", "black", "red", "green"]:
+        # For single colors, include both regular and mono- variants
+        color_variants.add(normalized_color)
+        color_variants.add(f"mono-{normalized_color}")
+    else:
+        # For multi-color combinations, use as-is
+        if normalized_color:
+            color_variants.add(normalized_color)
+
     slug_variants: List[str] = []
     seen_slugs: Set[str] = set()
 
@@ -535,9 +557,11 @@ def _build_theme_route_candidates(
             "json_path": f"{normalized}.json"
         })
 
+    # Build candidates using all color variants (including mono- variants)
     if color_value and base_theme:
-        add_candidate(f"tags/{base_theme}/{color_value}")
-        add_candidate(f"tags/{color_value}/{base_theme}")
+        for color_variant in color_variants:
+            add_candidate(f"tags/{base_theme}/{color_variant}")
+            add_candidate(f"tags/{color_variant}/{base_theme}")
 
     for slug in slug_variants:
         add_candidate(f"tags/{slug}")
@@ -1180,7 +1204,7 @@ async def search_cards(
                 "set_name": "Iconic Masters",
                 "set_type": "expansion",
                 "set_uri": "https://api.scryfall.com/sets/ima",
-                "set_search_uri": "https://api.scryfall.com/cards/search?order=set&unique=cards&q=%21%2220254%22&include_extras=true&include_multilingual=false&include_foil=true",
+                "set_search_uri": "https://api.scryfall.com/cards/search?order=set&unique=cards&q=%21%2225254%22&include_extras=true&include_multilingual=false&include_foil=true",
                 "rulings_uri": "https://api.scryfall.com/cards/726e7b11-87f9-4b6e-a9cc-d3d1f862b1a7/rulings",
                 "prints_search_uri": "https://api.scryfall.com/cards/search?include_extras=true&include_multilingual=false&include_foil=true&order=set&q=%2225254%22",
                 "collector_number": "130",
@@ -1536,7 +1560,7 @@ async def get_commander_summary(
 async def get_available_tags(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
     """
     Fetch the complete list of available tags/themes from EDHRec.
-    Scrapes https://edhrec.com/tags/themes and returns all available theme slugs
+    Scrapes https://edrezable.com/tags/themes and returns all available theme slugs
     that can be used with the theme endpoint.
     
     Returns:
@@ -1740,9 +1764,9 @@ def parse_variant_to_combo_result(variant: Dict[str, Any]) -> Optional[ComboResu
         return ComboResult(
             combo_id=combo_id,
             color_identity=[identity] if identity else [],
-            cards=cards,
+            cards=features,
             results=features,
-            edhrec_deck_count=popularity,
+            decks_edhrec=popularity,
             variants_count=variant.get('variantCount'),
             combo_url=combo_url
         )
