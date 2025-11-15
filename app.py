@@ -174,9 +174,7 @@ def _gather_section_card_names(source: Any) -> List[str]:
     
     return deduped
 
-# other helper functions omitted here for brevity (they remain unchanged)...
-
-# rest of earlier code continues unchanged until we reach the API endpoints
+# ... other helper functions and original code remain unchanged ...
 
 class ThemeItem(BaseModel):
     name: str
@@ -197,6 +195,25 @@ class PageTheme(BaseModel):
     container: ThemeContainer
     source_url: Optional[str] = None
     error: Optional[str] = None
+
+# ------------------------------------------------
+# Create FastAPI application instance BEFORE routes
+# ------------------------------------------------
+
+app = FastAPI(
+    title="MTG Deckbuilding API",
+    description="Scryfall-compliant MTG API with rate limiting and caching",
+    version="1.1.0"
+)
+
+# Optionally configure CORS (uses settings.allowed_origins)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # other Pydantic models like Card, ThemeCard, ThemeResponse, etc. remain unchanged...
 
