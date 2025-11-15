@@ -1294,21 +1294,13 @@ async def get_theme(
         regex="^(auto|full|metadata)$",
         description="Response format: 'auto' (auto-size), 'full' (all data), 'metadata' (categories only)"
     ),
-    client_id: str = Depends(get_client_identifier)
-): 
+    _client_id: str = Depends(get_client_identifier)
+):
     """Retrieve structured information for an EDHRec theme.
     
     This endpoint automatically manages response size to prevent server errors.
     Use max_cards parameter to control data volume, especially for large themes.
     """
-    await check_rate_limit(client_id)
-
-    if not rate_limiter:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Rate limiter not ready"
-        )
-
     # Handle metadata-only requests
     if response_format == "metadata":
         # Temporarily set max_cards to 0 to get metadata only
@@ -1316,11 +1308,10 @@ async def get_theme(
     else:
         card_limit = max_cards
 
-    async with rate_limiter:
-        theme_data = await scrape_edhrec_theme_page(
-            theme_slug,
-            max_cards_per_category=card_limit
-        )
+    theme_data = await scrape_edhrec_theme_page(
+        theme_slug,
+        max_cards_per_category=card_limit
+    )
     
     # Check response type and return appropriate model
     if "categories" not in theme_data or not theme_data["categories"]:
