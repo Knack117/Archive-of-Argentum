@@ -1,18 +1,24 @@
 """
-MTG Deckbuilding API using mightstone library
-FastAPI application for Magic: The Gathering card search and deckbuilding
+MTG Deckbuilding API with Rate Limiting, Caching, and Scryfall-Compliant Headers
+FastAPI application with proper API etiquette and comprehensive compliance
 """
 
 import os
+import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
-from typing import List, Optional
+from typing import List, Optional, Dict
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from hishel import Headers
 
 from mightstone.services import scryfall
 from config import settings
@@ -22,14 +28,71 @@ from config import settings
 logging.basicConfig(level=getattr(logging, settings.log_level))
 logger = logging.getLogger(__name__)
 
-# Global mightstone client
+# Scryfall-compliant headers
+SCRYFALL_HEADERS = Headers({
+    "User-Agent": "MtgDeckbuildingAPI/1.1.0 (https://github.com/Knack117/Archive-of-Argentum)",
+    "Accept": "application/json;q=0.9,*/*;q=0.8"
+})
+
+# Global mightstone client with custom headers
 client = scryfall.Scryfall()
+
+# Configure client headers for Scryfall compliance
+try:
+    # Set custom headers on the underlying HTTP client
+    if hasattr(client, 'client') and hasattr(client.client, 'headers'):
+        # Update existing headers
+        client.client.headers.update(SCRYFALL_HEADERS)
+        logger.info("Configured Scryfall-compliant headers on mightstone client")
+    else:
+        logger.warning("Could not configure mightstone client headers")
+except Exception as e:
+    logger.error(f"Failed to configure mightstone headers: {e}")
 
 # Security
 security = HTTPBearer()
 
+# Rate limiting storage (in production, use Redis)
+rate_limit_store: Dict[str, List[datetime]] = defaultdict(list)
 
-# Pydantic models for API responses
+# Cache storage (in production, use Redis/Memcached)
+cache_store: Dict[str, tuple] = {}
+
+# Constants for rate limiting
+MAX_REQUESTS_PER_SECOND = 10
+MIN_DELAY_MS = 50  # 50ms minimum between requests
+CACHE_TTL_SECONDS = 3600  # 1 hour cache
+
+
+class RateLimiter:
+    """Rate limiter for API requests"""
+    
+    def __init__(self, max_requests: int = MAX_REQUESTS_PER_SECOND, window_seconds: int = 1):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        
+    def is_allowed(self, client_id: str) -> bool:
+        """Check if request is allowed for client"""
+        now = datetime.now()
+        
+        # Clean old entries
+        cutoff = now - timedelta(seconds=self.window_seconds)
+        rate_limit_store[client_id] = [
+            timestamp for timestamp in rate_limit_store[client_id]
+            if timestamp > cutoff
+        ]
+        
+        # Check if under limit
+        if len(rate_limit_store[client_id]) >= self.max_requests:
+            return False
+            
+        # Record this request
+        rate_limit_store[client_id].append(now)
+        return True
+
+rate_limiter = RateLimiter()
+
+
 class CardSearchRequest(BaseModel):
     query: str = Field(..., description="Search query for cards")
     limit: int = Field(default=20, description="Number of cards to return")
@@ -64,58 +127,57 @@ class ApiResponse(BaseModel):
     count: Optional[int] = None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Starting MTG API with mightstone...")
-    # The new Scryfall client doesn't need explicit initialization
-    logger.info("Mightstone client ready")
-    
-    yield
-    
-    # Shutdown
-    logger.info("Shutting down MTG API...")
+def get_cache_key(query: str, limit: int) -> str:
+    """Generate cache key for search query"""
+    return f"search:{query}:{limit}"
 
 
-# API Key authentication dependency
-async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """
-    Verify API key from Authorization header
-    Expected format: "Bearer YOUR_API_KEY"
-    """
-    expected_key = settings.api_key
+def get_cached_response(cache_key: str) -> Optional[ApiResponse]:
+    """Retrieve cached response"""
+    if cache_key in cache_store:
+        cached_data, timestamp = cache_store[cache_key]
+        if datetime.now() - timestamp < timedelta(seconds=CACHE_TTL_SECONDS):
+            logger.info(f"Cache hit for {cache_key}")
+            return cached_data
+        else:
+            # Remove expired cache
+            del cache_store[cache_key]
+    return None
+
+
+def cache_response(cache_key: str, response: ApiResponse):
+    """Cache response"""
+    cache_store[cache_key] = (response, datetime.now())
+    logger.info(f"Cached response for {cache_key}")
+
+
+async def respect_rate_limit():
+    """Add delay to respect Scryfall's rate limits"""
+    # Add 50ms delay between requests (Scryfall recommends 50-100ms)
+    await asyncio.sleep(0.05)
+
+
+async def safe_mightstone_call(func, *args, **kwargs):
+    """Make mightstone API call with rate limiting and error handling"""
+    await respect_rate_limit()
     
-    if not expected_key:
-        logger.warning("No API_KEY environment variable set!")
-        # In development, allow requests without verification
-        if settings.environment == "development":
-            return True
-    
-    if credentials.credentials != expected_key:
+    try:
+        result = await func(*args, **kwargs)
+        return result
+    except HTTPException as e:
+        if e.status_code == 429:  # Too Many Requests
+            logger.warning("Scryfall rate limit exceeded - waiting longer")
+            await asyncio.sleep(1.0)  # Wait 1 second
+            result = await func(*args, **kwargs)
+            return result
+        else:
+            raise
+    except Exception as e:
+        logger.error(f"Mightstone API error: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Scryfall API temporarily unavailable"
         )
-    return True
-
-
-# Create FastAPI app
-app = FastAPI(
-    title="MTG Deckbuilding API",
-    description="Magic: The Gathering card search and deckbuilding API using mightstone",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 def convert_scry_card_to_response(card: scryfall.Card) -> CardResponse:
@@ -157,12 +219,89 @@ def convert_scry_card_to_response(card: scryfall.Card) -> CardResponse:
     )
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting MTG API with mightstone, rate limiting, and Scryfall-compliant headers...")
+    
+    # Verify header configuration
+    try:
+        if hasattr(client, 'client') and hasattr(client.client, 'headers'):
+            current_headers = client.client.headers
+            logger.info(f"Current mightstone headers: {dict(current_headers)}")
+            
+            # Check if our headers are properly set
+            user_agent = current_headers.get('user-agent', '')
+            if 'MtgDeckbuildingAPI' in user_agent:
+                logger.info("✅ Scryfall-compliant User-Agent configured")
+            else:
+                logger.warning("⚠️ User-Agent may not be Scryfall-compliant")
+        else:
+            logger.warning("⚠️ Could not access mightstone client headers")
+            
+        logger.info("Rate limiting and caching enabled")
+    except Exception as e:
+        logger.warning(f"Could not verify header configuration: {e}")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down MTG API...")
+    cache_store.clear()
+    rate_limit_store.clear()
+
+
+async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Verify API key from Authorization header"""
+    expected_key = settings.api_key
+    
+    if not expected_key:
+        logger.warning("No API_KEY environment variable set!")
+        if settings.environment == "development":
+            return True
+    
+    if credentials.credentials != expected_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return True
+
+
+def get_client_identifier(request: Request) -> str:
+    """Get unique identifier for rate limiting (IP + API key)"""
+    # Combine IP address and API key for unique identification
+    ip = request.client.host if request.client else "unknown"
+    auth_header = request.headers.get("authorization", "")
+    api_key = auth_header.replace("Bearer ", "") if auth_header else "anonymous"
+    return f"{ip}:{api_key}"
+
+
+# Create FastAPI app
+app = FastAPI(
+    title="MTG Deckbuilding API",
+    description="Magic: The Gathering card search API with Scryfall rate limiting compliance",
+    version="1.2.0",
+    lifespan=lifespan
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 @app.get("/", response_model=ApiResponse)
 async def root():
     """Root endpoint with API information"""
     return ApiResponse(
         success=True,
-        message="MTG Deckbuilding API is running!",
+        message="MTG Deckbuilding API v1.2.0 is running! Rate-limited, cached, and Scryfall-compliant.",
         data=None
     )
 
@@ -176,41 +315,98 @@ async def health_check():
     )
 
 
+@app.get("/api/v1/status", response_model=ApiResponse)
+async def api_status():
+    """Get API status including rate limiting and header info"""
+    total_cache_items = len(cache_store)
+    total_rate_limited_clients = len(rate_limit_store)
+    
+    # Check header status
+    header_status = "unknown"
+    try:
+        if hasattr(client, 'client') and hasattr(client.client, 'headers'):
+            user_agent = client.client.headers.get('user-agent', '')
+            if 'MtgDeckbuildingAPI' in user_agent:
+                header_status = "compliant"
+            else:
+                header_status = "non-compliant"
+        else:
+            header_status = "unavailable"
+    except:
+        header_status = "error"
+    
+    return ApiResponse(
+        success=True,
+        message=f"Cache: {total_cache_items} items, Rate limits: {total_rate_limited_clients} clients, Headers: {header_status}",
+        data=None
+    )
+
+
 @app.post("/api/v1/cards/search", response_model=ApiResponse)
 async def search_cards(
     request: CardSearchRequest,
+    http_request: Request,
     _: bool = Depends(verify_api_key)
 ):
     """
-    Search for Magic: The Gathering cards using mightstone's Scryfall integration
+    Search for Magic: The Gathering cards with rate limiting, caching, and Scryfall compliance
     """
     try:
-        # Search using mightstone's Scryfall service
-        # The search method returns an async generator, so we need to collect cards
+        # Rate limiting check
+        client_id = get_client_identifier(http_request)
+        if not rate_limiter.is_allowed(client_id):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Rate limit exceeded. Maximum {MAX_REQUESTS_PER_SECOND} requests per second.",
+                headers={
+                    "Retry-After": "1",
+                    "X-RateLimit-Limit": str(MAX_REQUESTS_PER_SECOND)
+                }
+            )
+        
+        # Check cache first
+        cache_key = get_cache_key(request.query, request.limit)
+        cached_response = get_cached_response(cache_key)
+        if cached_response:
+            return cached_response
+        
+        # Make rate-limited API call with proper headers
         cards = []
         async for card in client.search(request.query):
+            # Respect rate limit between each card fetch
+            await respect_rate_limit()
             cards.append(card)
             if len(cards) >= request.limit:
                 break
         
         if not cards:
-            return ApiResponse(
+            response = ApiResponse(
                 success=True,
                 data_list=[],
                 message="No cards found",
                 count=0
             )
+            # Cache empty results too
+            cache_response(cache_key, response)
+            return response
         
         # Convert to response format
         card_responses = [convert_scry_card_to_response(card) for card in cards]
         
-        return ApiResponse(
+        response = ApiResponse(
             success=True,
             data_list=card_responses,
             message=f"Found {len(card_responses)} cards",
             count=len(card_responses)
         )
         
+        # Cache successful response
+        cache_response(cache_key, response)
+        
+        return response
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error searching cards: {str(e)}")
         raise HTTPException(
@@ -222,13 +418,31 @@ async def search_cards(
 @app.get("/api/v1/cards/{card_id}", response_model=ApiResponse)
 async def get_card_by_id(
     card_id: str,
+    http_request: Request,
     _: bool = Depends(verify_api_key)
 ):
-    """
-    Get detailed information about a specific card by Scryfall ID
-    """
+    """Get detailed information about a specific card with full compliance"""
     try:
-        card = await client.card(card_id)
+        # Rate limiting check
+        client_id = get_client_identifier(http_request)
+        if not rate_limiter.is_allowed(client_id):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Rate limit exceeded. Maximum {MAX_REQUESTS_PER_SECOND} requests per second.",
+                headers={
+                    "Retry-After": "1",
+                    "X-RateLimit-Limit": str(MAX_REQUESTS_PER_SECOND)
+                }
+            )
+        
+        # Check cache
+        cache_key = f"card:{card_id}"
+        cached_response = get_cached_response(cache_key)
+        if cached_response and cached_response.data:
+            return cached_response
+        
+        # Make rate-limited API call with Scryfall-compliant headers
+        card = await safe_mightstone_call(client.card, card_id)
         
         if not card:
             raise HTTPException(
@@ -238,11 +452,16 @@ async def get_card_by_id(
         
         card_response = convert_scry_card_to_response(card)
         
-        return ApiResponse(
+        response = ApiResponse(
             success=True,
             data=card_response,
             message="Card retrieved successfully"
         )
+        
+        # Cache the response
+        cache_response(cache_key, response)
+        
+        return response
         
     except HTTPException:
         raise
@@ -256,16 +475,26 @@ async def get_card_by_id(
 
 @app.get("/api/v1/cards/random", response_model=ApiResponse)
 async def get_random_card(
+    http_request: Request,
     query: Optional[str] = None,
     _: bool = Depends(verify_api_key)
 ):
-    """
-    Get a random Magic: The Gathering card
-    Optional query parameter to filter random cards
-    """
+    """Get a random card with full compliance"""
     try:
-        # Get random card using mightstone
-        card = await client.random(query)
+        # Rate limiting check
+        client_id = get_client_identifier(http_request)
+        if not rate_limiter.is_allowed(client_id):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Rate limit exceeded. Maximum {MAX_REQUESTS_PER_SECOND} requests per second.",
+                headers={
+                    "Retry-After": "1",
+                    "X-RateLimit-Limit": str(MAX_REQUESTS_PER_SECOND)
+                }
+            )
+        
+        # Make rate-limited API call with Scryfall-compliant headers
+        card = await safe_mightstone_call(client.random, query)
         
         if not card:
             raise HTTPException(
@@ -294,12 +523,10 @@ async def get_random_card(
 @app.get("/api/v1/cards/autocomplete", response_model=ApiResponse)
 async def autocomplete_card_name(
     q: str,
+    http_request: Request,
     _: bool = Depends(verify_api_key)
 ):
-    """
-    Get autocomplete suggestions for card names
-    Query parameter: q (query string)
-    """
+    """Get autocomplete suggestions with full compliance"""
     try:
         if not q or len(q.strip()) < 2:
             return ApiResponse(
@@ -309,17 +536,42 @@ async def autocomplete_card_name(
                 count=0
             )
         
-        # Use mightstone's autocomplete functionality
-        catalog = await client.autocomplete_async(q.strip())
-        suggestions = catalog.data[:10]  # Limit to 10 suggestions
+        # Rate limiting check
+        client_id = get_client_identifier(http_request)
+        if not rate_limiter.is_allowed(client_id):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Rate limit exceeded. Maximum {MAX_REQUESTS_PER_SECOND} requests per second.",
+                headers={
+                    "Retry-After": "1",
+                    "X-RateLimit-Limit": str(MAX_REQUESTS_PER_SECOND)
+                }
+            )
         
-        return ApiResponse(
+        # Check cache
+        cache_key = f"autocomplete:{q.strip()}"
+        cached_response = get_cached_response(cache_key)
+        if cached_response:
+            return cached_response
+        
+        # Make rate-limited API call with Scryfall-compliant headers
+        catalog = await safe_mightstone_call(client.autocomplete_async, q.strip())
+        suggestions = catalog.data[:10]
+        
+        response = ApiResponse(
             success=True,
-            data_list=[{"name": name} for name in suggestions],  # Limit to 10 suggestions
+            data_list=[{"name": name} for name in suggestions],
             message=f"Found {len(suggestions)} suggestions",
             count=len(suggestions)
         )
         
+        # Cache the response
+        cache_response(cache_key, response)
+        
+        return response
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in autocomplete for '{q}': {str(e)}")
         raise HTTPException(
