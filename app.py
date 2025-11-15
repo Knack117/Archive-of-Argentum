@@ -317,6 +317,23 @@ async def get_theme(theme_slug: str) -> PageTheme:
 # Exception handlers and server main remain unchanged...
 # ----------------------------------------------
 
+
+# --------------------------------------------------------------------
+# Health endpoint for Render/hosting environment
+# --------------------------------------------------------------------
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint expected by Render. Returns a simple OK
+    response to indicate the service is running.
+    """
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "service": "MTG Deckbuilding API"
+    }
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """Handle HTTP exceptions with proper error format"""
