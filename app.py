@@ -1291,6 +1291,34 @@ def _parse_theme_slugs_from_html(html_content: str) -> Set[str]:
 async def _get_available_theme_slugs(force_refresh: bool = False) -> Set[str]:
     """Fetch and cache the list of available EDHRec theme slugs from the tags index."""
 
+    return sanitized_slug
+
+
+def _extract_next_data_from_html(html_content: str) -> Optional[Dict[str, Any]]:
+    """Extract the Next.js data blob embedded in EDHRec theme pages."""
+    if not html_content:
+        return None
+
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+        script_tag = soup.find("script", id="__NEXT_DATA__")
+        if not script_tag or not script_tag.string:
+            return None
+
+        return json.loads(script_tag.string)
+    except json.JSONDecodeError as exc:
+        logger.warning(f"Failed to decode __NEXT_DATA__ JSON: {exc}")
+        return None
+    except Exception as exc:
+        logger.warning(f"Failed to extract __NEXT_DATA__ from theme page: {exc}")
+        return None
+
+
+async def _fetch_theme_document(
+    sanitized_slug: str,
+) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    """Fetch and validate theme data directly from the EDHRec HTML page."""
+
     if not http_session:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="HTTP session not available")
 
