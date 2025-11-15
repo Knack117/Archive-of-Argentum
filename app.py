@@ -1,5 +1,4 @@
-"""
-MTG Deckbuilding API with Rate Limiting, Caching, and Scryfall-Compliant Headers
+"""MTG Deckbuilding API with Rate Limiting, Caching, and Scryfall-Compliant Headers
 FastAPI application with proper API etiquette and comprehensive compliance
 """
 
@@ -39,7 +38,7 @@ logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 EDHREC_BASE_URL = "https://edhrec.com/"
 COMMANDERSPELLBOOK_BASE_URL = "https://backend.commanderspellbook.com/"
 # Public search base URL for Commander Spellbook.
-# Use this front-end URL to direct users to a human‑friendly search results page.
+# Use this front-end URL to direct users to a human-friendly search results page.
 COMMANDERSPELLBOOK_PUBLIC_SEARCH_URL = "https://commanderspellbook.com/search/?q="
 EDHREC_ALLOWED_HOSTS = {"edhrec.com", "www.edhrec.com"}
 THEME_INDEX_CACHE_TTL_SECONDS = 6 * 3600  # Refresh the theme catalog every 6 hours
@@ -1457,8 +1456,6 @@ async def root():
         "status": "/api/v1/status"
     }
 
-# status, card search, help, etc. endpoints remain unchanged...
-
 # ----------------------------------------------
 # New simplified endpoints (replacing old ones)
 # ----------------------------------------------
@@ -1526,15 +1523,16 @@ async def get_commander_summary(
             all_tags_output.append(CommanderTag(
                 tag=tag_data.get("tag"),
                 count=tag_data.get("count"),
-                link=tag_data.get("link")
+                link=tag_data.get("link") or tag_data.get("url")
             ))
 
     # Build combos list
     combos_output = []
     for combo_data in commander_data.get("combos", []):
         if isinstance(combo_data, dict):
+            combo_text = combo_data.get("combo") or combo_data.get("name") or combo_data.get("description")
             combos_output.append(CommanderCombo(
-                combo=combo_data.get("combo"),
+                combo=combo_text,
                 url=combo_data.get("url")
             ))
 
@@ -1593,7 +1591,6 @@ async def get_available_tags(api_key: str = Depends(verify_api_key)) -> Dict[str
             # Find the __NEXT_DATA__ script tag
             next_data_script = soup.find('script', id='__NEXT_DATA__')
             if next_data_script and next_data_script.string:
-                import json
                 json_data = json.loads(next_data_script.string)
                 
                 # Navigate to the cardlists data
@@ -1688,40 +1685,126 @@ async def get_theme(theme_slug: str, api_key: str = Depends(verify_api_key)) -> 
 # Commander Spellbook Combo Fetching Function
 # --------------------------------------------------------------------
 
+async def fetch_combo_details_from_page(combo_id: str) -> Dict[str, Any]:
+    """
+    Fetch a combo page and extract card names, results, and other metadata.
+    Returns an empty dict if parsing fails.
+    """
+    if not combo_id:
+        return {}
+    combo_url = f"https://commanderspellbook.com/combo/{combo_id}/"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(combo_url)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            next_data = soup.find('script', id='__NEXT_DATA__', type='application/json')
+            if next_data and next_data.string:
+                data = json.loads(next_data.string)
+                combo = data.get('props', {}).get('pageProps', {}).get('combo', {})
+                # Extract card names
+                cards = []
+                for use in combo.get('uses', []):
+                    card_name = use.get('card', {}).get('name')
+                    if card_name:
+                        cards.append(card_name)
+                # Extract result names
+                results = []
+                for prod in combo.get('produces', []):
+                    feature_name = prod.get('feature', {}).get('name', '')
+                    if feature_name:
+                        results.append(feature_name)
+                combo_name = " | ".join(cards[:3]) if cards else None
+                decks_edhrec = combo.get('decksEdhrec', combo.get('popularity'))
+                return {
+                    "cards_in_combo": cards,
+                    "results_in_combo": results,
+                    "combo_name": combo_name,
+                    "decks_edhrec": decks_edhrec,
+                    "combo_url": combo_url,
+                }
+    except Exception as exc:
+        logger.error(f"Error fetching combo page {combo_id}: {exc}")
+    return {}
+
+def parse_variant_to_combo_result(variant: Dict[str, Any]) -> Optional[ComboResult]:
+    """
+    Parse a single variant from Commander Spellbook API into our ComboResult format.
+    """
+    try:
+        combo_id = variant.get('id')
+        identity = variant.get('identity', '')
+        # Extract card names used in the combo
+        cards: List[str] = []
+        for use in variant.get('uses', []):
+            card_info = use.get('card', {})
+            name = card_info.get('name')
+            if name:
+                cards.append(name)
+
+        # Extract results/output produced by the combo
+        results: List[str] = []
+        for produce in variant.get('produces', []):
+            feature_info = produce.get('feature', {})
+            feature_name = feature_info.get('name', '')
+            if feature_name:
+                results.append(feature_name)
+
+        combo_name = " | ".join(cards[:3]) if cards else None
+        popularity = (
+            variant.get("decksEdhrec")
+            or variant.get("popularity")
+            or variant.get("numDecks")
+        )
+
+        combo_url = f"https://commanderspellbook.com/combo/{combo_id}/" if combo_id else None
+
+        return ComboResult(
+            combo_id=combo_id,
+            combo_name=combo_name,
+            color_identity=[identity] if identity else [],
+            cards_in_combo=cards,
+            results_in_combo=results,
+            decks_edhrec=popularity,
+            variants=variant.get('variantCount'),
+            combo_url=combo_url,
+            price_info=variant.get('prices', {}) or {}
+        )
+    except Exception as e:
+        logger.error(f"Error parsing variant: {e}")
+        return None
+
 async def fetch_commander_combos(query: str, search_type: str = "commander") -> List[ComboResult]:
     """
-    Fetch combo data from Commander Spellbook API using the official backend.
+    Fetch combo data from Commander Spellbook API using the official backend
+    and enrich with data from individual combo pages when needed.
     """
     if not query or not query.strip():
         return []
-    
-    # Clean and format query
+
     clean_query = query.strip()
     encoded_query = quote_plus(clean_query)
-    
-       # Build API URL using variants endpoint with q parameter
+
     api_url = f"{COMMANDERSPELLBOOK_BASE_URL}variants?q={encoded_query}"
-    
+    combo_results: List[ComboResult] = []
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(api_url)
             response.raise_for_status()
-            
+
             data = response.json()
-            combo_results: List[ComboResult] = []
-            
-            # Parse the API response from the backend
+
             if isinstance(data, dict) and 'results' in data:
                 for variant in data.get('results', []):
                     combo_result = parse_variant_to_combo_result(variant)
                     if combo_result:
                         combo_results.append(combo_result)
-            
+
             # If the API didn't return results, fall back to parsing the public search page.
             if not combo_results:
                 search_url = f"{COMMANDERSPELLBOOK_PUBLIC_SEARCH_URL}{encoded_query}"
                 try:
-                    # Fetch the public search page and parse combos from the HTML.
                     html_resp = await client.get(search_url)
                     html_resp.raise_for_status()
                     html_content = html_resp.text
@@ -1729,68 +1812,28 @@ async def fetch_commander_combos(query: str, search_type: str = "commander") -> 
                 except Exception as html_exc:
                     logger.error(f"Error fetching combos from search page for {query}: {html_exc}")
                     # If parsing fails, return the empty list
-            
-            return combo_results
-            
+
+        # Enrich results with combo page details if needed
+        for result in combo_results:
+            if result.combo_id and (not result.cards_in_combo or not result.results_in_combo):
+                details = await fetch_combo_details_from_page(result.combo_id)
+                if details:
+                    if not result.combo_name:
+                        result.combo_name = details.get("combo_name")
+                    if not result.cards_in_combo:
+                        result.cards_in_combo = details.get("cards_in_combo", [])
+                    if not result.results_in_combo:
+                        result.results_in_combo = details.get("results_in_combo", [])
+                    if result.decks_edhrec is None:
+                        result.decks_edhrec = details.get("decks_edhrec")
+                    if not result.combo_url:
+                        result.combo_url = details.get("combo_url")
+
+        return combo_results
+
     except Exception as e:
         logger.error(f"Error fetching combos for {query}: {e}")
         return []
-
-
-def parse_variant_to_combo_result(variant: Dict[str, Any]) -> Optional[ComboResult]:
-    """
-    Parse a single variant from Commander Spellbook API into our ComboResult format.
-    """
-    try:
-        # Extract basic info
-        combo_id = variant.get('id')
-        identity = variant.get('identity', '')
-        
-        # Extract cards used
-        cards = []
-        for use in variant.get('uses', []):
-            card_info = use.get('card', {})
-            cards.append(ComboCard(
-                name=card_info.get('name', ''),
-                url=card_info.get('imageUriFrontSmall')
-            ))
-        
-        # Extract features produced
-        features = []
-        for produce in variant.get('produces', []):
-            feature_info = produce.get('feature', {})
-            feature_name = feature_info.get('name', '')
-            if feature_name:
-                features.append(feature_name)
-        
-        # Get combo description
-        description = variant.get('description', '')
-        
-        # Get legality info
-        legalities = variant.get('legalities', {})
-        is_legal_commander = legalities.get('commander', False)
-        
-        # Get popularity and bracket
-        popularity = variant.get('popularity', 0)
-        bracket_tag = variant.get('bracketTag', '')
-        
-        # Get price info if available
-        prices = variant.get('prices', {})
-        combo_url = None  # The API doesn't provide direct URLs to individual combos
-        
-        return ComboResult(
-            combo_id=combo_id,
-            color_identity=[identity] if identity else [],
-            cards=features,
-            results=features,
-            decks_edhrec=popularity,
-            variants_count=variant.get('variantCount'),
-            combo_url=combo_url
-        )
-        
-    except Exception as e:
-        logger.error(f"Error parsing variant: {e}")
-        return None
 
 # --------------------------------------------------------------------
 # Test and Debug Function
@@ -1859,51 +1902,28 @@ async def parse_combo_results_from_html(html_content: str) -> List[ComboResult]:
     Parse combo results from Commander Spellbook HTML content.
     """
     soup = BeautifulSoup(html_content, 'html.parser')
-    combo_results = []
+    combo_results: List[ComboResult] = []
     
-    # Method 1: Look for JSON data in script tags
-    script_tags = soup.find_all('script')
-    for script in script_tags:
-        if script.string:
-            try:
-                # Try to find Next.js data
-                if '__NEXT_DATA__' in script.string:
-                    import json
-                    data = json.loads(script.string)
-                    
-                    # Navigate the complex Next.js data structure
-                    # Based on debug info, we have: props, page, query, buildId, etc.
-                    props = data.get('props', {})
-                    
-                    # Look for pageProps first
-                    page_props = props.get('pageProps', {})
-                    if page_props:
-                        # Try to find data container
-                        container = page_props.get('data', {}).get('container', {})
-                        if container and 'json_dict' in container:
-                            json_dict = container['json_dict']
-                            
-                            # Look for cardlists containing search results
-                            cardlists = json_dict.get('cardlists', [])
-                            for cardlist in cardlists:
-                                if 'cardviews' in cardlist:
-                                    for combo_card in cardlist['cardviews']:
-                                        combo_result = parse_combo_card(combo_card)
-                                        if combo_result:
-                                            combo_results.append(combo_result)
-                    
-                    # If no data in pageProps, try other paths
-                    if not combo_results:
-                        # Check if data is directly in props or other locations
-                        # Look for any dictionaries that might contain combo data
-                        all_results = extract_combos_from_json(data)
-                        combo_results.extend(all_results)
-            
-            except (json.JSONDecodeError, KeyError, TypeError) as e:
-                logger.warning(f"Error parsing JSON from script: {e}")
-                continue
-    
-    # Method 2: Extract from text using improved regex patterns
+    # Method 1: Look for JSON data in __NEXT_DATA__ script tag
+    next_data_script = soup.find('script', id='__NEXT_DATA__', type='application/json')
+    if next_data_script and next_data_script.string:
+        try:
+            data = json.loads(next_data_script.string)
+            props = data.get('props', {})
+            page_props = props.get('pageProps', {})
+            container = page_props.get('data', {}).get('container', {})
+            json_dict = container.get('json_dict', {})
+            cardlists = json_dict.get('cardlists', [])
+            for cardlist in cardlists:
+                if 'cardviews' in cardlist:
+                    for combo_card in cardlist['cardviews']:
+                        combo_result = parse_combo_card(combo_card)
+                        if combo_result:
+                            combo_results.append(combo_result)
+        except Exception as e:
+            logger.warning(f"Error parsing combo JSON from HTML: {e}")
+
+    # Method 2: Extract from text using regex patterns if JSON approach failed
     if not combo_results:
         text_content = soup.get_text()
         text_results = extract_combos_from_text(text_content)
@@ -1911,7 +1931,7 @@ async def parse_combo_results_from_html(html_content: str) -> List[ComboResult]:
     
     # Remove duplicates and return
     seen_ids = set()
-    unique_results = []
+    unique_results: List[ComboResult] = []
     for result in combo_results:
         result_id = result.combo_id or hash(str(result.cards_in_combo) + str(result.results_in_combo))
         if result_id not in seen_ids:
@@ -1924,7 +1944,7 @@ def extract_combos_from_json(data: Any) -> List[ComboResult]:
     """
     Recursively search through JSON data for combo information.
     """
-    combo_results = []
+    combo_results: List[ComboResult] = []
     
     def search_dict(obj: Any, path: str = ""):
         if isinstance(obj, dict):
@@ -1960,10 +1980,9 @@ def parse_combo_card_from_json(card_data: Dict[str, Any]) -> Optional[ComboResul
     Parse combo card data from a JSON structure.
     """
     try:
-        # Look for various patterns in the JSON data
-        cards = []
-        results = []
-        color_identity = []
+        cards: List[str] = []
+        results: List[str] = []
+        color_identity: List[str] = []
         
         # Extract cards
         if 'name' in card_data:
@@ -2022,7 +2041,7 @@ def parse_combo_card(card_data: Dict[str, Any]) -> Optional[ComboResult]:
     """
     try:
         # Extract color identity
-        color_identity = []
+        color_identity: List[str] = []
         if 'color_identity' in card_data:
             colors = card_data['color_identity']
             if isinstance(colors, list):
@@ -2032,7 +2051,7 @@ def parse_combo_card(card_data: Dict[str, Any]) -> Optional[ComboResult]:
                 color_identity = [c.strip() for c in colors.split(',')]
         
         # Extract cards in combo
-        cards_in_combo = []
+        cards_in_combo: List[str] = []
         if 'cards' in card_data:
             for card in card_data['cards']:
                 if isinstance(card, dict) and 'name' in card:
@@ -2041,7 +2060,7 @@ def parse_combo_card(card_data: Dict[str, Any]) -> Optional[ComboResult]:
                     cards_in_combo.append(card)
         
         # Extract results
-        results_in_combo = []
+        results_in_combo: List[str] = []
         if 'results' in card_data:
             for result in card_data['results']:
                 if isinstance(result, dict) and 'description' in result:
@@ -2081,12 +2100,12 @@ def extract_combos_from_text(text_content: str) -> List[ComboResult]:
     """
     Extract combo information from text content using regex patterns.
     """
-    combo_results = []
+    combo_results: List[ComboResult] = []
     
     try:
         # Split into sections that might contain combo data
         lines = text_content.split('\n')
-        current_combo = {}
+        current_combo: Dict[str, Any] = {}
         
         for line in lines:
             line = line.strip()
@@ -2097,7 +2116,7 @@ def extract_combos_from_text(text_content: str) -> List[ComboResult]:
             combo_url_match = re.search(r'/combo/(\d+-\d+(?:-\d+)*)/', line)
             if combo_url_match:
                 # Save previous combo if exists
-                if current_combo.get('cards') and current_combo.get('results'):
+                if current_combo.get('cards') and current_combo.get('results_in_combo'):
                     combo_result = create_combo_from_text_data(current_combo)
                     if combo_result:
                         combo_results.append(combo_result)
@@ -2184,7 +2203,7 @@ def create_combo_from_text_data(combo_data: Dict[str, Any]) -> Optional[ComboRes
 # --------------------------------------------------------------------
 
 @app.get("/api/v1/combos/commander/{commander_name}", response_model=ComboSearchResponse)
-async def get_commander_combos(
+async def get_commander_combos_endpoint(
     commander_name: str, 
     api_key: str = Depends(verify_api_key)
 ) -> ComboSearchResponse:
@@ -2277,11 +2296,6 @@ async def search_combos_by_card(
             status_code=500,
             detail=f"Failed to search combos for card '{card_name}': {str(exc)}"
         )
-
-# ----------------------------------------------
-# Exception handlers and server main remain unchanged...
-# ----------------------------------------------
-
 
 # --------------------------------------------------------------------
 # Health endpoint for Render/hosting environment
