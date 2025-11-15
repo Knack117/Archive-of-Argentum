@@ -246,6 +246,9 @@ async def scrape_edhrec_commander_page(commander_url: str) -> Dict[str, Any]:
                 "commander_url": commander_url,
                 "commander_tags": json_data.get("commander_tags", []),
                 "top_10_tags": json_data.get("top_10_tags", []),
+                "all_tags": json_data.get("all_tags", []),
+                "combos": json_data.get("combos", []),
+                "similar_commanders": json_data.get("similar_commanders", []),
                 "categories": json_data.get("categories", {}),
                 "timestamp": datetime.utcnow().isoformat()
             }
@@ -276,12 +279,51 @@ def extract_commander_json_data(soup: BeautifulSoup, build_id: str) -> Dict[str,
                 
                 # Extract commander tags from panels.taglinks
                 panels = page_data.get('panels', {})
-                commander_tags = []
+                
+                # Extract ALL tags with their counts
+                all_tags = []
                 taglinks = panels.get('taglinks', [])
                 if isinstance(taglinks, list):
-                    # Get top 10 tags sorted by count
-                    sorted_tags = sorted(taglinks, key=lambda x: x.get('count', 0), reverse=True)[:10]
-                    commander_tags = [tag.get('value', '') for tag in sorted_tags if tag.get('value')]
+                    # Sort all tags by count
+                    sorted_tags = sorted(taglinks, key=lambda x: x.get('count', 0), reverse=True)
+                    for tag in sorted_tags:
+                        if tag.get('value'):
+                            all_tags.append({
+                                "tag": tag.get('value', ''),
+                                "count": tag.get('count', 0),
+                                "url": tag.get('href', '')
+                            })
+                
+                # Top 10 tags for backward compatibility
+                top_10_tags = [tag['tag'] for tag in all_tags[:10]]
+                
+                # Extract related combos
+                combos = []
+                combocounts = panels.get('combocounts', [])
+                if isinstance(combocounts, list):
+                    for combo in combocounts:
+                        if isinstance(combo, dict):
+                            combos.append({
+                                "name": combo.get('value', ''),
+                                "description": combo.get('alt', ''),
+                                "url": combo.get('href', '')
+                            })
+                
+                # Extract similar commanders
+                similar_commanders = []
+                similar = page_data.get('similar', [])
+                if isinstance(similar, list):
+                    for commander in similar:
+                        if isinstance(commander, dict):
+                            similar_commanders.append({
+                                "name": commander.get('name', ''),
+                                "color_identity": commander.get('color_identity', []),
+                                "cmc": commander.get('cmc'),
+                                "primary_type": commander.get('primary_type', ''),
+                                "rarity": commander.get('rarity', ''),
+                                "image_uris": commander.get('image_uris', {}),
+                                "prices": commander.get('prices', {})
+                            })
                 
                 # Extract categories and cards from container.json_dict.cardlists
                 container = page_data.get('container', {})
@@ -325,8 +367,11 @@ def extract_commander_json_data(soup: BeautifulSoup, build_id: str) -> Dict[str,
                         }
                 
                 return {
-                    "commander_tags": commander_tags,
-                    "top_10_tags": commander_tags,  # Same as commander_tags for now
+                    "commander_tags": top_10_tags,
+                    "top_10_tags": top_10_tags,  # Backward compatibility
+                    "all_tags": all_tags,  # NEW: All tags with counts
+                    "combos": combos,  # NEW: Related combos
+                    "similar_commanders": similar_commanders,  # NEW: Similar commanders
                     "categories": categories
                 }
                 
@@ -757,35 +802,79 @@ async def fetch_theme_tag(theme_name: str, color_identity: Optional[str] = None)
             html_content = response.text
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            # Extract theme data from page
-            sections, is_summary = extract_theme_sections_from_json({
-                "pageProps": {
-                    "data": {
-                        "container": {
-                            "json_dict": {
-                                "cardlists": extract_cardlists_from_html(soup)
+            # Extract theme data from __NEXT_DATA__ JSON (same approach as commander pages)
+            next_data_script = soup.find('script', {'id': '__NEXT_DATA__', 'type': 'application/json'})
+            
+            collections = []
+            header = f"{theme_name.title()} Theme"
+            description = f"EDHRec {theme_name} theme data"
+            
+            if next_data_script and next_data_script.string:
+                try:
+                    data = json.loads(next_data_script.string)
+                    page_data = data.get('props', {}).get('pageProps', {}).get('data', {})
+                    
+                    # Get header and description from page data
+                    header = page_data.get('header', header)
+                    description = page_data.get('description', description)
+                    
+                    # Extract cardlists from container.json_dict.cardlists
+                    container = page_data.get('container', {})
+                    json_dict = container.get('json_dict', {})
+                    cardlists = json_dict.get('cardlists', [])
+                    
+                    # Build collections from cardlists
+                    for cardlist in cardlists:
+                        if not isinstance(cardlist, dict):
+                            continue
+                        
+                        list_header = cardlist.get('header', 'Unknown')
+                        cardviews = cardlist.get('cardviews', [])
+                        
+                        if not cardviews:
+                            continue
+                        
+                        items = []
+                        for card_data in cardviews:
+                            if isinstance(card_data, dict):
+                                card_name = card_data.get('name', 'Unknown')
+                                items.append(ThemeItem(name=card_name))
+                        
+                        if items:
+                            collections.append(ThemeCollection(
+                                header=list_header,
+                                items=items
+                            ))
+                            
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.error(f"Error parsing theme JSON data: {e}")
+                    # Fall back to HTML parsing if JSON fails
+                    sections, is_summary = extract_theme_sections_from_json({
+                        "pageProps": {
+                            "data": {
+                                "container": {
+                                    "json_dict": {
+                                        "cardlists": extract_cardlists_from_html(soup)
+                                    }
+                                }
                             }
                         }
-                    }
-                }
-            })
-            
-            # Build collections
-            collections = []
-            for section_name, section_data in sections.items():
-                if section_data["cards"]:
-                    items = []
-                    for card in section_data["cards"]:
-                        items.append(ThemeItem(name=card.get("name", "Unknown")))
+                    })
                     
-                    collections.append(ThemeCollection(
-                        header=section_name.title(),
-                        items=items
-                    ))
+                    for section_name, section_data in sections.items():
+                        if section_data["cards"]:
+                            items = []
+                            for card in section_data["cards"]:
+                                items.append(ThemeItem(name=card.get("name", "Unknown")))
+                            
+                            collections.append(ThemeCollection(
+                                header=section_name.title(),
+                                items=items
+                            ))
             
             return PageTheme(
-                header=f"{theme_name.title()} Theme",
-                description=f"EDHRec {theme_name} theme data",
+                header=header,
+                description=description,
                 tags=[theme_name],
                 container=ThemeContainer(collections=collections),
                 source_url=url
