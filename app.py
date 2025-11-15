@@ -28,7 +28,7 @@ from mightstone.services import scryfall
 from config import settings
 from bs4 import BeautifulSoup
 import re
-from urllib.parse import urlparse, unquote, urljoin
+from urllib.parse import urlparse, unquote, urljoin, quote_plus
 
 
 EDHREC_BASE_URL = "https://edhrec.com/"
@@ -156,6 +156,39 @@ def _gather_section_card_names(source: Any) -> List[str]:
     
     return deduped
 
+
+def _safe_int(value: Any) -> Optional[int]:
+    """Convert a value to int when possible."""
+    if value is None:
+        return None
+
+    try:
+        if isinstance(value, str):
+            # Remove common formatting characters
+            cleaned = value.replace(",", "").strip()
+            if not cleaned:
+                return None
+            return int(float(cleaned))
+        return int(float(value))
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    """Convert a value to float when possible."""
+    if value is None:
+        return None
+
+    try:
+        if isinstance(value, str):
+            cleaned = value.replace(",", "").strip()
+            if not cleaned:
+                return None
+            return float(cleaned)
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
 def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, List[str]]:
     """Extract commander card sections from Next.js JSON payload using correct EDHRec structure"""
     sections = {
@@ -257,7 +290,7 @@ def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, L
 def extract_commander_tags_from_json(payload: Dict[str, Any]) -> List[str]:
     """Extract commander tags from Next.js JSON payload using correct EDHRec structure"""
     tags = []
-    
+
     try:
         # Navigate to the correct path: pageProps -> data -> panels -> links (no json_dict)
         page_props = payload.get("pageProps", {})
@@ -306,9 +339,191 @@ def extract_commander_tags_from_json(payload: Dict[str, Any]) -> List[str]:
     
     except Exception as e:
         logger.warning(f"Error extracting commander tags: {e}")
-    
+
     logger.info(f"Total tags extracted: {len(tags)}")
     return normalize_commander_tags(tags)
+
+
+def _convert_cardview_to_theme_card(card: Dict[str, Any], position: int) -> Optional[Dict[str, Any]]:
+    """Convert EDHRec cardview entry into a normalized theme card structure."""
+    if not isinstance(card, dict):
+        return None
+
+    name = _clean_text(card.get("name") or card.get("label") or card.get("value") or "")
+    if not name:
+        return None
+
+    edhrec_url = card.get("url")
+    if edhrec_url:
+        edhrec_url = urljoin(EDHREC_BASE_URL, edhrec_url.lstrip("/"))
+
+    inclusion_count = _safe_int(card.get("num_decks") or card.get("inclusion") or card.get("decks"))
+    potential_decks = _safe_int(card.get("potential_decks") or card.get("potential") or card.get("sample_size"))
+
+    inclusion_percentage = None
+    if inclusion_count is not None and potential_decks:
+        try:
+            inclusion_percentage = f"{(inclusion_count / max(potential_decks, 1)) * 100:.1f}%"
+        except ZeroDivisionError:
+            inclusion_percentage = None
+
+    synergy_value = _safe_float(card.get("synergy") or card.get("synergy_score") or card.get("synergy_delta"))
+    synergy_percentage = f"{synergy_value * 100:.1f}%" if synergy_value is not None else None
+
+    result = {
+        "name": name,
+        "rank": position,
+        "card_id": card.get("id"),
+        "sanitized": card.get("sanitized"),
+        "edhrec_url": edhrec_url,
+        "scryfall_uri": f"https://scryfall.com/search?q={quote_plus(name)}",
+        "inclusion_count": inclusion_count,
+        "potential_decks": potential_decks,
+        "inclusion_percentage": inclusion_percentage,
+        "synergy_percentage": synergy_percentage,
+    }
+
+    trend = _safe_float(card.get("trend_zscore") or card.get("trend"))
+    if trend is not None:
+        result["trend_score"] = trend
+
+    return result
+
+
+def extract_theme_sections_from_json(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Extract theme card sections from EDHRec Next.js payload."""
+    sections: Dict[str, Dict[str, Any]] = {}
+
+    try:
+        page_props = payload.get("pageProps", {})
+        data = page_props.get("data", {})
+        container = data.get("container", {})
+        json_dict = container.get("json_dict", {})
+        cardlists = json_dict.get("cardlists", [])
+
+        for cardlist in cardlists:
+            if not isinstance(cardlist, dict):
+                continue
+
+            header = _clean_text(cardlist.get("header") or "Cards")
+            if not header:
+                header = "Cards"
+
+            key = re.sub(r"[^a-z0-9]+", "_", header.lower()).strip("_") or "cards"
+
+            cards: List[Dict[str, Any]] = []
+            for idx, card in enumerate(cardlist.get("cardviews", []), start=1):
+                converted = _convert_cardview_to_theme_card(card, idx)
+                if converted:
+                    cards.append(converted)
+
+            sections[key] = {
+                "category_name": header,
+                "total_cards": len(cards),
+                "cards": cards,
+            }
+
+    except Exception as exc:
+        logger.warning(f"Failed to extract theme sections: {exc}")
+
+    return sections
+
+
+def _simplify_related_entries(entries: Any) -> List[Dict[str, Any]]:
+    """Simplify related theme/card data into name/url dictionaries."""
+    simplified: List[Dict[str, Any]] = []
+
+    if isinstance(entries, list):
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+
+            name = _clean_text(item.get("name") or item.get("value") or item.get("label") or item.get("title") or "")
+            if not name:
+                continue
+
+            url_value = item.get("url") or item.get("href")
+            if url_value:
+                url_value = urljoin(EDHREC_BASE_URL, url_value.lstrip("/"))
+
+            entry: Dict[str, Any] = {"name": name}
+            if url_value:
+                entry["url"] = url_value
+
+            if "rank" in item:
+                rank_value = _safe_int(item.get("rank"))
+                if rank_value is not None:
+                    entry["rank"] = rank_value
+
+            if "percentage" in item:
+                entry["percentage"] = item["percentage"]
+
+            simplified.append(entry)
+
+    return simplified
+
+
+def extract_theme_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract metadata for a theme page."""
+    metadata: Dict[str, Any] = {
+        "theme_name": None,
+        "description": None,
+        "color_identity": [],
+        "total_decks": None,
+        "average_deck_size": None,
+        "popularity_rank": None,
+        "top_commanders": [],
+        "related_themes": [],
+    }
+
+    try:
+        page_props = payload.get("pageProps", {})
+        data = page_props.get("data", {})
+        container = data.get("container", {})
+        seo = data.get("seo", {})
+
+        theme_name = data.get("theme_name") or container.get("title") or seo.get("title")
+        if not theme_name:
+            breadcrumbs = container.get("breadcrumb", [])
+            if breadcrumbs:
+                last = breadcrumbs[-1]
+                if isinstance(last, dict):
+                    theme_name = next(iter(last.values()), None)
+
+        if isinstance(theme_name, str) and "(" in theme_name:
+            # Clean suffix like "(Theme)"
+            theme_name = theme_name.replace("(Theme)", "").strip()
+
+        metadata["theme_name"] = theme_name
+
+        description = container.get("description") or data.get("description") or seo.get("description")
+        metadata["description"] = description
+
+        color_identity = data.get("color_identity") or data.get("colorIdentity") or []
+        if isinstance(color_identity, str):
+            color_identity = [color_identity]
+        elif not isinstance(color_identity, list):
+            color_identity = []
+        metadata["color_identity"] = color_identity
+
+        metadata["total_decks"] = _safe_int(data.get("num_decks") or data.get("num_decks_avg") or data.get("deck_count"))
+        metadata["average_deck_size"] = _safe_int(data.get("deck_size") or data.get("deckSize"))
+        metadata["popularity_rank"] = _safe_int(data.get("rank") or data.get("popularity_rank") or data.get("popularityRank"))
+
+        commanders_section = data.get("commanders") or data.get("top_commanders") or data.get("popular_commanders")
+        commander_names = _gather_section_card_names(commanders_section)
+        metadata["top_commanders"] = [
+            {"name": name, "rank": index + 1}
+            for index, name in enumerate(commander_names)
+        ]
+
+        related = data.get("similar_themes") or data.get("similarThemes") or data.get("related_themes") or data.get("similar")
+        metadata["related_themes"] = _simplify_related_entries(related)
+
+    except Exception as exc:
+        logger.warning(f"Failed to extract theme metadata: {exc}")
+
+    return metadata
 
 async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
     """
@@ -407,6 +622,60 @@ async def scrape_edhrec_commander_page(url: str) -> Dict[str, Any]:
             "cards": cards
         }
     
+    return result
+
+
+async def scrape_edhrec_theme_page(theme_slug: str) -> Dict[str, Any]:
+    """Scrape EDHRec theme page and return structured deckbuilding data."""
+    if not theme_slug:
+        raise HTTPException(status_code=400, detail="Theme slug is required")
+
+    sanitized_slug = theme_slug.strip().lower()
+    sanitized_slug = re.sub(r"[^a-z0-9\-]+", "-", sanitized_slug).strip("-")
+    if not sanitized_slug:
+        raise HTTPException(status_code=400, detail="Invalid theme slug")
+
+    if not http_session:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="HTTP session not available")
+
+    theme_url = urljoin(EDHREC_BASE_URL, f"themes/{sanitized_slug}")
+
+    async with http_session.get(theme_url, headers=SCRYFALL_HEADERS) as response:
+        if response.status != 200:
+            raise HTTPException(status_code=404, detail=f"Theme page not found: {sanitized_slug}")
+
+        html_content = await response.text()
+
+    build_id = extract_build_id_from_html(html_content)
+    if not build_id:
+        raise HTTPException(status_code=500, detail="Could not extract Next.js build ID from theme page")
+
+    json_url = urljoin(EDHREC_BASE_URL, f"_next/data/{build_id}/themes/{sanitized_slug}.json")
+
+    async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
+        if response.status != 200:
+            raise HTTPException(status_code=404, detail=f"Could not fetch theme data from: {json_url}")
+
+        json_data = await response.json()
+
+    metadata = extract_theme_metadata(json_data)
+    sections = extract_theme_sections_from_json(json_data)
+
+    result: Dict[str, Any] = {
+        "theme_slug": sanitized_slug,
+        "theme_url": theme_url,
+        "timestamp": datetime.utcnow().isoformat(),
+        "categories": sections,
+        "theme_name": metadata.get("theme_name"),
+        "description": metadata.get("description"),
+        "color_identity": metadata.get("color_identity", []),
+        "total_decks": metadata.get("total_decks"),
+        "average_deck_size": metadata.get("average_deck_size"),
+        "popularity_rank": metadata.get("popularity_rank"),
+        "top_commanders": metadata.get("top_commanders", []),
+        "related_themes": metadata.get("related_themes", []),
+    }
+
     return result
 
 
@@ -631,6 +900,41 @@ class StatusResponse(BaseModel):
     scryfall_compliance: Dict[str, Any]
 
 
+class ThemeCard(BaseModel):
+    name: str
+    rank: int
+    edhrec_url: Optional[str] = None
+    scryfall_uri: Optional[str] = None
+    card_id: Optional[str] = None
+    sanitized: Optional[str] = None
+    inclusion_count: Optional[int] = None
+    potential_decks: Optional[int] = None
+    inclusion_percentage: Optional[str] = None
+    synergy_percentage: Optional[str] = None
+    trend_score: Optional[float] = None
+
+
+class ThemeCategory(BaseModel):
+    category_name: str
+    total_cards: int
+    cards: List[ThemeCard]
+
+
+class ThemeResponse(BaseModel):
+    theme_slug: str
+    theme_url: str
+    timestamp: str
+    categories: Dict[str, ThemeCategory]
+    theme_name: Optional[str] = None
+    description: Optional[str] = None
+    color_identity: List[str] = Field(default_factory=list)
+    total_decks: Optional[int] = None
+    average_deck_size: Optional[int] = None
+    popularity_rank: Optional[int] = None
+    top_commanders: List[Dict[str, Any]] = Field(default_factory=list)
+    related_themes: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 @app.get("/", response_model=Dict[str, str])
 async def root():
     """Root endpoint"""
@@ -682,11 +986,20 @@ async def get_status():
 async def get_random_card(client_id: str = Depends(get_client_identifier)):
     """Get a random card"""
     await check_rate_limit(client_id)
-    
+
     url = "https://api.scryfall.com/cards/random"
     data = await make_scryfall_request(url)
-    
+
     return Card(**data)
+
+
+@app.get("/api/v1/themes/{theme_slug}", response_model=ThemeResponse)
+async def get_theme(theme_slug: str, client_id: str = Depends(get_client_identifier)):
+    """Retrieve structured information for an EDHRec theme."""
+    await check_rate_limit(client_id)
+
+    theme_data = await scrape_edhrec_theme_page(theme_slug)
+    return ThemeResponse(**theme_data)
 
 
 @app.get("/api/v1/cards/search", response_model=CardsResponse)

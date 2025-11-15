@@ -61,6 +61,11 @@ class TestCardEndpoints:
         # Should fail without proper API key
         assert response.status_code in [401, 403]
 
+    def test_theme_missing_auth(self):
+        """Test that theme endpoint requires authentication"""
+        response = client.get("/api/v1/themes/spellslinger")
+        assert response.status_code in [401, 403]
+
 
 class TestAPIResponseFormat:
     """Test API response format consistency"""
@@ -79,6 +84,7 @@ class TestAPIResponseFormat:
         assert "/api/v1/cards/{card_id}" in routes
         assert "/api/v1/cards/random" in routes
         assert "/api/v1/cards/autocomplete" in routes
+        assert "/api/v1/themes/{theme_slug}" in routes
 
 
 class TestDataValidation:
