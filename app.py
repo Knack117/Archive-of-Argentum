@@ -234,7 +234,10 @@ async def root():
 # ----------------------------------------------
 
 @app.get("/api/v1/commander/summary", response_model=PageTheme)
-async def get_commander_summary(name: str) -> PageTheme:
+async def get_commander_summary(
+    name: Optional[str] = Query(None),
+    commander_url: Optional[str] = Query(None)
+) -> PageTheme:
     """
     Fetches commander data for the given commander name and returns a simplified
     PageTheme.  This implementation does not perform any response-size
@@ -245,12 +248,19 @@ async def get_commander_summary(name: str) -> PageTheme:
     :param name: Name of the commander (e.g. "Atraxa, Praetors' Voice")
     :return: PageTheme with header, description, tags, container, and source_url.
     """
-    # Normalize name to slug and construct EDHRec URL
-    slug = normalize_commander_name(name)
-    commander_url = f"{EDHREC_BASE_URL}commanders/{slug}"
+    # Determine slug from name or commander_url
+    if name:
+        slug = normalize_commander_name(name)
+    elif commander_url:
+        # derive slug from URL by extracting card name and normalizing
+        parsed_name = extract_commander_name_from_url(commander_url)
+        slug = normalize_commander_name(parsed_name)
+    else:
+        raise HTTPException(status_code=400, detail="Must provide either 'name' or 'commander_url'")
+    commander_url_val = f"{EDHREC_BASE_URL}commanders/{slug}"
     # Fetch commander data using existing helper
     try:
-        commander_data = await scrape_edhrec_commander_page(commander_url)
+        commander_data = await scrape_edhrec_commander_page(commander_url_val)
     except HTTPException as exc:
         # propagate any HTTP exceptions such as 404
         raise exc
@@ -274,9 +284,11 @@ async def get_commander_summary(name: str) -> PageTheme:
     # Tags from commander_data
     tags = commander_data.get("commander_tags", [])
 
-    header = commander_data.get("commander_name") or name
+    header = commander_data.get("commander_name") or (
+        name if name else extract_commander_name_from_url(commander_url) if commander_url else name
+    )
     description = ""
-    source_url = commander_data.get("commander_url")
+    source_url = commander_data.get("commander_url") or commander_url_val
 
     return PageTheme(
         header=header,
