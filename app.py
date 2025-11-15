@@ -150,7 +150,10 @@ def normalize_commander_name(name: str) -> str:
     Normalize a commander name into a slug suitable for EDHRec URLs.
     """
     slug = name.strip().lower()
+    # Replace non-alphanumeric characters with hyphens, then collapse multiple hyphens
     slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    # Replace multiple consecutive hyphens with single hyphens
+    slug = re.sub(r"-+", "-", slug)
     slug = slug.strip("-")
     return slug or "unknown"
 
