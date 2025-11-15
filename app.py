@@ -2624,6 +2624,27 @@ async def get_average_deck(
     )
 
 
+@app.get("/api/v1/average_deck/{commander_name}", response_model=AverageDeckResponse)
+async def get_average_deck_by_commander(
+    commander_name: str,
+    api_key: str = Depends(verify_api_key),
+) -> AverageDeckResponse:
+    """
+    Fetch the EDHRec average deck list (text-only) for a given commander by commander name.
+    """
+    try:
+        # Fetch the average deck using the existing function
+        return await fetch_average_deck(commander_name, commander_is_slug=False)
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:
+        logger.error(f"Error fetching average deck for {commander_name}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching average deck: {str(exc)}",
+        )
+
+
 # --------------------------------------------------------------------
 # Health endpoint for Render/hosting environment
 # --------------------------------------------------------------------
