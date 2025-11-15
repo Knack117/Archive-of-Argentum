@@ -1,102 +1,66 @@
 #!/usr/bin/env python3
-"""
-Simple test to verify the ResponseTooLargeError fix logic
-"""
+"""Regression tests for theme response size safeguards."""
 
-def test_response_size_logic():
-    """Test the response size management logic"""
-    
-    # Test 1: Card limit resolution
-    def _resolve_theme_card_limit(requested_limit):
-        DEFAULT_THEME_CARD_LIMIT = 60
-        MAX_THEME_CARD_LIMIT = 200
-        
-        if requested_limit is None:
-            return DEFAULT_THEME_CARD_LIMIT
+from app import (
+    _create_categories_summary,
+    _estimate_response_size,
+    _generate_card_limit_plan,
+    _resolve_theme_card_limit,
+)
 
-        try:
-            value = int(requested_limit)
-        except (TypeError, ValueError):
-            return DEFAULT_THEME_CARD_LIMIT
 
-        if value <= 0:
-            return None
-
-        return min(value, MAX_THEME_CARD_LIMIT)
-
-    # Test card limits
+def test_theme_card_limit_resolution():
     assert _resolve_theme_card_limit(None) == 60
     assert _resolve_theme_card_limit(25) == 25
     assert _resolve_theme_card_limit(300) == 200
-    assert _resolve_theme_card_limit(0) is None
-    print("✓ Card limit resolution tests passed")
+    assert _resolve_theme_card_limit(0) == 0
+    assert _resolve_theme_card_limit(-5) == 60
 
-    # Test 2: Response size estimation
-    import json
-    
-    def _estimate_response_size(data):
-        return len(json.dumps(data, separators=(',', ':')))
 
-    # Test with sample data
+def test_estimate_response_size_orders_by_payload():
     small_response = {"theme_name": "Test", "categories": {"cards": {"total": 10}}}
-    large_response = {"theme_name": "Test", "categories": {f"cat_{i}": {"cards": list(range(100))} for i in range(20)}}
-    
-    small_size = _estimate_response_size(small_response)
-    large_size = _estimate_response_size(large_response)
-    
-    assert small_size < large_size
-    print(f"✓ Response size estimation: {small_size} bytes (small), {large_size} bytes (large)")
+    large_response = {
+        "theme_name": "Test",
+        "categories": {
+            f"cat_{i}": {"cards": list(range(100))}
+            for i in range(20)
+        },
+    }
 
-    # Test 3: Categories summary creation
-    def _create_categories_summary(sections):
-        summary = {}
-        for category_key, category_data in sections.items():
-            summary[category_key] = {
-                "category_name": category_data.get("category_name"),
-                "total_cards": category_data.get("total_cards"),
-                "available_cards": category_data.get("available_cards"),
-                "is_truncated": category_data.get("is_truncated", False),
-            }
-        return summary
+    assert _estimate_response_size(small_response) < _estimate_response_size(large_response)
 
+
+def test_create_categories_summary_preserves_metadata():
     sample_sections = {
         "instants": {
             "category_name": "Instants",
             "total_cards": 45,
             "available_cards": 67,
-            "is_truncated": True
+            "is_truncated": True,
         },
         "sorceries": {
             "category_name": "Sorceries",
             "total_cards": 38,
-            "is_truncated": True
-        }
+            "is_truncated": True,
+        },
     }
 
     summary = _create_categories_summary(sample_sections)
-    
+
     assert summary["instants"]["category_name"] == "Instants"
     assert summary["instants"]["total_cards"] == 45
-    assert summary["sorceries"]["is_truncated"] == True
-    print("✓ Categories summary creation test passed")
+    assert summary["sorceries"]["is_truncated"] is True
 
-    # Test 4: Large dataset detection
-    LARGE_RESPONSE_THRESHOLD = 50  # same as in app.py
-    
-    def detect_large_dataset(total_cards, limit_per_category):
-        expected_total = total_cards * (limit_per_category or 60)
-        return expected_total > LARGE_RESPONSE_THRESHOLD * (limit_per_category or 60)
 
-    # Test scenarios
-    small_dataset = detect_large_dataset(5, 10)  # 5 categories * 10 cards = 50 total, threshold = 50*10 = 500, so false
-    large_dataset = detect_large_dataset(100, 10)  # 100 categories * 10 cards = 1000 total, threshold = 50*10 = 500, so true
-    
-    assert not small_dataset
-    assert large_dataset
-    print("✓ Large dataset detection test passed")
+def test_generate_card_limit_plan_scales_down():
+    default_plan = _generate_card_limit_plan(60)
+    assert default_plan[0] == 60
+    assert default_plan[-1] == 1
+    assert any(limit < 60 for limit in default_plan[1:])
 
-    print("\n🎉 All response size fix logic tests passed!")
-    return True
+    zero_plan = _generate_card_limit_plan(0)
+    assert zero_plan == [0]
 
-if __name__ == "__main__":
-    test_response_size_logic()
+    large_plan = _generate_card_limit_plan(200)
+    assert large_plan[0] == 200
+    assert 100 in large_plan or 120 in large_plan

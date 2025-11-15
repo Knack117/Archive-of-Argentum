@@ -499,22 +499,34 @@ def extract_theme_sections_from_json(
         json_dict = container.get("json_dict", {})
         cardlists = json_dict.get("cardlists", [])
 
-        limit = None
-        if isinstance(max_cards_per_category, int) and max_cards_per_category > 0:
-            limit = max_cards_per_category
+        limit: Optional[int] = None
+        if isinstance(max_cards_per_category, int):
+            if max_cards_per_category >= 0:
+                limit = max_cards_per_category
 
         total_cards_estimated = 0
-        cards_with_data = []
 
         # First pass: count cards and estimate size
         for cardlist in cardlists:
             if isinstance(cardlist, dict) and "cardviews" in cardlist:
                 total_cards_estimated += len(cardlist["cardviews"])
 
-        # If we expect too many cards, create summary mode
-        if force_summary or total_cards_estimated > LARGE_RESPONSE_THRESHOLD * (limit or DEFAULT_THEME_CARD_LIMIT):
-            logger.info(f"Large dataset detected ({total_cards_estimated} cards), creating summary")
-            return {}, True
+        summary_triggered = force_summary
+
+        if (
+            not summary_triggered
+            and limit is None
+            and total_cards_estimated > LARGE_RESPONSE_THRESHOLD * DEFAULT_THEME_CARD_LIMIT
+        ):
+            logger.info(
+                "Large dataset detected (%s cards), applying conservative per-category limit",
+                total_cards_estimated,
+            )
+            limit = LARGE_THEME_CARD_LIMIT
+            summary_triggered = True
+
+        if limit is not None and limit < 0:
+            limit = None
 
         # Second pass: extract actual data
         for cardlist in cardlists:
@@ -539,7 +551,6 @@ def extract_theme_sections_from_json(
                 converted = _convert_cardview_to_theme_card(card, idx)
                 if converted:
                     cards.append(converted)
-                    cards_with_data.append(converted)
 
             sections[key] = {
                 "category_name": header,
@@ -554,7 +565,7 @@ def extract_theme_sections_from_json(
     except Exception as exc:
         logger.warning(f"Failed to extract theme sections: {exc}")
 
-    return sections, False
+    return sections, summary_triggered
 
 
 def _simplify_related_entries(entries: Any) -> List[Dict[str, Any]]:
@@ -597,19 +608,23 @@ def extract_theme_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
         "theme_name": None,
         "description": None,
         "color_identity": [],
+        "color_profile": None,
         "total_decks": None,
         "average_deck_size": None,
         "popularity_rank": None,
         "top_commanders": [],
         "related_themes": [],
+        "redirect_to": None,
     }
 
     try:
         page_props = payload.get("pageProps", {})
-        
+
         # Check for redirects (themes redirect to tags)
         if "__N_REDIRECT" in page_props:
-            logger.info(f"Theme redirects to: {page_props['__N_REDIRECT']}")
+            redirect_target = page_props["__N_REDIRECT"]
+            metadata["redirect_to"] = redirect_target
+            logger.info(f"Theme metadata indicates redirect to: {redirect_target}")
             return metadata
             
         data = page_props.get("data", {})
@@ -648,12 +663,17 @@ def extract_theme_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
         metadata["description"] = description
 
         # Extract color identity
-        color_identity = data.get("color_identity") or data.get("colorIdentity") or []
-        if isinstance(color_identity, str):
-            color_identity = [color_identity]
-        elif not isinstance(color_identity, list):
-            color_identity = []
-        metadata["color_identity"] = color_identity
+        raw_color_identity = data.get("color_identity") or data.get("colorIdentity") or []
+        if isinstance(raw_color_identity, list):
+            color_values = raw_color_identity
+        elif raw_color_identity is None:
+            color_values = []
+        else:
+            color_values = [raw_color_identity]
+
+        color_profile = normalize_theme_colors(color_values)
+        metadata["color_identity"] = color_profile.get("codes", [])
+        metadata["color_profile"] = color_profile
 
         # Extract statistics
         metadata["total_decks"] = _safe_int(data.get("num_decks") or data.get("num_decks_avg") or data.get("deck_count"))
@@ -780,6 +800,194 @@ COLOR_IDENTITY_SLUGS = [
 
 _SORTED_COLOR_IDENTITY_SLUGS = sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=True)
 
+COLOR_CODE_ORDER = ["W", "U", "B", "R", "G"]
+COLOR_CODE_TO_NAME = {
+    "W": "white",
+    "U": "blue",
+    "B": "black",
+    "R": "red",
+    "G": "green",
+}
+
+COLOR_SLUG_MAP: Dict[str, List[str]] = {
+    "white": ["W"],
+    "blue": ["U"],
+    "black": ["B"],
+    "red": ["R"],
+    "green": ["G"],
+    "colorless": [],
+    "azorius": ["W", "U"],
+    "dimir": ["U", "B"],
+    "rakdos": ["B", "R"],
+    "gruul": ["R", "G"],
+    "selesnya": ["G", "W"],
+    "orzhov": ["W", "B"],
+    "izzet": ["U", "R"],
+    "simic": ["G", "U"],
+    "golgari": ["B", "G"],
+    "boros": ["R", "W"],
+    "abzan": ["W", "B", "G"],
+    "bant": ["W", "U", "G"],
+    "esper": ["W", "U", "B"],
+    "grixis": ["U", "B", "R"],
+    "jeskai": ["W", "U", "R"],
+    "jund": ["B", "R", "G"],
+    "mardu": ["W", "B", "R"],
+    "naya": ["R", "G", "W"],
+    "sultai": ["U", "B", "G"],
+    "temur": ["G", "U", "R"],
+    "five-color": COLOR_CODE_ORDER[:],
+    "sans-white": ["U", "B", "R", "G"],
+    "sans-blue": ["W", "B", "R", "G"],
+    "sans-black": ["W", "U", "R", "G"],
+    "sans-red": ["W", "U", "B", "G"],
+    "sans-green": ["W", "U", "B", "R"],
+}
+
+COLOR_LETTER_MAP = {
+    "w": "W",
+    "u": "U",
+    "b": "B",
+    "r": "R",
+    "g": "G",
+}
+
+
+def _build_color_alias_map() -> Dict[str, List[str]]:
+    alias_map: Dict[str, List[str]] = {}
+
+    def _register(key: str, codes: List[str]):
+        normalized_key = key.strip().lower()
+        if not normalized_key:
+            return
+        alias_map.setdefault(normalized_key, codes)
+
+    for slug, codes in COLOR_SLUG_MAP.items():
+        pretty_slug = slug.replace("_", " ")
+        _register(slug, codes)
+        _register(pretty_slug, codes)
+        _register(slug.replace("-", ""), codes)
+        _register(pretty_slug.replace(" ", ""), codes)
+        _register(pretty_slug.replace(" ", "-"), codes)
+        _register(pretty_slug.replace(" ", "/"), codes)
+
+        if codes:
+            symbol = "".join(codes)
+            _register(symbol.lower(), codes)
+            _register(symbol[::-1].lower(), codes)
+
+            names_combo = "-".join(COLOR_CODE_TO_NAME[c] for c in codes)
+            _register(names_combo, codes)
+            _register(names_combo.replace("-", ""), codes)
+            _register(names_combo.replace("-", " "), codes)
+            _register(names_combo.replace("-", "/"), codes)
+        else:
+            _register("c", codes)
+            _register("colourless", codes)
+
+    for letter, code in COLOR_LETTER_MAP.items():
+        _register(letter, [code])
+        _register(COLOR_CODE_TO_NAME[code], [code])
+
+    return alias_map
+
+
+COLOR_ALIAS_MAP = _build_color_alias_map()
+
+
+def _lookup_color_codes(value: str) -> Optional[List[str]]:
+    if not value:
+        return None
+
+    candidate = value.strip().lower()
+    if not candidate:
+        return None
+
+    direct_match = COLOR_ALIAS_MAP.get(candidate)
+    if direct_match is not None:
+        return direct_match
+
+    compact = re.sub(r"[^a-z]", "", candidate)
+    if compact:
+        direct_match = COLOR_ALIAS_MAP.get(compact)
+        if direct_match is not None:
+            return direct_match
+
+    parts = [part for part in re.split(r"[^a-z]+", candidate) if part]
+    if len(parts) > 1:
+        collected: List[str] = []
+        for part in parts:
+            part_match = COLOR_ALIAS_MAP.get(part)
+            if part_match is None:
+                part_compact = re.sub(r"[^a-z]", "", part)
+                part_match = COLOR_ALIAS_MAP.get(part_compact)
+
+            if part_match is None:
+                letter_match = COLOR_LETTER_MAP.get(part)
+                if letter_match:
+                    part_match = [letter_match]
+
+            if part_match is None:
+                return None
+
+            collected.extend(part_match)
+
+        if collected:
+            return collected
+
+    if compact and all(ch in COLOR_LETTER_MAP for ch in compact):
+        return [COLOR_LETTER_MAP[ch] for ch in compact]
+
+    return None
+
+
+def normalize_theme_colors(raw_values: Any) -> Dict[str, Any]:
+    if raw_values is None:
+        values: List[str] = []
+    elif isinstance(raw_values, (list, tuple, set)):
+        values = [str(item) for item in raw_values if item is not None]
+    else:
+        values = [str(raw_values)]
+
+    collected: List[str] = []
+    for entry in values:
+        match = _lookup_color_codes(entry)
+        if match:
+            collected.extend(match)
+
+    unique_codes: List[str] = []
+    for code in COLOR_CODE_ORDER:
+        if code in collected and code not in unique_codes:
+            unique_codes.append(code)
+
+    slug: Optional[str] = None
+    for candidate_slug, candidate_codes in COLOR_SLUG_MAP.items():
+        if sorted(candidate_codes) == sorted(unique_codes):
+            slug = candidate_slug
+            break
+
+    symbol = "".join(unique_codes)
+    if not unique_codes:
+        # Explicitly represent colorless themes
+        slug = slug or "colorless"
+        symbol = "C"
+
+    names = [COLOR_CODE_TO_NAME[code] for code in unique_codes]
+    display_name = None
+    if slug:
+        display_name = slug.replace("-", " ").replace("_", " ").replace("/", " ").title()
+    elif names:
+        display_name = " ".join(name.title() for name in names)
+
+    return {
+        "codes": unique_codes,
+        "names": names,
+        "symbol": symbol,
+        "slug": slug,
+        "display_name": display_name,
+        "raw": values,
+    }
+
 
 DEFAULT_THEME_CARD_LIMIT = 60
 MAX_THEME_CARD_LIMIT = 200
@@ -829,10 +1037,84 @@ def _resolve_theme_card_limit(requested_limit: Optional[int]) -> Optional[int]:
     except (TypeError, ValueError):
         return DEFAULT_THEME_CARD_LIMIT
 
-    if value <= 0:
-        return None
+    if value < 0:
+        return DEFAULT_THEME_CARD_LIMIT
+
+    if value == 0:
+        return 0
 
     return min(value, MAX_THEME_CARD_LIMIT)
+
+
+def _generate_card_limit_plan(initial_limit: Optional[int]) -> List[int]:
+    """Generate progressively smaller card limits to avoid oversized responses."""
+
+    if initial_limit is None:
+        start = DEFAULT_THEME_CARD_LIMIT
+    else:
+        start = max(initial_limit, 0)
+
+    if start == 0:
+        return [0]
+
+    candidates = [start]
+
+    for factor in (0.75, 0.5, 0.35):
+        reduced = max(1, int(round(start * factor)))
+        candidates.append(reduced)
+
+    candidates.extend([
+        LARGE_THEME_CARD_LIMIT,
+        40,
+        30,
+        20,
+        15,
+        10,
+        5,
+        3,
+        1,
+    ])
+
+    plan: List[int] = []
+    seen = set()
+    for candidate in candidates:
+        normalized = max(1, min(candidate, MAX_THEME_CARD_LIMIT))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        plan.append(normalized)
+
+    if plan[-1] != 1:
+        plan.append(1)
+
+    return plan
+
+
+def _assemble_theme_payload(
+    sanitized_slug: str,
+    theme_url: str,
+    metadata: Dict[str, Any],
+    sections: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "theme_slug": sanitized_slug,
+        "theme_url": theme_url,
+        "timestamp": datetime.utcnow().isoformat(),
+        "theme_name": metadata.get("theme_name"),
+        "description": metadata.get("description"),
+        "color_identity": metadata.get("color_identity", []),
+        "color_profile": metadata.get("color_profile"),
+        "total_decks": metadata.get("total_decks"),
+        "average_deck_size": metadata.get("average_deck_size"),
+        "popularity_rank": metadata.get("popularity_rank"),
+        "top_commanders": metadata.get("top_commanders", []),
+        "related_themes": metadata.get("related_themes", []),
+    }
+
+    if sections is not None:
+        payload["categories"] = sections
+
+    return payload
 
 
 def _is_valid_theme_data(metadata: Dict[str, Any], sections: Dict[str, Any]) -> bool:
@@ -986,73 +1268,102 @@ async def scrape_edhrec_theme_page(
             continue
 
         metadata = extract_theme_metadata(json_data)
-        sections, is_summary = extract_theme_sections_from_json(
-            json_data,
-            max_cards_per_category=card_limit
-        )
 
-        # Check if this is a valid theme by looking for meaningful data
-        if not _is_valid_theme_data(metadata, sections):
+        limit_plan = _generate_card_limit_plan(card_limit)
+        oversize_attempts: List[Dict[str, Any]] = []
+        last_sections: Optional[Dict[str, Any]] = None
+        last_summary_flag = False
+        applied_limit: Optional[int] = None
+
+        for attempt_limit in limit_plan:
+            sections, summary_flag = extract_theme_sections_from_json(
+                json_data,
+                max_cards_per_category=attempt_limit,
+            )
+
+            if not _is_valid_theme_data(metadata, sections):
+                redirect_target = metadata.get("redirect_to")
+                if redirect_target:
+                    last_error = f"Theme redirected to {redirect_target} when accessing {theme_url}"
+                else:
+                    last_error = f"No valid theme data found at {theme_url}"
+                continue
+
+            result = _assemble_theme_payload(
+                sanitized_slug,
+                theme_url,
+                metadata,
+                sections,
+            )
+
+            estimated_size = _estimate_response_size(result)
+            last_sections = sections
+            last_summary_flag = summary_flag
+            applied_limit = attempt_limit
+
+            if attempt_limit == 0 or estimated_size <= MAX_RESPONSE_SIZE_BYTES:
+                response_info: Dict[str, Any] = {}
+
+                if attempt_limit == 0:
+                    response_info["response_type"] = "metadata"
+                else:
+                    response_info["response_type"] = "full"
+                    response_info["size_estimate"] = estimated_size
+                    if estimated_size > SMALL_RESPONSE_SIZE_BYTES:
+                        response_info["recommendation"] = (
+                            "Consider using max_cards parameter for better performance"
+                        )
+
+                if card_limit is not None and attempt_limit != card_limit:
+                    response_info["original_card_limit"] = card_limit
+                    response_info["applied_card_limit"] = attempt_limit
+
+                if last_summary_flag:
+                    response_info["note"] = "Applied conservative per-category limit due to large dataset"
+
+                if response_info:
+                    result["response_info"] = response_info
+
+                return result
+
+            oversize_attempts.append({
+                "card_limit": attempt_limit,
+                "estimated_size": estimated_size,
+            })
+
+        if last_sections is None:
             last_error = f"No valid theme data found at {theme_url}"
             continue
 
-        result: Dict[str, Any] = {
-            "theme_slug": sanitized_slug,
-            "theme_url": theme_url,
-            "timestamp": datetime.utcnow().isoformat(),
-            "categories": sections,
-            "theme_name": metadata.get("theme_name"),
-            "description": metadata.get("description"),
-            "color_identity": metadata.get("color_identity", []),
-            "total_decks": metadata.get("total_decks"),
-            "average_deck_size": metadata.get("average_deck_size"),
-            "popularity_rank": metadata.get("popularity_rank"),
-            "top_commanders": metadata.get("top_commanders", []),
-            "related_themes": metadata.get("related_themes", []),
+        logger.warning(
+            "Response remained too large after adaptive limits; returning summary for %s",
+            sanitized_slug,
+        )
+
+        summary_result = _assemble_theme_payload(
+            sanitized_slug,
+            theme_url,
+            metadata,
+            sections={},
+        )
+        summary_result["categories_summary"] = _create_categories_summary(last_sections)
+
+        response_info = {
+            "response_type": "summary",
+            "reason": "Response exceeded size limit",
         }
 
-        # Check response size and potentially truncate
-        estimated_size = _estimate_response_size(result)
-        response_info = {}
-        
-        if estimated_size > MAX_RESPONSE_SIZE_BYTES:
-            logger.warning(f"Response too large ({estimated_size} bytes), creating summary")
-            
-            # Create summary version
-            summary_result = {
-                "theme_slug": sanitized_slug,
-                "theme_url": theme_url,
-                "timestamp": datetime.utcnow().isoformat(),
-                "theme_name": metadata.get("theme_name"),
-                "description": metadata.get("description"),
-                "color_identity": metadata.get("color_identity", []),
-                "total_decks": metadata.get("total_decks"),
-                "average_deck_size": metadata.get("average_deck_size"),
-                "popularity_rank": metadata.get("popularity_rank"),
-                "top_commanders": metadata.get("top_commanders", []),
-                "related_themes": metadata.get("related_themes", []),
-                "categories_summary": _create_categories_summary(sections)
-            }
-            
-            response_info = {
-                "response_type": "summary",
-                "original_size_estimate": estimated_size,
-                "reason": "Response exceeded size limit",
-                "use_full_endpoint": "Use max_cards parameter to reduce data size"
-            }
-            
-            summary_result["response_info"] = response_info
-            return summary_result
-        
-        if estimated_size > SMALL_RESPONSE_SIZE_BYTES:
-            response_info = {
-                "response_type": "full",
-                "size_estimate": estimated_size,
-                "recommendation": "Consider using max_cards parameter for better performance"
-            }
-            result["response_info"] = response_info
+        if oversize_attempts:
+            response_info["attempts"] = oversize_attempts
 
-        return result
+        if card_limit is not None:
+            response_info["original_card_limit"] = card_limit
+
+        if applied_limit is not None and applied_limit != card_limit:
+            response_info["applied_card_limit"] = applied_limit
+
+        summary_result["response_info"] = response_info
+        return summary_result
 
     # If we get here, no valid theme was found - provide helpful error message
     error_detail = _create_theme_error_message(sanitized_slug, last_error)
@@ -1301,6 +1612,15 @@ class ThemeCategory(BaseModel):
     is_truncated: bool = False
 
 
+class ThemeColorProfile(BaseModel):
+    codes: List[str] = Field(default_factory=list)
+    names: List[str] = Field(default_factory=list)
+    symbol: Optional[str] = None
+    slug: Optional[str] = None
+    display_name: Optional[str] = None
+    raw: List[str] = Field(default_factory=list)
+
+
 class ThemeResponse(BaseModel):
     theme_slug: str
     theme_url: str
@@ -1309,6 +1629,7 @@ class ThemeResponse(BaseModel):
     theme_name: Optional[str] = None
     description: Optional[str] = None
     color_identity: List[str] = Field(default_factory=list)
+    color_profile: Optional[ThemeColorProfile] = None
     total_decks: Optional[int] = None
     average_deck_size: Optional[int] = None
     popularity_rank: Optional[int] = None
@@ -1325,11 +1646,13 @@ class ThemeMetadataResponse(BaseModel):
     theme_name: Optional[str] = None
     description: Optional[str] = None
     color_identity: List[str] = Field(default_factory=list)
+    color_profile: Optional[ThemeColorProfile] = None
     total_decks: Optional[int] = None
     average_deck_size: Optional[int] = None
     popularity_rank: Optional[int] = None
     top_commanders: List[Dict[str, Any]] = Field(default_factory=list)
     related_themes: List[Dict[str, Any]] = Field(default_factory=list)
+    response_info: Optional[Dict[str, Any]] = None
     categories_summary: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -1476,6 +1799,7 @@ async def get_theme(
     if response_format == "metadata":
         # Get metadata only
         theme_data = await scrape_edhrec_theme_page(theme_slug, max_cards_per_category=0)
+        theme_data.pop("categories", None)
         return ThemeMetadataResponse(**theme_data)
     
     # Smart card limit handling for large themes
