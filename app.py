@@ -230,7 +230,7 @@ class Card(BaseModel):
     prices: Optional[Dict[str, Optional[str]]] = None
     related_uris: Optional[Dict[str, str]] = None
     mana_cost_html: Optional[str] = None
-    generated mana: Optional[str] = None
+    generated_mana: Optional[str] = None
 
 
 class CardsResponse(BaseModel):
