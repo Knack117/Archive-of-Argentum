@@ -9,7 +9,7 @@ import logging
 import time
 import json
 from contextlib import asynccontextmanager
-from typing import List, Optional, Dict, Any, Tuple, Union
+from typing import List, Optional, Dict, Any, Tuple, Union, Set
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -33,6 +33,14 @@ from urllib.parse import urlparse, unquote, urljoin, quote_plus
 
 EDHREC_BASE_URL = "https://edhrec.com/"
 EDHREC_ALLOWED_HOSTS = {"edhrec.com", "www.edhrec.com"}
+THEME_INDEX_CACHE_TTL_SECONDS = 6 * 3600  # Refresh the theme catalog every 6 hours
+
+
+_theme_catalog_cache: Dict[str, Any] = {
+    "timestamp": 0.0,
+    "slugs": set(),
+}
+_theme_catalog_lock = asyncio.Lock()
 
 # EDHRec helper functions (adapted from user's working implementation)
 def extract_build_id_from_html(html: str) -> Optional[str]:
@@ -1014,8 +1022,10 @@ def _get_adaptive_card_limit(theme_slug: str, sections: Dict[str, Any], requeste
     # Auto-detect large themes and apply conservative limits
     category_count = len(sections)
     total_cards_estimate = sum(
-        section_data.get("total_cards", 0) 
-        for section_data in sections.values() 
+        section_data.get("available_cards")
+        if isinstance(section_data, dict) and section_data.get("available_cards") is not None
+        else section_data.get("total_cards", 0)
+        for section_data in sections.values()
         if isinstance(section_data, dict)
     )
     
@@ -1135,9 +1145,13 @@ def _is_valid_theme_data(metadata: Dict[str, Any], sections: Dict[str, Any]) -> 
     return has_valid_metadata or has_sections
 
 
-def _create_theme_error_message(sanitized_slug: str, last_error: Optional[str]) -> str:
+def _create_theme_error_message(
+    sanitized_slug: str,
+    last_error: Optional[str],
+    available_themes: Optional[Set[str]] = None,
+) -> str:
     """Create a helpful error message for invalid themes."""
-    
+
     # Check if this looks like a color-prefixed theme
     color_slug, theme_part = _split_color_prefixed_theme_slug(sanitized_slug)
     if color_slug and theme_part:
@@ -1147,19 +1161,36 @@ def _create_theme_error_message(sanitized_slug: str, last_error: Optional[str]) 
     else:
         suggestion = f"Try a common theme like 'spellslinger', 'voltron', 'tokens', 'graveyard', or 'battles'"
         color_hint = f"Valid colors: {', '.join(sorted(COLOR_IDENTITY_SLUGS, key=len, reverse=True))}"
-    
+
     # Get examples of common themes
     example_themes = [
         "spellslinger", "voltron", "tokens", "graveyard", "battles",
         "lifegain", "counters", "enchantments", "artifacts", "reanimator"
     ]
-    
-    return (
-        f"Theme '{sanitized_slug}' not found on EDHRec. {suggestion}\n\n"
-        f"Common theme examples: {', '.join(example_themes)}\n"
-        f"{color_hint}\n\n"
-        f"Note: EDHRec uses format /tags/[theme] or /tags/[theme]/[color] (e.g., '/tags/spellslinger' or '/tags/spellslinger/temur')"
-    )
+
+    message_parts = [
+        f"Theme '{sanitized_slug}' not found on EDHRec. {suggestion}",
+        f"Common theme examples: {', '.join(example_themes)}",
+        color_hint,
+        "",
+        "Note: EDHRec uses format /tags/[theme] or /tags/[theme]/[color] (e.g., '/tags/spellslinger' or '/tags/spellslinger/temur')",
+    ]
+
+    if available_themes:
+        sorted_catalog = sorted(available_themes)
+        preview = ", ".join(sorted_catalog[:20])
+        message_parts.extend([
+            "",
+            f"Known EDHRec themes ({len(sorted_catalog)} total): {preview}",
+        ])
+
+    if last_error:
+        message_parts.extend([
+            "",
+            f"Last attempt: {last_error}",
+        ])
+
+    return "\n".join(part for part in message_parts if part is not None)
 
 
 def _split_color_prefixed_theme_slug(sanitized_slug: str) -> Tuple[Optional[str], Optional[str]]:
@@ -1181,18 +1212,18 @@ def _build_theme_route_candidates(sanitized_slug: str) -> List[Dict[str, str]]:
     if color_slug and theme_part:
         candidates.append({
             "page_path": f"tags/{theme_part}/{color_slug}",
-            "json_path": f"tags/{theme_part}/{color_slug}.json"
+            "json_path": f"tags/{theme_part}/{color_slug}.json",
         })
 
     # Try tags first (themes redirect to tags)
     candidates.append({
         "page_path": f"tags/{sanitized_slug}",
-        "json_path": f"tags/{sanitized_slug}.json"
+        "json_path": f"tags/{sanitized_slug}.json",
     })
 
     candidates.append({
         "page_path": f"themes/{sanitized_slug}",
-        "json_path": f"themes/{sanitized_slug}.json"
+        "json_path": f"themes/{sanitized_slug}.json",
     })
 
     unique_candidates: List[Dict[str, str]] = []
@@ -1206,30 +1237,179 @@ def _build_theme_route_candidates(sanitized_slug: str) -> List[Dict[str, str]]:
     return unique_candidates
 
 
-async def scrape_edhrec_theme_page(
-    theme_slug: str,
-    max_cards_per_category: Optional[int] = None
-) -> Dict[str, Any]:
-    """Scrape EDHRec theme page and return structured deckbuilding data."""
+def _parse_theme_slugs_from_html(html_content: str) -> Set[str]:
+    """Extract theme slugs from the EDHRec tags index HTML page."""
+
+    slugs: Set[str] = set()
+
+    if not html_content:
+        return slugs
+
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+    except Exception as exc:
+        logger.warning(f"Failed to parse tags HTML for theme catalog: {exc}")
+        return slugs
+
+    for link in soup.find_all("a", href=True):
+        href = link.get("href", "")
+        if not href:
+            continue
+
+        parsed = urlparse(href)
+        if parsed.scheme and parsed.netloc and parsed.netloc not in EDHREC_ALLOWED_HOSTS:
+            continue
+
+        path = parsed.path if parsed.scheme else href
+        if not path:
+            continue
+
+        if not path.startswith("/"):
+            path = f"/{path}"
+
+        if not path.startswith("/tags/"):
+            continue
+
+        segments = [segment for segment in path.split("/") if segment]
+        if len(segments) < 2:
+            continue
+
+        candidate = segments[1].strip().lower()
+        candidate = re.sub(r"[^a-z0-9\-]+", "-", candidate).strip("-")
+        if not candidate:
+            continue
+
+        if candidate in COLOR_IDENTITY_SLUGS:
+            # Skip color identity collections
+            continue
+
+        slugs.add(candidate)
+
+    return slugs
+
+
+async def _get_available_theme_slugs(force_refresh: bool = False) -> Set[str]:
+    """Fetch and cache the list of available EDHRec theme slugs from the tags index."""
+
+    if not http_session:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="HTTP session not available")
+
+    now = time.time()
+    cached_slugs: Set[str] = _theme_catalog_cache.get("slugs", set())
+    cache_age = now - _theme_catalog_cache.get("timestamp", 0.0)
+
+    if cached_slugs and not force_refresh and cache_age < THEME_INDEX_CACHE_TTL_SECONDS:
+        return set(cached_slugs)
+
+    async with _theme_catalog_lock:
+        cached_slugs = _theme_catalog_cache.get("slugs", set())
+        cache_age = now - _theme_catalog_cache.get("timestamp", 0.0)
+
+        if cached_slugs and not force_refresh and cache_age < THEME_INDEX_CACHE_TTL_SECONDS:
+            return set(cached_slugs)
+
+        tags_url = urljoin(EDHREC_BASE_URL, "tags")
+
+        try:
+            async with http_session.get(tags_url, headers=SCRYFALL_HEADERS) as response:
+                if response.status != 200:
+                    logger.warning(f"Failed to fetch theme catalog: status {response.status}")
+                    if cached_slugs:
+                        return set(cached_slugs)
+                    raise HTTPException(status_code=response.status, detail="Unable to load theme catalog from EDHRec")
+
+                html_content = await response.text()
+        except aiohttp.ClientError as exc:
+            logger.warning(f"Error fetching theme catalog: {exc}")
+            if cached_slugs:
+                return set(cached_slugs)
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Failed to retrieve theme catalog from EDHRec")
+
+        slugs = _parse_theme_slugs_from_html(html_content)
+        if not slugs:
+            logger.warning("Theme catalog scrape returned no slugs")
+            if cached_slugs:
+                return set(cached_slugs)
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to parse theme catalog from EDHRec")
+
+        _theme_catalog_cache["timestamp"] = now
+        _theme_catalog_cache["slugs"] = slugs
+
+        return set(slugs)
+
+
+def _validate_theme_slug_against_catalog(sanitized_slug: str, available_themes: Set[str]) -> None:
+    """Validate a sanitized theme slug against the catalog of known themes."""
+
+    if sanitized_slug in available_themes:
+        return
+
+    color_slug, theme_part = _split_color_prefixed_theme_slug(sanitized_slug)
+
+    if color_slug and color_slug not in COLOR_IDENTITY_SLUGS:
+        detail = _create_theme_error_message(
+            sanitized_slug,
+            f"Color prefix '{color_slug}' is not recognized by EDHRec",
+            available_themes,
+        )
+        raise HTTPException(status_code=404, detail=detail)
+
+    if color_slug and theme_part and theme_part in available_themes:
+        return
+
+    detail = _create_theme_error_message(
+        sanitized_slug,
+        f"Theme '{theme_part or sanitized_slug}' is not listed on EDHRec" if theme_part or sanitized_slug else None,
+        available_themes,
+    )
+    raise HTTPException(status_code=404, detail=detail)
+
+
+def _sanitize_theme_slug(theme_slug: str) -> str:
+    """Normalize a user-provided theme slug for EDHRec lookups."""
     if not theme_slug:
         raise HTTPException(status_code=400, detail="Theme slug is required")
 
     sanitized_slug = theme_slug.strip().lower()
     sanitized_slug = re.sub(r"[^a-z0-9\-]+", "-", sanitized_slug).strip("-")
+
     if not sanitized_slug:
         raise HTTPException(status_code=400, detail="Invalid theme slug")
+
+    return sanitized_slug
+
+
+def _extract_next_data_from_html(html_content: str) -> Optional[Dict[str, Any]]:
+    """Extract the Next.js data blob embedded in EDHRec theme pages."""
+    if not html_content:
+        return None
+
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+        script_tag = soup.find("script", id="__NEXT_DATA__")
+        if not script_tag or not script_tag.string:
+            return None
+
+        return json.loads(script_tag.string)
+    except json.JSONDecodeError as exc:
+        logger.warning(f"Failed to decode __NEXT_DATA__ JSON: {exc}")
+        return None
+    except Exception as exc:
+        logger.warning(f"Failed to extract __NEXT_DATA__ from theme page: {exc}")
+        return None
+
+
+async def _fetch_theme_document(
+    sanitized_slug: str,
+    available_themes: Optional[Set[str]] = None,
+) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    """Fetch and validate theme data directly from the EDHRec HTML page."""
 
     if not http_session:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="HTTP session not available")
 
     route_candidates = _build_theme_route_candidates(sanitized_slug)
     last_error: Optional[str] = None
-    card_limit = _resolve_theme_card_limit(max_cards_per_category)
-    
-    # First pass: try with a conservative limit for large themes
-    if max_cards_per_category is None:
-        # We'll determine the appropriate limit after seeing the data structure
-        pass
 
     for candidate in route_candidates:
         theme_url = urljoin(EDHREC_BASE_URL, candidate["page_path"])
@@ -1245,129 +1425,27 @@ async def scrape_edhrec_theme_page(
             last_error = f"HTTP error fetching theme page {theme_url}: {exc}"
             continue
 
-        build_id = extract_build_id_from_html(html_content)
-        if not build_id:
-            last_error = f"Could not extract Next.js build ID from theme page {theme_url}"
+        next_data = _extract_next_data_from_html(html_content)
+        if not next_data:
+            last_error = f"Could not extract theme data from page {theme_url}"
             continue
 
-        json_path = candidate["json_path"]
-        json_url = urljoin(EDHREC_BASE_URL, f"_next/data/{build_id}/{json_path}")
+        metadata = extract_theme_metadata(next_data)
+        sections_preview, _ = extract_theme_sections_from_json(next_data, max_cards_per_category=1)
 
-        try:
-            async with http_session.get(json_url, headers=SCRYFALL_HEADERS) as response:
-                if response.status != 200:
-                    last_error = f"Could not fetch theme data from: {json_url} (status {response.status})"
-                    continue
-
-                json_data = await response.json()
-        except aiohttp.ClientError as exc:
-            last_error = f"HTTP error fetching theme JSON {json_url}: {exc}"
-            continue
-        except aiohttp.ContentTypeError as exc:
-            last_error = f"Invalid JSON content from {json_url}: {exc}"
+        if not _is_valid_theme_data(metadata, sections_preview):
+            redirect_target = metadata.get("redirect_to")
+            if redirect_target:
+                last_error = f"Theme redirected to {redirect_target} when accessing {theme_url}"
+            else:
+                last_error = f"No valid theme data found at {theme_url}"
             continue
 
-        metadata = extract_theme_metadata(json_data)
+        return theme_url, next_data, metadata, sections_preview
 
-        limit_plan = _generate_card_limit_plan(card_limit)
-        oversize_attempts: List[Dict[str, Any]] = []
-        last_sections: Optional[Dict[str, Any]] = None
-        last_summary_flag = False
-        applied_limit: Optional[int] = None
-
-        for attempt_limit in limit_plan:
-            sections, summary_flag = extract_theme_sections_from_json(
-                json_data,
-                max_cards_per_category=attempt_limit,
-            )
-
-            if not _is_valid_theme_data(metadata, sections):
-                redirect_target = metadata.get("redirect_to")
-                if redirect_target:
-                    last_error = f"Theme redirected to {redirect_target} when accessing {theme_url}"
-                else:
-                    last_error = f"No valid theme data found at {theme_url}"
-                continue
-
-            result = _assemble_theme_payload(
-                sanitized_slug,
-                theme_url,
-                metadata,
-                sections,
-            )
-
-            estimated_size = _estimate_response_size(result)
-            last_sections = sections
-            last_summary_flag = summary_flag
-            applied_limit = attempt_limit
-
-            if attempt_limit == 0 or estimated_size <= MAX_RESPONSE_SIZE_BYTES:
-                response_info: Dict[str, Any] = {}
-
-                if attempt_limit == 0:
-                    response_info["response_type"] = "metadata"
-                else:
-                    response_info["response_type"] = "full"
-                    response_info["size_estimate"] = estimated_size
-                    if estimated_size > SMALL_RESPONSE_SIZE_BYTES:
-                        response_info["recommendation"] = (
-                            "Consider using max_cards parameter for better performance"
-                        )
-
-                if card_limit is not None and attempt_limit != card_limit:
-                    response_info["original_card_limit"] = card_limit
-                    response_info["applied_card_limit"] = attempt_limit
-
-                if last_summary_flag:
-                    response_info["note"] = "Applied conservative per-category limit due to large dataset"
-
-                if response_info:
-                    result["response_info"] = response_info
-
-                return result
-
-            oversize_attempts.append({
-                "card_limit": attempt_limit,
-                "estimated_size": estimated_size,
-            })
-
-        if last_sections is None:
-            last_error = f"No valid theme data found at {theme_url}"
-            continue
-
-        logger.warning(
-            "Response remained too large after adaptive limits; returning summary for %s",
-            sanitized_slug,
-        )
-
-        summary_result = _assemble_theme_payload(
-            sanitized_slug,
-            theme_url,
-            metadata,
-            sections={},
-        )
-        summary_result["categories_summary"] = _create_categories_summary(last_sections)
-
-        response_info = {
-            "response_type": "summary",
-            "reason": "Response exceeded size limit",
-        }
-
-        if oversize_attempts:
-            response_info["attempts"] = oversize_attempts
-
-        if card_limit is not None:
-            response_info["original_card_limit"] = card_limit
-
-        if applied_limit is not None and applied_limit != card_limit:
-            response_info["applied_card_limit"] = applied_limit
-
-        summary_result["response_info"] = response_info
-        return summary_result
-
-    # If we get here, no valid theme was found - provide helpful error message
-    error_detail = _create_theme_error_message(sanitized_slug, last_error)
+    error_detail = _create_theme_error_message(sanitized_slug, last_error, available_themes)
     raise HTTPException(status_code=404, detail=error_detail)
+
 
 
 # Configure logging
@@ -1717,6 +1795,15 @@ async def get_random_card(client_id: str = Depends(get_client_identifier)):
 @app.get("/api/v1/help/themes")
 async def get_themes_help():
     """Get help information about EDHRec theme patterns and usage."""
+
+    try:
+        theme_catalog = sorted(await _get_available_theme_slugs())
+    except HTTPException:
+        theme_catalog = []
+    except Exception as exc:
+        logger.warning(f"Failed to load theme catalog for help endpoint: {exc}")
+        theme_catalog = []
+
     return {
         "title": "EDHRec Theme API Help",
         "theme_patterns": {
@@ -1724,7 +1811,7 @@ async def get_themes_help():
             "basic_theme": {
                 "pattern": "/tags/[theme-name]",
                 "example": "/tags/spellslinger",
-                "valid_themes": [
+                "valid_themes": theme_catalog[:25] if theme_catalog else [
                     "spellslinger", "voltron", "tokens", "graveyard", "battles",
                     "lifegain", "counters", "enchantments", "artifacts", "reanimator"
                 ]
@@ -1765,6 +1852,13 @@ async def get_themes_help():
             "theme_not_found": "If theme doesn't exist, API returns helpful suggestions",
             "large_responses": "API automatically manages response size to prevent errors",
             "size_recommendations": "For large themes, consider using max_cards parameter"
+        },
+        "theme_catalog": {
+            "total": len(theme_catalog),
+            "sample": theme_catalog[:50],
+        } if theme_catalog else {
+            "total": 0,
+            "sample": [],
         }
     }
 
@@ -1794,33 +1888,79 @@ async def get_theme(
     For large themes, it will automatically apply appropriate card limits.
     NO RATE LIMITING - EDHRec scraping is unthrottled.
     """
-    
-    # Handle metadata-only requests
+
+    sanitized_slug = _sanitize_theme_slug(theme_slug)
+    available_theme_slugs = await _get_available_theme_slugs()
+    _validate_theme_slug_against_catalog(sanitized_slug, available_theme_slugs)
+    theme_url, raw_theme_data, metadata, preview_sections = await _fetch_theme_document(
+        sanitized_slug,
+        available_theme_slugs,
+    )
+
+    def build_metadata_payload(reason: str, applied_limit: Optional[int], estimated_size: Optional[int]) -> Dict[str, Any]:
+        payload = _assemble_theme_payload(sanitized_slug, theme_url, metadata)
+        payload["categories_summary"] = _create_categories_summary(preview_sections)
+        info: Dict[str, Any] = {
+            "mode": "metadata",
+            "reason": reason,
+        }
+        if applied_limit is not None:
+            info["applied_card_limit"] = applied_limit
+        if estimated_size is not None:
+            info["estimated_size"] = estimated_size
+        payload["response_info"] = info
+        return payload
+
     if response_format == "metadata":
-        # Get metadata only
-        theme_data = await scrape_edhrec_theme_page(theme_slug, max_cards_per_category=0)
-        theme_data.pop("categories", None)
-        return ThemeMetadataResponse(**theme_data)
-    
-    # Smart card limit handling for large themes
-    if max_cards is None:
-        # First pass with conservative limit to get theme structure
-        theme_data = await scrape_edhrec_theme_page(theme_slug, max_cards_per_category=LARGE_THEME_CARD_LIMIT)
-        
-        # Check if we have meaningful data and can expand
-        if "categories" in theme_data and theme_data["categories"]:
-            adaptive_limit = _get_adaptive_card_limit(theme_slug, theme_data["categories"])
-            
-            # If adaptive limit is higher than what we used, re-fetch with higher limit
-            if adaptive_limit > LARGE_THEME_CARD_LIMIT:
-                logger.info(f"Theme {theme_slug} is smaller than expected, expanding limit to {adaptive_limit}")
-                theme_data = await scrape_edhrec_theme_page(theme_slug, max_cards_per_category=adaptive_limit)
-        
-        return ThemeResponse(**theme_data)
-    else:
-        # User specified a limit
-        theme_data = await scrape_edhrec_theme_page(theme_slug, max_cards_per_category=max_cards)
-        return ThemeResponse(**theme_data)
+        metadata_payload = build_metadata_payload("explicit_metadata_request", 0, None)
+        return ThemeMetadataResponse(**metadata_payload)
+
+    # Determine appropriate limits for card extraction
+    user_requested_limit: Optional[int] = max_cards if max_cards is not None else None
+
+    if response_format == "auto":
+        adaptive_limit = _get_adaptive_card_limit(sanitized_slug, preview_sections, requested_limit=user_requested_limit)
+        sections, summary_flag = extract_theme_sections_from_json(
+            raw_theme_data,
+            max_cards_per_category=adaptive_limit,
+        )
+
+        payload = _assemble_theme_payload(sanitized_slug, theme_url, metadata, sections)
+        estimated_size = _estimate_response_size(payload)
+
+        if estimated_size > SMALL_RESPONSE_SIZE_BYTES:
+            metadata_payload = build_metadata_payload("response_too_large", adaptive_limit, estimated_size)
+            return ThemeMetadataResponse(**metadata_payload)
+
+        payload["response_info"] = {
+            "mode": "auto",
+            "applied_card_limit": adaptive_limit,
+            "estimated_size": estimated_size,
+            "summary_only": summary_flag,
+        }
+        return ThemeResponse(**payload)
+
+    # response_format == "full"
+    resolved_limit = _resolve_theme_card_limit(user_requested_limit)
+    sections, summary_flag = extract_theme_sections_from_json(
+        raw_theme_data,
+        max_cards_per_category=resolved_limit,
+    )
+
+    payload = _assemble_theme_payload(sanitized_slug, theme_url, metadata, sections)
+    estimated_size = _estimate_response_size(payload)
+
+    if estimated_size > MAX_RESPONSE_SIZE_BYTES:
+        metadata_payload = build_metadata_payload("response_too_large", resolved_limit, estimated_size)
+        return ThemeMetadataResponse(**metadata_payload)
+
+    payload["response_info"] = {
+        "mode": "full",
+        "applied_card_limit": resolved_limit,
+        "estimated_size": estimated_size,
+        "summary_only": summary_flag,
+    }
+    return ThemeResponse(**payload)
 
 
 @app.get("/api/v1/cards/search", response_model=CardsResponse)
