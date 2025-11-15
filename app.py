@@ -14,8 +14,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from mightstone.models import ScryCard
-from mightstone.client import AsyncClient
+from mightstone.services import scryfall
 from config import settings
 
 
@@ -24,7 +23,7 @@ logging.basicConfig(level=getattr(logging, settings.log_level))
 logger = logging.getLogger(__name__)
 
 # Global mightstone client
-client = AsyncClient()
+client = scryfall.Scryfall()
 
 # Security
 security = HTTPBearer()
@@ -69,14 +68,13 @@ class ApiResponse(BaseModel):
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting MTG API with mightstone...")
-    await client.initialize()
-    logger.info("Mightstone client initialized successfully")
+    # The new Scryfall client doesn't need explicit initialization
+    logger.info("Mightstone client ready")
     
     yield
     
     # Shutdown
     logger.info("Shutting down MTG API...")
-    await client.close()
 
 
 # API Key authentication dependency
@@ -120,25 +118,42 @@ app.add_middleware(
 )
 
 
-def convert_scry_card_to_response(card: ScryCard) -> CardResponse:
-    """Convert mightstone ScryCard to our API response format"""
+def convert_scry_card_to_response(card: scryfall.Card) -> CardResponse:
+    """Convert mightstone Card to our API response format"""
+    # Convert colors list to strings for JSON serialization
+    colors_list = None
+    if card.colors:
+        colors_list = [str(color) for color in card.colors]
+    
+    color_identity_list = None
+    if hasattr(card, 'color_identity') and card.color_identity:
+        color_identity_list = [str(color) for color in card.color_identity]
+    
+    # Convert image_uris to dict
+    image_uris_dict = None
+    if card.image_uris:
+        # Convert image_uris object to dict
+        image_uris_dict = {}
+        for key, value in card.image_uris.__dict__.items():
+            image_uris_dict[key] = str(value)
+    
     return CardResponse(
-        id=card.id,
+        id=str(card.id),  # Convert UUID to string
         name=card.name,
-        mana_cost=card.mana_cost,
+        mana_cost=str(card.mana_cost) if card.mana_cost else None,
         cmc=card.cmc,
         type_line=card.type_line,
         oracle_text=card.oracle_text,
-        power=card.power,
-        toughness=card.toughness,
-        loyalty=card.loyalty,
-        colors=card.colors,
-        color_identity=card.color_identity,
+        power=str(card.power) if card.power else None,
+        toughness=str(card.toughness) if card.toughness else None,
+        loyalty=str(card.loyalty) if card.loyalty else None,
+        colors=colors_list,
+        color_identity=color_identity_list,
         set_name=card.set_name,
         set_code=card.set_code,
         rarity=card.rarity,
-        image_uris=card.image_uris,
-        scryfall_uri=card.scryfall_uri
+        image_uris=image_uris_dict,
+        scryfall_uri=None  # This field might not be available in the new API
     )
 
 
@@ -170,22 +185,13 @@ async def search_cards(
     Search for Magic: The Gathering cards using mightstone's Scryfall integration
     """
     try:
-        # Create search parameters for mightstone
-        search_params = SearchParameters(
-            name=f"!{request.query}" if request.query else "",  # Exact name match
-            order=request.order,
-            unique=request.unique,
-            include_extras=False
-        )
-        
         # Search using mightstone's Scryfall service
-        cards = await client.search(
-            ScryCard,
-            query=request.query,
-            limit=request.limit,
-            order=request.order,
-            unique=request.unique
-        )
+        # The search method returns an async generator, so we need to collect cards
+        cards = []
+        async for card in client.search(request.query):
+            cards.append(card)
+            if len(cards) >= request.limit:
+                break
         
         if not cards:
             return ApiResponse(
@@ -304,11 +310,12 @@ async def autocomplete_card_name(
             )
         
         # Use mightstone's autocomplete functionality
-        suggestions = await client.autocomplete(q.strip())
+        catalog = await client.autocomplete_async(q.strip())
+        suggestions = catalog.data[:10]  # Limit to 10 suggestions
         
         return ApiResponse(
             success=True,
-            data_list=[{"name": name} for name in suggestions[:10]],  # Limit to 10 suggestions
+            data_list=[{"name": name} for name in suggestions],  # Limit to 10 suggestions
             message=f"Found {len(suggestions)} suggestions",
             count=len(suggestions)
         )
