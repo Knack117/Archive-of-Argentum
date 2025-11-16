@@ -2466,20 +2466,25 @@ async def debug_combo_search(
 def _extract_text_decklist_from_html(html: str) -> List[str]:
     """
     Extract text decklist from EDHRec average-decks page.
-    Handles both new and legacy formats.
+    Handles all current JSON structures (2025) and legacy HTML fallbacks.
     """
     soup = BeautifulSoup(html, "html.parser")
 
-    # --- Check __NEXT_DATA__ script JSON ---
     next_data = soup.find("script", id="__NEXT_DATA__", type="application/json")
     if next_data and next_data.string:
         try:
             data = json.loads(next_data.string)
+
+            # Possible locations of deck text within EDHRec's JSON
             json_paths = [
                 ["props", "pageProps", "data", "container", "json_dict", "export"],
                 ["props", "pageProps", "data", "container", "json_dict", "decklists"],
                 ["props", "pageProps", "data", "container", "json_dict", "text"],
                 ["props", "pageProps", "data", "container", "json_dict", "averageDeck", "export"],
+                ["props", "pageProps", "data", "container", "json_dict", "average_deck", "export"],
+                ["props", "pageProps", "data", "container", "json_dict", "averageDeck", "deck"],
+                ["props", "pageProps", "data", "container", "json_dict", "decklist"],
+                ["props", "pageProps", "data", "container", "json_dict", "average_deck", "deck"],
             ]
 
             def get_nested(obj, path):
@@ -2496,6 +2501,19 @@ def _extract_text_decklist_from_html(html: str) -> List[str]:
                     lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
                     if lines:
                         return lines
+                elif isinstance(content, list):
+                    # Sometimes decklists is a list of text entries
+                    for entry in content:
+                        if isinstance(entry, str) and "\n" in entry:
+                            lines = [ln.strip() for ln in entry.splitlines() if ln.strip()]
+                            if lines:
+                                return lines
+                        elif isinstance(entry, dict):
+                            maybe_deck = entry.get("deck") or entry.get("export") or ""
+                            if isinstance(maybe_deck, str) and "\n" in maybe_deck:
+                                lines = [ln.strip() for ln in maybe_deck.splitlines() if ln.strip()]
+                                if lines:
+                                    return lines
 
         except Exception as e:
             logger.warning(f"Error parsing __NEXT_DATA__ JSON for decklist: {e}")
