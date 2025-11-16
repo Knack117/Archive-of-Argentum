@@ -25,6 +25,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from cachetools import TTLCache
 
+# Cache instantiation
+cache = TTLCache(maxsize=500, ttl=3600)
+
 from config import settings
 from bs4 import BeautifulSoup
 import re
@@ -3230,7 +3233,7 @@ GAME_CHANGERS = {
         "Necropotence", "Yawgmoth's Will", "Timetwister", "Wheel of Fortune",
         "Mystical Tutor", "Vampiric Tutor", "Demonic Tutor", "Imperial Seal",
         "Grim Tutor", "Beseech the Mirror", "Wish", "Cunning Wish", "Ritual Wish",
-        "Biorhythm", "Enter the Infinite", " laboratory Maniac", "Jace, Wielder of Mysteries",
+        "Biorhythm", "Enter the Infinite", "Laboratory Maniac", "Jace, Wielder of Mysteries",
         "Laboratory Maniac", "Neurok Transmuter", "Split Decision", "Brainstorm", "Ponder",
         "Preordain", "Spell Pierce", "Force of Will", "Force of Negation", "Mana Drain",
         "Counterspell", "Misdirection", "Pact of Negation", "Snapback", "Cyclonic Rift",
@@ -3324,8 +3327,15 @@ class DeckValidator:
             
             # Validate bracket
             bracket_validation = None
-            if request.validate_bracket and request.target_bracket:
-                bracket_validation = await self._validate_bracket(cards, request.target_bracket)
+            bracket_inferred = False
+            if request.validate_bracket:
+                # If no target bracket specified, automatically infer the appropriate bracket
+                if request.target_bracket:
+                    target_bracket = request.target_bracket
+                else:
+                    target_bracket = await self._infer_bracket(cards)
+                    bracket_inferred = True
+                bracket_validation = await self._validate_bracket(cards, target_bracket, bracket_inferred)
             
             # Create response
             return DeckValidationResponse(
@@ -3658,7 +3668,123 @@ class DeckValidator:
             "warnings": warnings
         }
     
-    async def _validate_bracket(self, cards: List[DeckCard], target_bracket: str) -> BracketValidation:
+    async def _infer_bracket(self, cards: List[DeckCard]) -> str:
+        """
+        Automatically infer the appropriate bracket for a deck based on its characteristics.
+        Returns the bracket name that best matches the deck's power level and cards.
+        """
+        # Count relevant characteristics
+        game_changer_count = sum(1 for card in cards if card.is_game_changer)
+        combo_pairs = [
+            ("Demonic Consultation", "Thassa's Oracle"),
+            ("Tainted Pact", "Thassa's Oracle"),
+            ("Tainted Pact", "Laboratory Maniac"),
+            ("Demonic Consultation", "Laboratory Maniac"),
+            ("Exquisite Blood", "Sanguine Bond"),
+            ("Dramatic Reversal", "Isochron Scepter"),
+            ("Dualcaster Mage", "Twinflame"),
+            ("Heliod, Sun-Crowned", "Walking Ballista")
+        ]
+        card_names = {card.name for card in cards}
+        combo_count = sum(1 for card1, card2 in combo_pairs if card1 in card_names and card2 in card_names)
+        mass_land_count = sum(1 for card in cards if "mass_land_denial" in card.bracket_categories)
+        
+        # Sophisticated cEDH detection based on deck characteristics
+        cedh_score = self._calculate_cedh_score(cards, combo_count, game_changer_count, mass_land_count)
+        
+        # CRITICAL: Mass Land Denial immediately pushes to Bracket 4 (Optimized)
+        if mass_land_count > 0:
+            return "optimized"
+        
+        # cEDH: High cedh_score OR extreme combo/game changer density  
+        if cedh_score >= 25 or (combo_count >= 2 and game_changer_count >= 4):
+            return "cedh"
+        
+        # Optimized: Combos OR many game changers (4+) [Mass land denial already handled above]
+        elif combo_count >= 1 or game_changer_count >= 4:
+            return "optimized"
+        
+        # Upgraded: Moderate game changers (1-3)
+        elif 1 <= game_changer_count <= 3:
+            return "upgraded"
+        
+        # Core: No game changers, no mass land denial
+        elif game_changer_count == 0:
+            return "core"
+        
+        # Default to exhibition if unsure
+        else:
+            return "exhibition"
+
+    def _calculate_cedh_score(self, cards: List[DeckCard], combo_count: int, game_changer_count: int, mass_land_count: int) -> int:
+        """
+        Calculate cEDH score based on multiple sophisticated criteria.
+        Higher scores indicate more likely cEDH deck.
+        """
+        score = 0
+        
+        # Fast mana concentration (cEDH decks run almost all of them)
+        fast_mana_cards = {
+            "Sol Ring", "Mana Crypt", "Mana Vault", "Chrome Mox", "Mox Diamond", 
+            "Mox Opal", "Lotus Petal", "Dark Ritual", "Cabal Ritual", "Ancient Tomb", 
+            "Mishra's Workshop", "Grim Monolith"
+        }
+        fast_mana_count = sum(1 for card in cards if card.name in fast_mana_cards and card.is_game_changer)
+        score += fast_mana_count * 2  # Fast mana is very important in cEDH
+        
+        # Premium tutors (not thematic tutors) - much stricter scoring
+        premium_tutors = {
+            "Demonic Tutor", "Vampiric Tutor", "Imperial Seal", "Grim Tutor",
+            "Mystical Tutor", "Worldly Tutor", "Enlightened Tutor",
+            "Beseech the Mirror"
+        }
+        premium_tutor_count = sum(1 for card in cards if card.name in premium_tutors and card.is_game_changer)
+        score += premium_tutor_count * 3  # Premium tutors are crucial
+        
+        # Premium stack interaction
+        premium_interaction = {
+            "Force of Will", "Force of Negation", "Mana Drain", "Counterspell",
+            "Spell Pierce", "Misdirection", "Pact of Negation"
+        }
+        interaction_count = sum(1 for card in cards if card.name in premium_interaction and card.is_game_changer)
+        score += interaction_count * 2  # Stack interaction is vital
+        
+        # Best combo pieces (cEDH priority)
+        best_combo_pieces = {
+            "Thassa's Oracle", "Demonic Consultation", "Tainted Pact", 
+            "Exquisite Blood", "Sanguine Bond"
+        }
+        combo_piece_count = sum(1 for card in cards if card.name in best_combo_pieces and card.is_game_changer)
+        score += combo_piece_count * 2
+        
+        # Premium value engines
+        premium_engines = {
+            "Necropotence", "Ad Nauseam", "Underworld Breach", "Yawgmoth's Will",
+            "Timetwister", "Wheel of Fortune"
+        }
+        engine_count = sum(1 for card in cards if card.name in premium_engines and card.is_game_changer)
+        score += engine_count
+        
+        # More conservative bonuses - require true cEDH concentrations
+        if fast_mana_count >= 5:
+            score += 3  # cEDH typically runs 5-7 fast mana sources
+        if premium_tutor_count >= 3:
+            score += 4  # cEDH runs 3-5+ tutors
+        if interaction_count >= 3:
+            score += 3  # cEDH has lots of interaction
+        
+        # Stronger penalty for casual elements
+        if mass_land_count > 0:
+            score -= 3  # cEDH typically avoids mass land denial
+        
+        # Minimum requirements for cEDH classification
+        total_critical_elements = fast_mana_count + premium_tutor_count + interaction_count + combo_piece_count
+        if total_critical_elements < 8:  # Need at least 8 critical cEDH elements
+            score = min(score, 15)  # Cap score if missing critical elements
+        
+        return score
+
+    async def _validate_bracket(self, cards: List[DeckCard], target_bracket: str, bracket_inferred: bool = False) -> BracketValidation:
         """Validate deck against bracket requirements"""
         if target_bracket not in COMMANDER_BRACKETS:
             return BracketValidation(
@@ -3733,7 +3859,8 @@ class DeckValidator:
                 "early_game_combos": combo_count,
                 "detected_combos": [f"{c1} + {c2}" for c1, c2 in detected_combos],
                 "tutors": tutor_count,
-                "total_cards": len(cards)
+                "total_cards": len(cards),
+                "bracket_inferred": bracket_inferred
             },
             violations=violations,
             recommendations=recommendations
