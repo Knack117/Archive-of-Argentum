@@ -3358,69 +3358,68 @@ class DeckValidator:
 
     
     async def _load_authoritative_data(self) -> Dict[str, Set[str]]:
-    """Scrape authoritative lists from Moxfield and EDHRec and cache them."""
-    if "authoritative_data" in self.cache:
-        return self.cache["authoritative_data"]
+        """Scrape authoritative lists from Moxfield and EDHRec and cache them."""
+        if "authoritative_data" in self.cache:
+            return self.cache["authoritative_data"]
 
-    async def fetch_list(url: str, selector: str, attr: str = "text") -> Set[str]:
-        try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                soup = BeautifulSoup(resp.text, "html.parser")
-                elements = soup.select(selector)
-                if attr == "text":
-                    return {el.get_text(strip=True) for el in elements if el.get_text(strip=True)}
-                else:
-                    return {el.get(attr) for el in elements if el.get(attr)}
-        except Exception as e:
-            logger.warning(f"Failed to scrape {url}: {e}")
-            return set()
+        async def fetch_list(url: str, selector: str, attr: str = "text") -> Set[str]:
+            try:
+                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    resp.raise_for_status()
+                    soup = BeautifulSoup(resp.text, "html.parser")
+                    elements = soup.select(selector)
+                    if attr == "text":
+                        return {el.get_text(strip=True) for el in elements if el.get_text(strip=True)}
+                    else:
+                        return {el.get(attr) for el in elements if el.get(attr)}
+            except Exception as e:
+                logger.warning(f"Failed to scrape {url}: {e}")
+                return set()
 
-    # Scrape authoritative data sources
-    mass_land_denial = await fetch_list(
-        "https://moxfield.com/commanderbrackets/masslanddenial",
-        "div.card-item span.card-name"
-    )
-    early_game_combos = await fetch_list(
-        "https://edhrec.com/combos/early-game-2-card-combos",
-        "div.card-container span.card-name"
-    )
-    game_changers = await fetch_list(
-        "https://moxfield.com/commanderbrackets/gamechangers",
-        "div.card-item span.card-name"
-    )
+        # Scrape authoritative data sources
+        mass_land_denial = await fetch_list(
+            "https://moxfield.com/commanderbrackets/masslanddenial",
+            "div.card-item span.card-name"
+        )
+        early_game_combos = await fetch_list(
+            "https://edhrec.com/combos/early-game-2-card-combos",
+            "div.card-container span.card-name"
+        )
+        game_changers = await fetch_list(
+            "https://moxfield.com/commanderbrackets/gamechangers",
+            "div.card-item span.card-name"
+        )
 
-    data = {
-        "mass_land_denial": set(mass_land_denial),
-        "early_game_combos": set(early_game_combos),
-        "game_changers": set(game_changers),
-    }
+        data = {
+            "mass_land_denial": set(mass_land_denial),
+            "early_game_combos": set(early_game_combos),
+            "game_changers": set(game_changers),
+        }
 
-    self.cache["authoritative_data"] = data
-    return data
+        self.cache["authoritative_data"] = data
+        return data
 
+    async def _classify_card(self, card_name: str, quantity: int, data: Dict[str, Set[str]]) -> DeckCard:
+        """Classify a single card using authoritative scraped lists."""
+        categories = []
+        is_game_changer = False
 
-async def _classify_card(self, card_name: str, quantity: int, data: Dict[str, Set[str]]) -> DeckCard:
-    """Classify a single card using authoritative scraped lists."""
-    categories = []
-    is_game_changer = False
+        if card_name in data["mass_land_denial"]:
+            categories.append("mass_land_denial")
+        if card_name in data["early_game_combos"]:
+            categories.append("early_game_combo")
+        if card_name in data["game_changers"]:
+            categories.append("game_changer")
+            is_game_changer = True
 
-    if card_name in data["mass_land_denial"]:
-        categories.append("mass_land_denial")
-    if card_name in data["early_game_combos"]:
-        categories.append("early_game_combo")
-    if card_name in data["game_changers"]:
-        categories.append("game_changer")
-        is_game_changer = True
-
-    return DeckCard(
-        name=card_name,
-        quantity=quantity,
-        is_game_changer=is_game_changer,
-        bracket_categories=categories,
-        legality_status="pending"
-    )
+        return DeckCard(
+            name=card_name,
+            quantity=quantity,
+            is_game_changer=is_game_changer,
+            bracket_categories=categories,
+            legality_status="pending"
+        )
     
     async def _validate_legality(self, cards: List[DeckCard], commander: Optional[str]) -> Dict[str, Any]:
         """Validate commander format legality"""
