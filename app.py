@@ -4157,6 +4157,10 @@ class DeckValidator:
         """Sum quantities to understand the real deck size."""
         return sum(card.quantity for card in cards)
 
+    def _calculate_total_card_count(self, cards: List[DeckCard]) -> int:
+        """Sum quantities to understand the real deck size."""
+        return sum(card.quantity for card in cards)
+
     def _calculate_salt_score(self, cards: List[DeckCard], data: Dict[str, Dict[str, float]]) -> float:
         """
         Calculate salt score for a deck based on saltiest cards.
