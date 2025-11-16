@@ -90,6 +90,11 @@ _theme_catalog_lock = asyncio.Lock()
 
 SALT_LABEL_RE = re.compile(r"Salt\s*Score:\s*([0-9]+(?:\.[0-9]+)?)")
 
+# Regex helpers for normalizing decklist card names exported from arena/Moxfield
+CARD_SET_SUFFIX_RE = re.compile(r"\s*\(([A-Z0-9]{2,5})\)\s*\d*$")
+CARD_BRACKET_SUFFIX_RE = re.compile(r"\s*\[[A-Z0-9]{2,5}\]\s*(?:#?\d+)?$")
+CARD_HASH_SUFFIX_RE = re.compile(r"\s+#\d+$")
+
 # --------------------------------------------------------------------
 # EDHRec helper functions
 # --------------------------------------------------------------------
@@ -3406,7 +3411,6 @@ class DeckValidator:
     
     async def _build_deck_cards(self, decklist: List[str]) -> List[DeckCard]:
         """Parse decklist and classify each card using authoritative scraped data."""
-        import re
         data = await self._load_authoritative_data()
         cards: List[DeckCard] = []
 
@@ -3423,10 +3427,28 @@ class DeckValidator:
                 quantity = int(match.group(1))
                 card_name = match.group(2).strip()
 
+            card_name = self._normalize_card_name(card_name)
+
             card = await self._classify_card(card_name, quantity, data)
             cards.append(card)
 
         return cards
+
+    def _normalize_card_name(self, card_name: str) -> str:
+        """Strip common set/collector suffixes from exported decklists."""
+        if not card_name:
+            return ""
+
+        cleaned = card_name.strip()
+
+        # Remove Arena/Moxfield style "(SET) 123" suffixes first
+        cleaned = CARD_SET_SUFFIX_RE.sub("", cleaned)
+        # Remove bracketed set codes like "[BRO] #270"
+        cleaned = CARD_BRACKET_SUFFIX_RE.sub("", cleaned)
+        # Remove lingering "#123" style markers if present
+        cleaned = CARD_HASH_SUFFIX_RE.sub("", cleaned)
+
+        return cleaned.strip()
 
     
     async def _load_authoritative_data(self) -> Dict[str, Set[str]]:
@@ -3761,16 +3783,29 @@ class DeckValidator:
             return {}
 
         salt_data: Dict[str, float] = {}
-        cardlists: List[Dict[str, Any]] = []
 
-        # Traverse nested dictionaries/lists to locate any "cardlists" entries
+        # Traverse nested dictionaries/lists to locate "cardlists" entries or
+        # individual card dictionaries that expose a salt score.
         stack: List[Any] = [data]
         while stack:
             current = stack.pop()
             if isinstance(current, dict):
                 cardlist_candidate = current.get("cardlists")
                 if isinstance(cardlist_candidate, list):
-                    cardlists.extend(cardlist_candidate)
+                    for cardlist in cardlist_candidate:
+                        self._extract_salt_from_cardlist(cardlist, salt_data)
+                        stack.append(cardlist)
+
+                name = (
+                    current.get("name")
+                    or current.get("card", {}).get("name")
+                    or ""
+                ).strip()
+                if name:
+                    salt_score = self._extract_salt_score_from_card(current)
+                    if salt_score is not None and 0 <= salt_score <= 5:
+                        salt_data[name] = float(salt_score)
+
                 for value in current.values():
                     if isinstance(value, (dict, list)):
                         stack.append(value)
@@ -3778,9 +3813,6 @@ class DeckValidator:
                 for item in current:
                     if isinstance(item, (dict, list)):
                         stack.append(item)
-
-        for cardlist in cardlists:
-            self._extract_salt_from_cardlist(cardlist, salt_data)
 
         return salt_data
 
@@ -4148,7 +4180,7 @@ class DeckValidator:
         counts: Dict[str, int] = defaultdict(int)
 
         for card in cards:
-            normalized_name = card.name.strip()
+            normalized_name = self._normalize_card_name(card.name)
             counts[normalized_name] += max(card.quantity, 1)
 
         illegal_duplicates: Dict[str, int] = {}
@@ -4163,7 +4195,8 @@ class DeckValidator:
 
     def _is_unlimited_card(self, card_name: str) -> bool:
         """Return True if the card is exempt from singleton restrictions."""
-        return card_name.strip().lower() in UNLIMITED_DUPLICATE_CARDS
+        normalized = self._normalize_card_name(card_name).lower()
+        return normalized in UNLIMITED_DUPLICATE_CARDS
 
     def _calculate_total_card_count(self, cards: List[DeckCard]) -> int:
         """Sum quantities to understand the real deck size."""
