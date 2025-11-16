@@ -24,6 +24,10 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download the Playwright-managed Chromium binary (and its system deps) so
+# runtime scraping works immediately after deployment.
+RUN python -m playwright install --with-deps chromium
+
 # Copy application code
 COPY . .
 
