@@ -141,7 +141,11 @@ async def scrape_edhrec_commander_page(commander_url: str) -> Dict[str, Any]:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
             response = await client.get(commander_url, headers=headers)
             response.raise_for_status()
 

@@ -379,7 +379,11 @@ async def fetch_theme_tag(theme_slug: str, color_identity: Optional[str] = None)
 
     last_error: Optional[Exception] = None
 
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        timeout=30.0,
+        follow_redirects=True,
+        trust_env=False,
+    ) as client:
         for candidate in candidates:
             page_path = candidate["page_path"]
             url = f"{EDHREC_BASE_URL}{page_path}"
@@ -477,7 +481,11 @@ async def get_available_tags(api_key: str = Depends(verify_api_key)) -> Dict[str
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
             response = await client.get(tags_url, headers=headers)
             response.raise_for_status()
             html_content = response.text
