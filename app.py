@@ -3300,7 +3300,7 @@ class DeckValidator:
             # Validate bracket
             bracket_validation = None
             if request.validate_bracket and request.target_bracket:
-                bracket_validation = await self._validate_bracket(cards, request.target_bracket, request.source_urls)
+                bracket_validation = await self._validate_bracket(cards, request.target_bracket)
             
             # Create response
             return DeckValidationResponse(
@@ -3327,7 +3327,6 @@ class DeckValidator:
                 cards=[],
                 bracket_validation=None,
                 legality_validation={},
-                source_analysis={},
                 validation_timestamp=datetime.utcnow().isoformat(),
                 errors=[str(exc)],
                 warnings=[]
@@ -3448,7 +3447,7 @@ async def _classify_card(self, card_name: str, quantity: int, data: Dict[str, Se
             "warnings": warnings
         }
     
-    async def _validate_bracket(self, cards: List[DeckCard], target_bracket: str, source_urls: List[str]) -> BracketValidation:
+    async def _validate_bracket(self, cards: List[DeckCard], target_bracket: str) -> BracketValidation:
         """Validate deck against bracket requirements"""
         if target_bracket not in COMMANDER_BRACKETS:
             return BracketValidation(
@@ -3538,7 +3537,6 @@ async def validate_deck(
     
     - Provide a decklist of card names
     - Optionally specify commander and target bracket
-    - Include source URLs for reference comparison
     - Validates against official Commander Brackets system
     - Checks for Game Changers, format legality, and power level compliance
     """
@@ -3581,10 +3579,6 @@ async def get_sample_validation(
         ],
         commander="Jace, Wielder of Mysteries",
         target_bracket="upgraded",
-        source_urls=[
-            "https://moxfield.com/commanderbrackets/masslanddenial",
-            "https://edhrec.com/combos/early-game-2-card-combos"
-        ],
         validate_bracket=True,
         validate_legality=True
     )
