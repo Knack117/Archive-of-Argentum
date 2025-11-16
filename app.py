@@ -3358,43 +3358,63 @@ class DeckValidator:
 
     
     async def _load_authoritative_data(self) -> Dict[str, Set[str]]:
-        """Scrape authoritative lists from Moxfield and EDHRec and cache them."""
+        """Load authoritative bracket card lists and cache them."""
         if "authoritative_data" in self.cache:
             return self.cache["authoritative_data"]
 
-        async def fetch_list(url: str, selector: str, attr: str = "text") -> Set[str]:
-            try:
-                async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                    soup = BeautifulSoup(resp.text, "html.parser")
-                    elements = soup.select(selector)
-                    if attr == "text":
-                        return {el.get_text(strip=True) for el in elements if el.get_text(strip=True)}
-                    else:
-                        return {el.get(attr) for el in elements if el.get(attr)}
-            except Exception as e:
-                logger.warning(f"Failed to scrape {url}: {e}")
-                return set()
+        # Authoritative Game Changers list from WotC/Moxfield
+        # Source: https://moxfield.com/commanderbrackets/gamechangers
+        game_changers = {
+            "Ad Nauseam", "Ancient Tomb", "Aura Shards", "Bolas's Citadel", 
+            "Braids, Cabal Minion", "Chrome Mox", "Coalition Victory", 
+            "Consecrated Sphinx", "Crop Rotation", "Cyclonic Rift", 
+            "Demonic Tutor", "Drannith Magistrate", "Enlightened Tutor", 
+            "Field of the Dead", "Fierce Guardianship", "Force of Will", 
+            "Gaea's Cradle", "Gamble", "Gifts Ungiven", "Glacial Chasm", 
+            "Grand Arbiter Augustin IV", "Grim Monolith", "Humility", 
+            "Imperial Seal", "Intuition", "Jeska's Will", "Lion's Eye Diamond", 
+            "Mana Vault", "Mishra's Workshop", "Mox Diamond", "Mystical Tutor", 
+            "Narset, Parter of Veils", "Natural Order", "Necropotence", 
+            "Notion Thief", "Opposition Agent", "Orcish Bowmasters", 
+            "Panoptic Mirror", "Rhystic Study", "Seedborn Muse", "Serra's Sanctum", 
+            "Smothering Tithe", "Survival of the Fittest", "Teferi's Protection", 
+            "Tergrid, God of Fright // Tergrid's Lantern", "Tergrid, God of Fright",
+            "Thassa's Oracle", "The One Ring", "The Tabernacle at Pendrell Vale", 
+            "Underworld Breach", "Vampiric Tutor", "Worldly Tutor"
+        }
 
-        # Scrape authoritative data sources
-        mass_land_denial = await fetch_list(
-            "https://moxfield.com/commanderbrackets/masslanddenial",
-            "div.card-item span.card-name"
-        )
-        early_game_combos = await fetch_list(
-            "https://edhrec.com/combos/early-game-2-card-combos",
-            "div.card-container span.card-name"
-        )
-        game_changers = await fetch_list(
-            "https://moxfield.com/commanderbrackets/gamechangers",
-            "div.card-item span.card-name"
-        )
+        # Mass Land Denial list from WotC/Moxfield
+        # Source: https://moxfield.com/commanderbrackets/masslanddenial
+        mass_land_denial = {
+            "Acid Rain", "Apocalypse", "Armageddon", "Back to Basics", 
+            "Bearer of the Heavens", "Bend or Break", "Blood Moon", "Boil", 
+            "Boiling Seas", "Boom // Bust", "Break the Ice", "Burning of Xinye", 
+            "Cataclysm", "Catastrophe", "Choke", "Cleansing", "Contamination", 
+            "Conversion", "Curse of Marit Lage", "Death Cloud", 
+            "Decree of Annihilation", "Desolation Angel", "Destructive Force", 
+            "Devastating Dreams", "Devastation", "Dimensional Breach", 
+            "Disciple of Caelus Nin", "Epicenter", "Fall of the Thran", 
+            "Flashfires", "Gilt-Leaf Archdruid", "Glaciers", "Global Ruin", 
+            "Hall of Gemstone", "Harbinger of the Seas", "Hokori, Dust Drinker", 
+            "Impending Disaster", "Infernal Darkness", "Jokulhaups", 
+            "Keldon Firebombers", "Land Equilibrium", "Magus of the Balance", 
+            "Magus of the Moon", "Myojin of Infinite Rage", "Naked Singularity", 
+            "Natural Balance", "Obliterate", "Omen of Fire", "Raiding Party", 
+            "Ravages of War", "Razia's Purification", "Reality Twist", 
+            "Realm Razer", "Restore Balance", "Rising Waters", "Ritual of Subdual", 
+            "Ruination", "Soulscour", "Stasis", "Static Orb", "Storm Cauldron", 
+            "Sunder", "Sway of the Stars", "Tectonic Break", "Thoughts of Ruin", 
+            "Tsunami", "Wake of Destruction", "Wildfire", "Winter Moon", 
+            "Winter Orb", "Worldfire", "Worldpurge", "Worldslayer"
+        }
+
+        # Early game combo pieces (placeholder - can be expanded)
+        early_game_combos = set()
 
         data = {
-            "mass_land_denial": set(mass_land_denial),
-            "early_game_combos": set(early_game_combos),
-            "game_changers": set(game_changers),
+            "mass_land_denial": mass_land_denial,
+            "early_game_combos": early_game_combos,
+            "game_changers": game_changers,
         }
 
         self.cache["authoritative_data"] = data
