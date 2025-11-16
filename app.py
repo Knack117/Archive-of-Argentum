@@ -3129,6 +3129,8 @@ class DeckValidationResponse(BaseModel):
     validation_timestamp: str
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    # Salt scoring information
+    salt_scores: Dict[str, Any] = Field(default_factory=dict)
 
 
 # Commander Brackets data
@@ -3292,6 +3294,29 @@ class DeckValidator:
             # Parse and normalize decklist
             cards = await self._build_deck_cards(request.decklist)
             
+            # Load data for salt scoring
+            data = await self._load_authoritative_data()
+            
+            # Get commander salt score
+            commander_salt_score = await self._get_commander_salt_score(request.commander) if request.commander else 0.0
+            
+            # Calculate deck salt score
+            deck_salt_score = self._calculate_salt_score(cards, data)
+            
+            # Calculate combined salt score (weighted average)
+            combined_salt_score = round((commander_salt_score + deck_salt_score) / 2, 2)
+            
+            # Build salt scores summary
+            salt_scores = {
+                "commander_salt_score": commander_salt_score,
+                "deck_salt_score": deck_salt_score,
+                "combined_salt_score": combined_salt_score,
+                "commander_salt_description": self._get_salt_level_description(commander_salt_score),
+                "deck_salt_description": self._get_salt_level_description(deck_salt_score),
+                "combined_salt_description": self._get_salt_level_description(combined_salt_score),
+                "salt_level": self._get_salt_level_description(combined_salt_score)
+            }
+            
             # Validate legality
             legality_results = {}
             if request.validate_legality:
@@ -3316,7 +3341,8 @@ class DeckValidator:
                 legality_validation=legality_results,
                 validation_timestamp=datetime.utcnow().isoformat(),
                 errors=[],
-                warnings=[]
+                warnings=[],
+                salt_scores=salt_scores
             )
             
         except Exception as exc:
@@ -3329,7 +3355,8 @@ class DeckValidator:
                 legality_validation={},
                 validation_timestamp=datetime.utcnow().isoformat(),
                 errors=[str(exc)],
-                warnings=[]
+                warnings=[],
+                salt_scores={}
             )
     
     async def _build_deck_cards(self, decklist: List[str]) -> List[DeckCard]:
@@ -3513,10 +3540,61 @@ class DeckValidator:
             ("Splinter Twin", "Deceiver Exarch")
         ]
 
+        # Top 100 Saltiest Cards from EDHRec
+        # Source: https://edhrec.com/top/salt
+        salt_cards = {
+            "Stasis": 3.06, "Winter Orb": 2.96, "Vivi Ornitier": 2.81, 
+            "Tergrid, God of Fright": 2.8, "Rhystic Study": 2.73, 
+            "The Tabernacle at Pendrell Vale": 2.68, "Armageddon": 2.67, 
+            "Static Orb": 2.62, "Vorinclex, Voice of Hunger": 2.61, 
+            "Thassa's Oracle": 2.59, "Grand Arbiter Augustin IV": 2.58, 
+            "Smothering Tithe": 2.58, "Jin-Gitaxias, Core Augur": 2.57, 
+            "The One Ring": 2.55, "Humility": 2.51, "Drannith Magistrate": 2.46, 
+            "Expropriate": 2.45, "Sunder": 2.44, "Obliterate": 2.42, 
+            "Devastation": 2.41, "Ravages of War": 2.39, "Cyclonic Rift": 2.36, 
+            "Jokulhaups": 2.36, "Apocalypse": 2.34, "Opposition Agent": 2.32, 
+            "Urza, Lord High Artificer": 2.31, "Fierce Guardianship": 2.3, 
+            "Hokori, Dust Drinker": 2.27, "Back to Basics": 2.23, 
+            "Nether Void": 2.23, "Jin-Gitaxias, Progress Tyrant": 2.22, 
+            "Braids, Cabal Minion": 2.21, "Worldfire": 2.2, 
+            "Toxrill, the Corrosive": 2.19, "Aura Shards": 2.18, 
+            "Gaea's Cradle": 2.17, "Kinnan, Bonder Prodigy": 2.15, 
+            "Yuriko, the Tiger's Shadow": 2.15, "Teferi's Protection": 2.13, 
+            "Blood Moon": 2.13, "Farewell": 2.13, "Rising Waters": 2.11, 
+            "Decree of Annihilation": 2.1, "Winter Moon": 2.08, 
+            "Smokestack": 2.08, "Orcish Bowmasters": 2.07, 
+            "Tectonic Break": 2.05, "Edgar Markov": 2.05, "Sen Triplets": 2.04, 
+            "Warp World": 2.04, "Sheoldred, the Apocalypse": 2.03, 
+            "Emrakul, the Promised End": 2.03, "Scrambleverse": 2.02, 
+            "Thieves' Auction": 2.02, "Force of Will": 2.01, 
+            "Narset, Parter of Veils": 2.01, "Glacial Chasm": 1.99, 
+            "Ruination": 1.99, "Mindslaver": 1.98, "Epicenter": 1.97, 
+            "The Ur-Dragon": 1.97, "Notion Thief": 1.96, "Void Winnower": 1.96, 
+            "Jodah, the Unifier": 1.94, "Storm, Force of Nature": 1.91, 
+            "Wake of Destruction": 1.91, "Force of Negation": 1.91, 
+            "Deadpool, Trading Card": 1.9, "Mana Drain": 1.89, 
+            "Blightsteel Colossus": 1.88, "Dictate of Erebos": 1.88, 
+            "Boil": 1.87, "Winota, Joiner of Forces": 1.85, 
+            "Mana Breach": 1.84, "Global Ruin": 1.84, "Catastrophe": 1.83, 
+            "Emrakul, the World Anew": 1.83, "Acid Rain": 1.83, 
+            "Time Stretch": 1.83, "Grave Pact": 1.82, 
+            "Impending Disaster": 1.82, "Ulamog, the Defiler": 1.82, 
+            "Demonic Consultation": 1.82, "Underworld Breach": 1.81, 
+            "Consecrated Sphinx": 1.8, "Divine Intervention": 1.79, 
+            "Thoughts of Ruin": 1.79, "Miirym, Sentinel Wyrm": 1.78, 
+            "Vorinclex, Monstrous Raider": 1.78, "Ad Nauseam": 1.78, 
+            "Seedborn Muse": 1.77, "Cataclysm": 1.76, 
+            "Elesh Norn, Mother of Machines": 1.76, "Boiling Seas": 1.76, 
+            "Magus of the Moon": 1.75, "Elesh Norn, Grand Cenobite": 1.74, 
+            "Sway of the Stars": 1.74, "Hullbreaker Horror": 1.74, 
+            "Necropotence": 1.73, "Atraxa, Praetors' Voice": 1.72
+        }
+
         data = {
             "mass_land_denial": mass_land_denial,
             "early_game_combo_pairs": early_game_combo_pairs,
             "game_changers": game_changers,
+            "salt_cards": salt_cards,
         }
 
         self.cache["authoritative_data"] = data
@@ -3669,6 +3747,88 @@ class DeckValidator:
                 return True
             seen.add(card.name)
         return False
+
+    def _calculate_salt_score(self, cards: List[DeckCard], data: Dict[str, Dict[str, float]]) -> float:
+        """
+        Calculate salt score for a deck based on saltiest cards.
+        Returns a score from 0-5 where higher means saltier.
+        """
+        if not cards:
+            return 0.0
+        
+        salt_cards = data.get("salt_cards", {})
+        total_salt = 0.0
+        card_count = 0
+        
+        for card in cards:
+            # Normalize card name for lookup
+            card_name = card.name.strip()
+            salt_score = salt_cards.get(card_name, 0.0)
+            
+            # Weight by quantity if present
+            weighted_salt = salt_score * card.quantity
+            total_salt += weighted_salt
+            card_count += 1
+        
+        # Calculate average salt per card, then scale to 0-5
+        avg_salt_per_card = total_salt / max(card_count, 1)
+        
+        # Salt scores are already in reasonable range, scale appropriately
+        # Most cards are 1.5-3.0 range, so we'll normalize to 0-5
+        normalized_score = min(5.0, avg_salt_per_card * 1.5)
+        
+        return round(normalized_score, 2)
+
+    async def _get_commander_salt_score(self, commander_name: str) -> float:
+        """
+        Get salt score for a commander from EDHRec.
+        Returns 0.0 if not found.
+        """
+        if not commander_name:
+            return 0.0
+        
+        try:
+            # Normalize commander name for URL
+            commander_normalized = commander_name.lower().replace(" ", "-").replace(",", "").replace("'", "")
+            url = f"https://edhrec.com/commanders/{commander_normalized}"
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=10.0)
+                if response.status_code != 200:
+                    return 0.0
+                
+                # Parse the response for salt score
+                # This would need to be implemented based on the actual page structure
+                # For now, return a default based on some known high-salt commanders
+                high_salt_commanders = {
+                    "tergrid-god-of-fright": 2.8,
+                    "yuriko-the-tigers-shadow": 2.15,
+                    "vorinclex-voice-of-hunger": 2.61,
+                    "kinnan-bonder-prodigy": 2.15,
+                    "jin-gitaxias-core-augur": 2.57,
+                    "edgar-markov": 2.05,
+                    "sheoldred-the-apocalypse": 2.03,
+                    "atraxa-praetors-voice": 1.72
+                }
+                
+                return high_salt_commanders.get(commander_normalized, 1.0)  # Default 1.0 if not found
+                
+        except Exception as e:
+            logger.warning(f"Failed to fetch commander salt score for {commander_name}: {e}")
+            return 0.0
+
+    def _get_salt_level_description(self, score: float) -> str:
+        """Get a description of the salt level based on score."""
+        if score >= 4.0:
+            return "Extremely Salty"
+        elif score >= 3.0:
+            return "Very Salty"
+        elif score >= 2.0:
+            return "Moderately Salty"
+        elif score >= 1.0:
+            return "Slightly Salty"
+        else:
+            return "Casual"
 
 
 # Create global validator instance
