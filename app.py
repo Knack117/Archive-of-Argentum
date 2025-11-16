@@ -3091,13 +3091,12 @@ async def health_check():
 # --------------------------------------------------------------------
 
 class DeckValidationRequest(BaseModel):
-    """Request model for deck validation"""
+    """Request model for deck validation (simplified, no user-supplied sources)"""
     decklist: List[str] = Field(..., description="List of card names in the deck")
     commander: Optional[str] = Field(None, description="Commander name")
     target_bracket: Optional[str] = Field(None, description="Target bracket (exhibition, core, upgraded, optimized, cedh)")
-    source_urls: Optional[List[str]] = Field(default_factory=list, description="Moxfield or EDHRec URLs to reference")
-    validate_bracket: bool = Field(default=True, description="Whether to validate against bracket rules")
-    validate_legality: bool = Field(default=True, description="Whether to validate commander format legality")
+    validate_bracket: bool = Field(default=True, description="Validate against bracket rules")
+    validate_legality: bool = Field(default=True, description="Validate Commander format legality")
 
 
 class DeckCard(BaseModel):
@@ -3127,7 +3126,6 @@ class DeckValidationResponse(BaseModel):
     cards: List[DeckCard]
     bracket_validation: Optional[BracketValidation]
     legality_validation: Dict[str, Any]
-    source_analysis: Dict[str, Any]
     validation_timestamp: str
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
@@ -3292,7 +3290,7 @@ class DeckValidator:
         """Main validation method"""
         try:
             # Parse and normalize decklist
-            cards = await self._parse_decklist(request.decklist)
+            cards = await self._build_deck_cards(request.decklist)
             
             # Validate legality
             legality_results = {}
@@ -3303,11 +3301,6 @@ class DeckValidator:
             bracket_validation = None
             if request.validate_bracket and request.target_bracket:
                 bracket_validation = await self._validate_bracket(cards, request.target_bracket, request.source_urls)
-            
-            # Analyze sources
-            source_analysis = {}
-            if request.source_urls:
-                source_analysis = await self._analyze_sources(request.source_urls)
             
             # Create response
             return DeckValidationResponse(
@@ -3321,7 +3314,6 @@ class DeckValidator:
                 cards=cards,
                 bracket_validation=bracket_validation,
                 legality_validation=legality_results,
-                source_analysis=source_analysis,
                 validation_timestamp=datetime.utcnow().isoformat(),
                 errors=[],
                 warnings=[]
@@ -3341,87 +3333,94 @@ class DeckValidator:
                 warnings=[]
             )
     
-    async def _parse_decklist(self, decklist: List[str]) -> List[DeckCard]:
-        """Parse and normalize decklist"""
-        cards = []
-        
-        for line in decklist:
-            line = line.strip()
-            if not line:
-                continue
-            
-            # Handle quantity (e.g., "4 Lightning Bolt" or "1x Sol Ring")
-            quantity = 1
-            card_name = line
-            
-            # Extract quantity from various formats
-            import re
-            
-            quantity_patterns = [
-                r'^(\d+)\s+x?\s+(.+)$',  # "4 Lightning Bolt" or "4x Lightning Bolt"
-                r'^(\d+)\s+(.+)$',       # "4 Lightning Bolt"
-                r'^x\s*(\d+)\s+(.+)$',   # "x 4 Lightning Bolt"
-            ]
-            
-            for pattern in quantity_patterns:
-                match = re.match(pattern, line, re.IGNORECASE)
-                if match:
-                    quantity = int(match.group(1))
-                    card_name = match.group(2).strip()
-                    break
-            
-            # Clean up card name
-            card_name = re.sub(r'\s+', ' ', card_name).strip()
-            
-            # Check if it's a game changer
-            is_game_changer = card_name in GAME_CHANGERS["current_list"]
-            
-            # Validate card and add metadata
-            card = DeckCard(
-                name=card_name,
-                quantity=quantity,
-                is_game_changer=is_game_changer,
-                bracket_categories=self._categorize_card(card_name),
-                legality_status="pending"
-            )
-            
-            cards.append(card)
-        
-        return cards
+    async def _build_deck_cards(self, decklist: List[str]) -> List[DeckCard]:
+    """Parse decklist and classify each card using authoritative scraped data."""
+    import re
+    data = await self._load_authoritative_data()
+    cards: List[DeckCard] = []
+
+    for line in decklist:
+        line = line.strip()
+        if not line:
+            continue
+
+        quantity = 1
+        card_name = line
+
+        match = re.match(r"^(\d+)\s*x?\s*(.+)$", line, re.IGNORECASE)
+        if match:
+            quantity = int(match.group(1))
+            card_name = match.group(2).strip()
+
+        card = await self._classify_card(card_name, quantity, data)
+        cards.append(card)
+
+    return cards
     
-    def _categorize_card(self, card_name: str) -> List[str]:
-        """Categorize card for bracket validation"""
-        categories = []
-        
-        # Check for mass land denial
-        if card_name in MASS_LAND_DENIAL:
-            categories.append("mass_land_denial")
-        
-        # Check for early game combo
-        for combo in EARLY_GAME_COMBOS:
-            if card_name in combo["cards"]:
-                categories.append("early_game_combo")
-        
-        # Check for game changers
-        if card_name in GAME_CHANGERS["current_list"]:
-            categories.append("game_changer")
-        
-        # Check for tutors (basic heuristic)
-        tutor_keywords = ["tutor", "search", "find"]
-        if any(keyword in card_name.lower() for keyword in tutor_keywords):
-            categories.append("tutor")
-        
-        # Check for fast mana
-        fast_mana_keywords = ["mox", "sol ring", "mana crypt", "mana vault", "lotus", "ritual"]
-        if any(keyword in card_name.lower() for keyword in fast_mana_keywords):
-            categories.append("fast_mana")
-        
-        # Check for counterspells
-        counter_keywords = ["counter", "negate", "dismiss", "disrupt"]
-        if any(keyword in card_name.lower() for keyword in counter_keywords):
-            categories.append("counterspell")
-        
-        return categories
+    async def _load_authoritative_data(self) -> Dict[str, Set[str]]:
+    """Scrape authoritative lists from Moxfield and EDHRec and cache them."""
+    if "authoritative_data" in self.cache:
+        return self.cache["authoritative_data"]
+
+    async def fetch_list(url: str, selector: str, attr: str = "text") -> Set[str]:
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "html.parser")
+                elements = soup.select(selector)
+                if attr == "text":
+                    return {el.get_text(strip=True) for el in elements if el.get_text(strip=True)}
+                else:
+                    return {el.get(attr) for el in elements if el.get(attr)}
+        except Exception as e:
+            logger.warning(f"Failed to scrape {url}: {e}")
+            return set()
+
+    # Scrape authoritative data sources
+    mass_land_denial = await fetch_list(
+        "https://moxfield.com/commanderbrackets/masslanddenial",
+        "div.card-item span.card-name"
+    )
+    early_game_combos = await fetch_list(
+        "https://edhrec.com/combos/early-game-2-card-combos",
+        "div.card-container span.card-name"
+    )
+    game_changers = await fetch_list(
+        "https://moxfield.com/commanderbrackets/gamechangers",
+        "div.card-item span.card-name"
+    )
+
+    data = {
+        "mass_land_denial": set(mass_land_denial),
+        "early_game_combos": set(early_game_combos),
+        "game_changers": set(game_changers),
+    }
+
+    self.cache["authoritative_data"] = data
+    return data
+
+
+async def _classify_card(self, card_name: str, quantity: int, data: Dict[str, Set[str]]) -> DeckCard:
+    """Classify a single card using authoritative scraped lists."""
+    categories = []
+    is_game_changer = False
+
+    if card_name in data["mass_land_denial"]:
+        categories.append("mass_land_denial")
+    if card_name in data["early_game_combos"]:
+        categories.append("early_game_combo")
+    if card_name in data["game_changers"]:
+        categories.append("game_changer")
+        is_game_changer = True
+
+    return DeckCard(
+        name=card_name,
+        quantity=quantity,
+        is_game_changer=is_game_changer,
+        bracket_categories=categories,
+        legality_status="pending"
+    )
     
     async def _validate_legality(self, cards: List[DeckCard], commander: Optional[str]) -> Dict[str, Any]:
         """Validate commander format legality"""
@@ -3509,29 +3508,6 @@ class DeckValidator:
             violations=violations,
             recommendations=recommendations
         )
-    
-    async def _analyze_sources(self, source_urls: List[str]) -> Dict[str, Any]:
-        """Analyze reference sources from Moxfield/EDHRec URLs"""
-        analysis = {
-            "sources_scraped": 0,
-            "total_reference_cards": 0,
-            "reference_categories": [],
-            "analysis_timestamp": datetime.utcnow().isoformat()
-        }
-        
-        # This would implement actual scraping logic
-        # For now, return placeholder structure
-        for url in source_urls:
-            if "moxfield.com" in url:
-                analysis["sources_scraped"] += 1
-                analysis["total_reference_cards"] += len(MASS_LAND_DENIAL)  # Placeholder
-                analysis["reference_categories"].append("moxfield_commander_brackets")
-            elif "edhrec.com" in url:
-                analysis["sources_scraped"] += 1
-                analysis["total_reference_cards"] += len(EARLY_GAME_COMBOS) * 2  # Placeholder
-                analysis["reference_categories"].append("edhrec_combos")
-        
-        return analysis
     
     def _check_duplicates(self, cards: List[DeckCard]) -> bool:
         """Check for duplicate cards"""
