@@ -3285,6 +3285,34 @@ EARLY_GAME_COMBOS = [
 ]
 
 
+# Cards that are allowed to break the traditional singleton rule.
+# Includes all basic lands, their snow-covered variants, and cards that
+# explicitly allow any number of copies in a deck under Commander rules.
+UNLIMITED_DUPLICATE_CARDS = {
+    # Basic lands
+    "plains",
+    "island",
+    "swamp",
+    "mountain",
+    "forest",
+    "wastes",
+    # Snow-covered basics
+    "snow-covered plains",
+    "snow-covered island",
+    "snow-covered swamp",
+    "snow-covered mountain",
+    "snow-covered forest",
+    "snow-covered wastes",
+    # Non-basic cards with explicit rules text
+    "relentless rats",
+    "shadowborn apostle",
+    "rat colony",
+    "dragon's approach",
+    "persistent petitioners",
+    "seven dwarves",
+}
+
+
 class DeckValidator:
     """Main deck validation class"""
     
@@ -3296,7 +3324,9 @@ class DeckValidator:
         try:
             # Parse and normalize decklist
             cards = await self._build_deck_cards(request.decklist)
-            
+
+            illegal_duplicates = self._find_illegal_duplicates(cards)
+
             # Load data for salt scoring
             data = await self._load_authoritative_data()
             
@@ -3323,7 +3353,9 @@ class DeckValidator:
             # Validate legality
             legality_results = {}
             if request.validate_legality:
-                legality_results = await self._validate_legality(cards, request.commander)
+                legality_results = await self._validate_legality(
+                    cards, request.commander, duplicate_cards=illegal_duplicates
+                )
             
             # Validate bracket
             bracket_validation = None
@@ -3341,10 +3373,11 @@ class DeckValidator:
             return DeckValidationResponse(
                 success=True,
                 deck_summary={
-                    "total_cards": len(cards),
+                    "total_cards": self._calculate_total_card_count(cards),
                     "commander": request.commander,
                     "target_bracket": request.target_bracket,
-                    "has_duplicates": self._check_duplicates(cards)
+                    "has_duplicates": bool(illegal_duplicates),
+                    "illegal_duplicates": illegal_duplicates,
                 },
                 cards=cards,
                 bracket_validation=bracket_validation,
@@ -3629,23 +3662,45 @@ class DeckValidator:
         }
         
         salt_url = "https://edhrec.com/top/salt"
+        salt_json_url = "https://json.edhrec.com/pages/top/salt.json"
 
         try:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                # Try to load the structured JSON feed first (most reliable)
+                try:
+                    json_response = await client.get(salt_json_url, headers=headers)
+                    json_response.raise_for_status()
+                    salt_data = self._extract_salt_scores_from_json(json_response.json())
+                    if salt_data:
+                        logger.info(
+                            f"Scraped {len(salt_data)} salt scores from EDHRec JSON feed"
+                        )
+                        return salt_data
+                    logger.warning(
+                        "EDHRec JSON feed returned no salt data, falling back to HTML scrape"
+                    )
+                except Exception as json_exc:
+                    logger.warning(
+                        f"Unable to fetch JSON salt data ({json_exc}), falling back to HTML"
+                    )
+
+                # Fall back to scraping the HTML page directly
                 response = await client.get(salt_url, headers=headers)
                 response.raise_for_status()
-                
+
                 html_content = response.text
                 soup = BeautifulSoup(html_content, "html.parser")
-                
+
                 # Extract salt scores from the HTML
                 salt_data = self._extract_salt_scores_from_html(soup)
-                
+
                 if not salt_data:
-                    logger.warning("Could not extract salt scores from HTML, using fallback")
+                    logger.warning(
+                        "Could not extract salt scores from HTML, using fallback"
+                    )
                     return self._get_fallback_salt_scores()
-                
-                logger.info(f"Scraped {len(salt_data)} salt scores from EDHRec")
+
+                logger.info(f"Scraped {len(salt_data)} salt scores from EDHRec HTML page")
                 return salt_data
                 
         except Exception as exc:
@@ -3656,36 +3711,18 @@ class DeckValidator:
         """Extract salt scores from HTML structure"""
         salt_data = {}
         
-        # Look for JSON data in script tags
+        # Look for JSON data embedded in the page (Next.js __NEXT_DATA__)
         script_tags = soup.find_all("script", type="application/json")
         for script in script_tags:
             try:
+                if not script.string:
+                    continue
                 data = json.loads(script.string)
-                # Look for card data in the JSON structure
-                page_data = data.get("props", {}).get("pageProps", {}).get("data", {})
-                container = page_data.get("container", {})
-                json_dict = container.get("json_dict", {})
-                cardlists = json_dict.get("cardlists", [])
-                
-                for cardlist in cardlists:
-                    if not isinstance(cardlist, dict):
-                        continue
-                        
-                    header = cardlist.get("header", "").lower()
-                    if "salt" in header:
-                        cardviews = cardlist.get("cardviews", [])
-                        for card_data in cardviews:
-                            if isinstance(card_data, dict):
-                                name = card_data.get("name", "").strip()
-                                # Look for salt score in synergy field or other numeric fields
-                                salt_score = card_data.get("synergy")
-                                if isinstance(salt_score, (int, float)) and name:
-                                    salt_data[name] = float(salt_score)
-                
-                if salt_data:  # If we found data, return it
+                extracted = self._extract_salt_scores_from_json(data)
+                if extracted:
+                    salt_data.update(extracted)
                     break
-                    
-            except (json.JSONDecodeError, AttributeError, KeyError):
+            except (json.JSONDecodeError, TypeError):
                 continue
         
         # If JSON parsing didn't work, try HTML parsing as fallback
@@ -3715,6 +3752,86 @@ class DeckValidator:
                                 continue
         
         return salt_data
+
+    def _extract_salt_scores_from_json(self, data: Dict[str, Any]) -> Dict[str, float]:
+        """Extract salt scores from EDHRec JSON data structures."""
+        if not isinstance(data, dict):
+            return {}
+
+        salt_data: Dict[str, float] = {}
+        cardlists: List[Dict[str, Any]] = []
+
+        # Traverse nested dictionaries/lists to locate any "cardlists" entries
+        stack: List[Any] = [data]
+        while stack:
+            current = stack.pop()
+            if isinstance(current, dict):
+                cardlist_candidate = current.get("cardlists")
+                if isinstance(cardlist_candidate, list):
+                    cardlists.extend(cardlist_candidate)
+                for value in current.values():
+                    if isinstance(value, (dict, list)):
+                        stack.append(value)
+            elif isinstance(current, list):
+                for item in current:
+                    if isinstance(item, (dict, list)):
+                        stack.append(item)
+
+        for cardlist in cardlists:
+            self._extract_salt_from_cardlist(cardlist, salt_data)
+
+        return salt_data
+
+    def _extract_salt_from_cardlist(self, cardlist: Dict[str, Any], salt_data: Dict[str, float]) -> None:
+        """Extract salt scores from a single cardlist block."""
+        if not isinstance(cardlist, dict):
+            return
+
+        cardviews = (
+            cardlist.get("cardviews")
+            or cardlist.get("cards")
+            or cardlist.get("list")
+            or []
+        )
+
+        for card_data in cardviews:
+            if not isinstance(card_data, dict):
+                continue
+
+            name = (card_data.get("name") or card_data.get("card", {}).get("name") or "").strip()
+            if not name:
+                continue
+
+            salt_score = self._extract_salt_score_from_card(card_data)
+            if salt_score is not None and 0 <= salt_score <= 5:
+                salt_data[name] = float(salt_score)
+
+    def _extract_salt_score_from_card(self, card_data: Dict[str, Any]) -> Optional[float]:
+        """Pull the salt score from a card entry, checking multiple known fields."""
+        if not isinstance(card_data, dict):
+            return None
+
+        possible_keys = ["salt", "salt_score", "saltiness"]
+
+        for key in possible_keys:
+            value = card_data.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+
+        # Sometimes scores are nested inside a "scores" object
+        scores = card_data.get("scores")
+        if isinstance(scores, dict):
+            for key in possible_keys:
+                value = scores.get(key)
+                if isinstance(value, (int, float)):
+                    return float(value)
+
+        # Final fallback: some EDHRec data puts salt score under "synergy" when listing top salt cards
+        value = card_data.get("synergy")
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        return None
 
     def _get_fallback_salt_scores(self) -> Dict[str, float]:
         """
@@ -3763,29 +3880,56 @@ class DeckValidator:
         
         return detected_combos
     
-    async def _validate_legality(self, cards: List[DeckCard], commander: Optional[str]) -> Dict[str, Any]:
+    async def _validate_legality(
+        self,
+        cards: List[DeckCard],
+        commander: Optional[str],
+        duplicate_cards: Optional[Dict[str, int]] = None,
+    ) -> Dict[str, Any]:
         """Validate commander format legality"""
         legality_issues = []
         warnings = []
-        
+
+        if duplicate_cards is None:
+            duplicate_cards = self._find_illegal_duplicates(cards)
+
         # Basic commander format rules
         if commander:
             # Commander color identity check would go here
             # For now, just basic validation
-            
-            if len(cards) != 100:
-                legality_issues.append(f"Deck must have exactly 99 cards plus 1 commander (total 100 cards, currently has {len(cards)})")
-        
+
+            total_main_deck = self._calculate_total_card_count(cards)
+            commander_present = any(card.name.lower() == commander.lower() for card in cards)
+            total_with_commander = total_main_deck + (0 if commander_present else 1)
+
+            if total_with_commander != 100:
+                legality_issues.append(
+                    "Deck must have exactly 99 cards plus 1 commander (total 100 cards, "
+                    f"detected {total_main_deck} non-commander cards and "
+                    f"{'includes' if commander_present else 'excludes'} the commander)."
+                )
+
+        if duplicate_cards:
+            duplicate_list = ", ".join(
+                f"{name} x{count}" for name, count in sorted(duplicate_cards.items())
+            )
+            legality_issues.append(
+                "Commander is a singleton format. Only basic lands and a handful of cards "
+                "that explicitly break this rule can appear more than once. Duplicate cards "
+                f"detected: {duplicate_list}."
+            )
+
         # Check for banned cards (placeholder - would need comprehensive banlist)
         banned_cards = ["Ancestral Recall", "Black Lotus", "Time Walk", "Mox Sapphire", "Mox Jet", "Mox Pearl", "Mox Ruby", "Mox Emerald"]
         for card in cards:
             if card.name in banned_cards:
                 legality_issues.append(f"Card '{card.name}' is banned in Commander")
-        
+
         return {
             "is_legal": len(legality_issues) == 0,
             "issues": legality_issues,
-            "warnings": warnings
+            "warnings": warnings,
+            "illegal_duplicates": duplicate_cards,
         }
     
     async def _infer_bracket(self, cards: List[DeckCard]) -> str:
@@ -3976,7 +4120,7 @@ class DeckValidator:
                 "early_game_combos": combo_count,
                 "detected_combos": [f"{c1} + {c2}" for c1, c2 in detected_combos],
                 "tutors": tutor_count,
-                "total_cards": len(cards),
+                "total_cards": self._calculate_total_card_count(cards),
                 "bracket_inferred": bracket_inferred
             },
             violations=violations,
@@ -3984,13 +4128,34 @@ class DeckValidator:
         )
     
     def _check_duplicates(self, cards: List[DeckCard]) -> bool:
-        """Check for duplicate cards"""
-        seen = set()
+        """Check for duplicate cards using total quantities per name."""
+        return bool(self._find_illegal_duplicates(cards))
+
+    def _find_illegal_duplicates(self, cards: List[DeckCard]) -> Dict[str, int]:
+        """Return a mapping of card names that violate the singleton rule."""
+        counts: Dict[str, int] = defaultdict(int)
+
         for card in cards:
-            if card.name in seen:
-                return True
-            seen.add(card.name)
-        return False
+            normalized_name = card.name.strip()
+            counts[normalized_name] += max(card.quantity, 1)
+
+        illegal_duplicates: Dict[str, int] = {}
+        for name, total in counts.items():
+            if total <= 1:
+                continue
+            if self._is_unlimited_card(name):
+                continue
+            illegal_duplicates[name] = total
+
+        return illegal_duplicates
+
+    def _is_unlimited_card(self, card_name: str) -> bool:
+        """Return True if the card is exempt from singleton restrictions."""
+        return card_name.strip().lower() in UNLIMITED_DUPLICATE_CARDS
+
+    def _calculate_total_card_count(self, cards: List[DeckCard]) -> int:
+        """Sum quantities to understand the real deck size."""
+        return sum(card.quantity for card in cards)
 
     def _calculate_salt_score(self, cards: List[DeckCard], data: Dict[str, Dict[str, float]]) -> float:
         """
@@ -4008,11 +4173,11 @@ class DeckValidator:
             # Normalize card name for lookup
             card_name = card.name.strip()
             salt_score = salt_cards.get(card_name, 0.0)
-            
+
             # Weight by quantity if present
             weighted_salt = salt_score * card.quantity
             total_salt += weighted_salt
-            card_count += 1
+            card_count += card.quantity
         
         # Calculate average salt per card, then scale to 0-5
         avg_salt_per_card = total_salt / max(card_count, 1)
