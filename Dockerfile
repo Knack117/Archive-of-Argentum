@@ -56,6 +56,10 @@ RUN apt-get update \
         fonts-unifont \
         && rm -rf /var/lib/apt/lists/*
 
+# Ensure Playwright installs browsers into the same path that the unprivileged
+# runtime user will check so Chromium is available after the user switch.
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/app/.cache/ms-playwright
+
 # Copy requirements first for better Docker layer caching
 COPY requirements.txt .
 
@@ -63,15 +67,19 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Download the Playwright-managed Chromium binary so runtime scraping works
-# immediately after deployment.
-RUN python -m playwright install chromium
+# immediately after deployment. Install using the same PLAYWRIGHT_BROWSERS_PATH
+# so the `app` user can access the cached browser files.
+RUN mkdir -p /home/app/.cache/ms-playwright \
+    && python -m playwright install chromium
 
 # Copy application code
 COPY . .
 
-# Create non-root user for security
+# Create non-root user for security and ensure it owns its cache directory so
+# Playwright can read the pre-installed Chromium binary.
 RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app
+    && mkdir -p /home/app/.cache \
+    && chown -R app:app /app /home/app/.cache
 USER app
 
 # Expose port (Render will provide this via PORT env var)
