@@ -3334,28 +3334,29 @@ class DeckValidator:
             )
     
     async def _build_deck_cards(self, decklist: List[str]) -> List[DeckCard]:
-    """Parse decklist and classify each card using authoritative scraped data."""
-    import re
-    data = await self._load_authoritative_data()
-    cards: List[DeckCard] = []
+        """Parse decklist and classify each card using authoritative scraped data."""
+        import re
+        data = await self._load_authoritative_data()
+        cards: List[DeckCard] = []
 
-    for line in decklist:
-        line = line.strip()
-        if not line:
-            continue
+        for line in decklist:
+            line = line.strip()
+            if not line:
+                continue
 
-        quantity = 1
-        card_name = line
+            quantity = 1
+            card_name = line
 
-        match = re.match(r"^(\d+)\s*x?\s*(.+)$", line, re.IGNORECASE)
-        if match:
-            quantity = int(match.group(1))
-            card_name = match.group(2).strip()
+            match = re.match(r"^(\d+)\s*x?\s*(.+)$", line, re.IGNORECASE)
+            if match:
+                quantity = int(match.group(1))
+                card_name = match.group(2).strip()
 
-        card = await self._classify_card(card_name, quantity, data)
-        cards.append(card)
+            card = await self._classify_card(card_name, quantity, data)
+            cards.append(card)
 
-    return cards
+        return cards
+
     
     async def _load_authoritative_data(self) -> Dict[str, Set[str]]:
     """Scrape authoritative lists from Moxfield and EDHRec and cache them."""
