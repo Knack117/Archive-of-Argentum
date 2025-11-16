@@ -115,9 +115,9 @@ async def test_deck_validation():
                 commander="Jace, Wielder of Mysteries",
                 target_bracket="optimized",
                 source_urls=[
-                    "https://moxfield.com/commanderbrackets/masslanddenial",
-                    "https://moxfield.com/commanderbrackets/gamechangers",
-                    "https://edics.com/combos/early-game-2-card-combos"
+                    "https://archiveofargentum.com/reference/mass-land-denial",
+                    "https://archiveofargentum.com/reference/game-changers",
+                    "https://edhrec.com/combos/early-game-2-card-combos"
                 ],
                 validate_bracket=True,
                 validate_legality=True

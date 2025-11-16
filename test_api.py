@@ -10,6 +10,7 @@ from app import app
 
 # Create test client
 client = TestClient(app)
+AUTH_HEADERS = {"Authorization": "Bearer test-key"}
 
 
 class TestBasicEndpoints:
@@ -93,13 +94,13 @@ class TestDataValidation:
     def test_search_request_validation(self):
         """Test search request validation"""
         # Test with invalid request (missing required fields)
-        response = client.post("/api/v1/cards/search", json={})
+        response = client.post("/api/v1/cards/search", json={}, headers=AUTH_HEADERS)
         assert response.status_code == 422  # Validation error
     
     def test_autocomplete_request_validation(self):
         """Test autocomplete request validation"""
         # Test with query too short
-        response = client.get("/api/v1/cards/autocomplete?q=a")
+        response = client.get("/api/v1/cards/autocomplete?q=a", headers=AUTH_HEADERS)
         # Should return empty results or validation error
         assert response.status_code == 200 or response.status_code == 422
 
