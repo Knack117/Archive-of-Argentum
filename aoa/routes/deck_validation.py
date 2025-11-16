@@ -591,7 +591,11 @@ class DeckValidator:
         salt_url = "https://edhrec.com/top/salt"
 
         try:
-            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                timeout=30.0,
+                follow_redirects=True,
+                trust_env=False,
+            ) as client:
                 response = await client.get(salt_url, headers=headers)
                 response.raise_for_status()
 
@@ -1264,7 +1268,7 @@ class DeckValidator:
             commander_normalized = commander_name.lower().replace(" ", "-").replace(",", "").replace("'", "")
             url = f"https://edhrec.com/commanders/{commander_normalized}"
             
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(trust_env=False) as client:
                 response = await client.get(url, timeout=10.0)
                 if response.status_code != 200:
                     return 0.0

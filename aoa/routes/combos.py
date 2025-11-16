@@ -28,7 +28,11 @@ async def fetch_combo_details_from_page(combo_id: str) -> Dict[str, Any]:
     combo_url = f"https://commanderspellbook.com/combo/{combo_id}/"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
             resp = await client.get(combo_url)
             resp.raise_for_status()
 
@@ -300,7 +304,11 @@ async def fetch_commander_combos(query: str, search_type: str = "commander") -> 
     combo_results: List[ComboResult] = []
 
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
             response = await client.get(api_url)
             response.raise_for_status()
             data = response.json()
@@ -408,7 +416,11 @@ async def debug_combo_search(
     encoded_query = quote_plus(query)
     api_url = f"{COMMANDERSPELLBOOK_BASE_URL}variants?q={encoded_query}"
 
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        timeout=30.0,
+        follow_redirects=True,
+        trust_env=False,
+    ) as client:
         response = await client.get(api_url)
         response.raise_for_status()
         data = response.json()

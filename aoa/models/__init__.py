@@ -1,6 +1,6 @@
 """Aggregate exports for API models."""
 from .cards import Card, CardSearchRequest, CardSearchResponse
-from .combos import ComboCard, ComboResult, ComboSearchResponse
+from .combos import ComboResult, ComboSearchResponse
 from .commanders import (
     AverageDeckResponse,
     CommanderCard,
@@ -21,7 +21,6 @@ __all__ = [
     "Card",
     "CardSearchRequest",
     "CardSearchResponse",
-    "ComboCard",
     "ComboResult",
     "ComboSearchResponse",
     "AverageDeckResponse",
