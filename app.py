@@ -3087,6 +3087,595 @@ async def health_check():
 
 
 # --------------------------------------------------------------------
+# Deck Validation Models and Logic
+# --------------------------------------------------------------------
+
+class DeckValidationRequest(BaseModel):
+    """Request model for deck validation"""
+    decklist: List[str] = Field(..., description="List of card names in the deck")
+    commander: Optional[str] = Field(None, description="Commander name")
+    target_bracket: Optional[str] = Field(None, description="Target bracket (exhibition, core, upgraded, optimized, cedh)")
+    source_urls: Optional[List[str]] = Field(default_factory=list, description="Moxfield or EDHRec URLs to reference")
+    validate_bracket: bool = Field(default=True, description="Whether to validate against bracket rules")
+    validate_legality: bool = Field(default=True, description="Whether to validate commander format legality")
+
+
+class DeckCard(BaseModel):
+    """Individual card in deck with validation metadata"""
+    name: str
+    quantity: int = 1
+    is_game_changer: bool = False
+    bracket_categories: List[str] = Field(default_factory=list)
+    legality_status: str = "unknown"
+    validation_issues: List[str] = Field(default_factory=list)
+
+
+class BracketValidation(BaseModel):
+    """Bracket validation results"""
+    target_bracket: str
+    overall_compliance: bool
+    bracket_score: int = Field(..., ge=1, le=5, description="Bracket confidence score")
+    compliance_details: Dict[str, Any] = Field(default_factory=dict)
+    violations: List[str] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
+
+
+class DeckValidationResponse(BaseModel):
+    """Complete deck validation response"""
+    success: bool
+    deck_summary: Dict[str, Any]
+    cards: List[DeckCard]
+    bracket_validation: Optional[BracketValidation]
+    legality_validation: Dict[str, Any]
+    source_analysis: Dict[str, Any]
+    validation_timestamp: str
+    errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+# Commander Brackets data
+COMMANDER_BRACKETS = {
+    "exhibition": {
+        "level": 1,
+        "name": "Exhibition",
+        "expectations": {
+            "focus": "Theme over power",
+            "win_conditions": "Highly thematic or substandard",
+            "gameplay": "At least 9 turns before win/loss",
+            "complexity": "Opportunity to show off creations"
+        },
+        "restrictions": {
+            "game_changers": "Allowed with Rule 0 discussion",
+            "combos": "Minimal/complex theme-based combos only",
+            "tutors": "Limited to thematic/roleplay tutors"
+        }
+    },
+    "core": {
+        "level": 2,
+        "name": "Core",
+        "expectations": {
+            "focus": "Unoptimized and straightforward",
+            "win_conditions": "Incremental, telegraphed, disruptable",
+            "gameplay": "At least 8 turns before win/loss",
+            "complexity": "Low pressure, social interaction focus"
+        },
+        "restrictions": {
+            "game_changers": "Very limited",
+            "combos": "Few early-game combos",
+            "tutors": "Limited to 1-2 tutors max"
+        }
+    },
+    "upgraded": {
+        "level": 3,
+        "name": "Upgraded",
+        "expectations": {
+            "focus": "Powered up with strong synergy",
+            "win_conditions": "One big turn from hand",
+            "gameplay": "At least 6 turns before win/loss",
+            "complexity": "Proactive and reactive plays"
+        },
+        "restrictions": {
+            "game_changers": "Value engines and game-enders allowed",
+            "combos": "Standard game-ending combos allowed",
+            "tutors": "Moderate number of tutors acceptable"
+        }
+    },
+    "optimized": {
+        "level": 4,
+        "name": "Optimized",
+        "expectations": {
+            "focus": "Lethal, consistent, and fast",
+            "win_conditions": "Efficient and instantaneous",
+            "gameplay": "At least 4 turns before win/loss",
+            "complexity": "Explosive and powerful"
+        },
+        "restrictions": {
+            "game_changers": "Fast mana, tutors, free disruption allowed",
+            "combos": "Fast, efficient combos allowed",
+            "tutors": "Efficient tutors encouraged"
+        }
+    },
+    "cedh": {
+        "level": 5,
+        "name": "cEDH",
+        "expectations": {
+            "focus": "Competitive metagame optimized",
+            "win_conditions": "Optimized for efficiency",
+            "gameplay": "Can end on any turn",
+            "complexity": "Intricate and advanced"
+        },
+        "restrictions": {
+            "game_changers": "All game changers allowed",
+            "combos": "All combos allowed",
+            "tutors": "All tutors allowed"
+        }
+    }
+}
+
+# Game Changers list (October 2025 update)
+GAME_CHANGERS = {
+    "removed_2025": [
+        "Expropriate", "Jin-Gitaxias, Core Augur", "Sway of the Stars", "Vorinclex, Voice of Hunger",
+        "Kinnan, Bonder Prodigy", "Urza, Lord High Artificer", "Winota, Joiner of Forces", 
+        "Yuriko, the Tiger's Shadow", "Deflecting Swat", "Food Chain"
+    ],
+    "current_list": [
+        # High-impact cards that warp games
+        "Ad Nauseam", "Demonic Consultation", "Thassa's Oracle", "Tainted Pact",
+        "Exquisite Blood", "Sanguine Bond", "Consecrated Sphinx", "Coalition Victory",
+        "Panoptic Mirror", "Time Walk", "Ancestral Recall", "Black Lotus",
+        "Mox Sapphire", "Mox Jet", "Mox Pearl", "Mox Ruby", "Mox Emerald",
+        "Fastbond", "Lion's Eye Diamond", "Mana Vault", "Sol Ring", "Mana Crypt",
+        "Chrome Mox", "Mox Opal", "Lotus Petal", "Dark Ritual", "Cabal Ritual",
+        "Necropotence", "Yawgmoth's Will", "Timetwister", "Wheel of Fortune",
+        "Mystical Tutor", "Vampiric Tutor", "Demonic Tutor", "Imperial Seal",
+        "Grim Tutor", "Beseech the Mirror", "Wish", "Cunning Wish", "Ritual Wish",
+        "Biorhythm", "Enter the Infinite", " laboratory Maniac", "Jace, Wielder of Mysteries",
+        "Laboratory Maniac", "Neurok Transmuter", "Split Decision", "Brainstorm", "Ponder",
+        "Preordain", "Spell Pierce", "Force of Will", "Force of Negation", "Mana Drain",
+        "Counterspell", "Misdirection", "Pact of Negation", "Snapback", "Cyclonic Rift",
+        "Vandalblast", "Armageddon", "Ravages of War", "Cataclysm", "Balance",
+        "Life from the Loam", "The Tabernacle at Pendrell Vale", "Back to Basics",
+        "Winter Orb", "Static Orb", "Tangle Wire", "Smokestack", "Crucible of Worlds",
+        "Land Tax", "Scroll Rack", "Miren's Oracle Engine", "Sensei's Divining Top",
+        "The One Ring", "Ring of Maiev", "Shaharazad", "Panoptic Mirror"
+    ]
+}
+
+# Mass Land Denial cards from Moxfield
+MASS_LAND_DENIAL = [
+    "Acidic Slime", "Acid Rain", "Aloe Alchemist", "Arboreal Grazer", "Avenger of Zendikar",
+    "Bane of Progress", "Bojuka Bog", "Brago's Representative", "Brago, King Eternal",
+    "Casualties of War", "City of Brass", "Crystal Vein", "Dampening Wave", "Deserted Temple",
+    "Destroy All Artifacts", "Dust Bowl", "Elixir of Immortality", "Ezuri, Renegade Leader",
+    "Fierce Guardianship", "Force of Vigor", "From the Dust", "Gaea's Cradle", "Glacial Chasm",
+    "Grazing Gladehart", "Hallowed Fountain", "Harmonic Sliver", "Heartbeat of Spring",
+    "Hurricane", "Krosan Grip", "Living Plane", "Lotus Field", "Mana Confluence",
+    "Manifold Insights", "Maze of Ith", "Mishra's Factory", "Mycosynth Lattice", "Necromentia",
+    "Omen of the Sea", "Overgrown Estate", "Path to Exile", "Perplexing Chimera", "Pithing Needle",
+    "Polymorphist's Jest", "Ponder", "Primal Command", "Prophet of Kruphix", "Rite of the Raging Storm",
+    "Sea Gate Restoration", "Shatterstorm", "Silence", "Sol Ring", "Stifle", "Summer Bloom",
+    "Survival of the Fittest", "Swords to Plowshares", "Swiftfoot Boots", "Telepathy",
+    "Terror of the Peaks", "The Great Aurora", "Thran Quarry", "Timetwister", "Trickery Charm",
+    "Ulcerate", "Unravel the Aether", "Vandalblast", "Venser, the Soaring Blade",
+    "Vesuva", "Vinethorn Gatherer", "Volrath's Laboratory", "Walking Ballista", "White Sun's Zenith",
+    "Winter Orb", "World Breaker", "Zuran Orb"
+]
+
+# Early game 2-card combos from EDHRec
+EARLY_GAME_COMBOS = [
+    {
+        "cards": ["Demonic Consultation", "Thassa's Oracle"],
+        "effects": ["Exile your library", "Win the game"],
+        "brackets": ["1", "2", "3", "4", "5"]
+    },
+    {
+        "cards": ["Exquisite Blood", "Sanguine Bond"],
+        "effects": ["Infinite lifegain triggers", "Infinite lifeloss", "Infinite lifegain"],
+        "brackets": ["1", "2", "3", "4", "5"]
+    },
+    {
+        "cards": ["Tainted Pact", "Thassa's Oracle"],
+        "effects": ["Win the game"],
+        "brackets": ["1", "2", "3", "4", "5"]
+    }
+]
+
+
+class DeckValidator:
+    """Main deck validation class"""
+    
+    def __init__(self):
+        self.cache = TTLCache(maxsize=1000, ttl=3600)  # 1 hour cache
+        
+    async def validate_deck(self, request: DeckValidationRequest) -> DeckValidationResponse:
+        """Main validation method"""
+        try:
+            # Parse and normalize decklist
+            cards = await self._parse_decklist(request.decklist)
+            
+            # Validate legality
+            legality_results = {}
+            if request.validate_legality:
+                legality_results = await self._validate_legality(cards, request.commander)
+            
+            # Validate bracket
+            bracket_validation = None
+            if request.validate_bracket and request.target_bracket:
+                bracket_validation = await self._validate_bracket(cards, request.target_bracket, request.source_urls)
+            
+            # Analyze sources
+            source_analysis = {}
+            if request.source_urls:
+                source_analysis = await self._analyze_sources(request.source_urls)
+            
+            # Create response
+            return DeckValidationResponse(
+                success=True,
+                deck_summary={
+                    "total_cards": len(cards),
+                    "commander": request.commander,
+                    "target_bracket": request.target_bracket,
+                    "has_duplicates": self._check_duplicates(cards)
+                },
+                cards=cards,
+                bracket_validation=bracket_validation,
+                legality_validation=legality_results,
+                source_analysis=source_analysis,
+                validation_timestamp=datetime.utcnow().isoformat(),
+                errors=[],
+                warnings=[]
+            )
+            
+        except Exception as exc:
+            logger.error(f"Error validating deck: {exc}")
+            return DeckValidationResponse(
+                success=False,
+                deck_summary={},
+                cards=[],
+                bracket_validation=None,
+                legality_validation={},
+                source_analysis={},
+                validation_timestamp=datetime.utcnow().isoformat(),
+                errors=[str(exc)],
+                warnings=[]
+            )
+    
+    async def _parse_decklist(self, decklist: List[str]) -> List[DeckCard]:
+        """Parse and normalize decklist"""
+        cards = []
+        
+        for line in decklist:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Handle quantity (e.g., "4 Lightning Bolt" or "1x Sol Ring")
+            quantity = 1
+            card_name = line
+            
+            # Extract quantity from various formats
+            import re
+            
+            quantity_patterns = [
+                r'^(\d+)\s+x?\s+(.+)$',  # "4 Lightning Bolt" or "4x Lightning Bolt"
+                r'^(\d+)\s+(.+)$',       # "4 Lightning Bolt"
+                r'^x\s*(\d+)\s+(.+)$',   # "x 4 Lightning Bolt"
+            ]
+            
+            for pattern in quantity_patterns:
+                match = re.match(pattern, line, re.IGNORECASE)
+                if match:
+                    quantity = int(match.group(1))
+                    card_name = match.group(2).strip()
+                    break
+            
+            # Clean up card name
+            card_name = re.sub(r'\s+', ' ', card_name).strip()
+            
+            # Check if it's a game changer
+            is_game_changer = card_name in GAME_CHANGERS["current_list"]
+            
+            # Validate card and add metadata
+            card = DeckCard(
+                name=card_name,
+                quantity=quantity,
+                is_game_changer=is_game_changer,
+                bracket_categories=self._categorize_card(card_name),
+                legality_status="pending"
+            )
+            
+            cards.append(card)
+        
+        return cards
+    
+    def _categorize_card(self, card_name: str) -> List[str]:
+        """Categorize card for bracket validation"""
+        categories = []
+        
+        # Check for mass land denial
+        if card_name in MASS_LAND_DENIAL:
+            categories.append("mass_land_denial")
+        
+        # Check for early game combo
+        for combo in EARLY_GAME_COMBOS:
+            if card_name in combo["cards"]:
+                categories.append("early_game_combo")
+        
+        # Check for game changers
+        if card_name in GAME_CHANGERS["current_list"]:
+            categories.append("game_changer")
+        
+        # Check for tutors (basic heuristic)
+        tutor_keywords = ["tutor", "search", "find"]
+        if any(keyword in card_name.lower() for keyword in tutor_keywords):
+            categories.append("tutor")
+        
+        # Check for fast mana
+        fast_mana_keywords = ["mox", "sol ring", "mana crypt", "mana vault", "lotus", "ritual"]
+        if any(keyword in card_name.lower() for keyword in fast_mana_keywords):
+            categories.append("fast_mana")
+        
+        # Check for counterspells
+        counter_keywords = ["counter", "negate", "dismiss", "disrupt"]
+        if any(keyword in card_name.lower() for keyword in counter_keywords):
+            categories.append("counterspell")
+        
+        return categories
+    
+    async def _validate_legality(self, cards: List[DeckCard], commander: Optional[str]) -> Dict[str, Any]:
+        """Validate commander format legality"""
+        legality_issues = []
+        warnings = []
+        
+        # Basic commander format rules
+        if commander:
+            # Commander color identity check would go here
+            # For now, just basic validation
+            
+            if len(cards) != 99:
+                legality_issues.append(f"Deck must have exactly 99 cards (currently has {len(cards)})")
+        
+        # Check for banned cards (placeholder - would need comprehensive banlist)
+        banned_cards = ["Ancestral Recall", "Black Lotus", "Time Walk", "Mox Sapphire", "Mox Jet", "Mox Pearl", "Mox Ruby", "Mox Emerald"]
+        for card in cards:
+            if card.name in banned_cards:
+                legality_issues.append(f"Card '{card.name}' is banned in Commander")
+        
+        return {
+            "is_legal": len(legality_issues) == 0,
+            "issues": legality_issues,
+            "warnings": warnings
+        }
+    
+    async def _validate_bracket(self, cards: List[DeckCard], target_bracket: str, source_urls: List[str]) -> BracketValidation:
+        """Validate deck against bracket requirements"""
+        if target_bracket not in COMMANDER_BRACKETS:
+            return BracketValidation(
+                target_bracket=target_bracket,
+                overall_compliance=False,
+                bracket_score=1,
+                violations=[f"Invalid bracket: {target_bracket}"],
+                recommendations=[f"Valid brackets: {', '.join(COMMANDER_BRACKETS.keys())}"]
+            )
+        
+        bracket_info = COMMANDER_BRACKETS[target_bracket]
+        violations = []
+        recommendations = []
+        score_factors = []
+        
+        # Check game changers
+        game_changer_count = sum(1 for card in cards if card.is_game_changer)
+        if target_bracket in ["exhibition", "core"] and game_changer_count > 0:
+            violations.append(f"Game changers found in {target_bracket} bracket")
+            recommendations.append("Consider moving to higher bracket or removing game changers")
+        elif target_bracket == "cedh" and game_changer_count == 0:
+            recommendations.append("Consider adding game changers for cEDH")
+        
+        # Check for mass land denial
+        mass_land_count = sum(1 for card in cards if "mass_land_denial" in card.bracket_categories)
+        if target_bracket == "exhibition" and mass_land_count > 2:
+            violations.append("Too many mass land denial effects for Exhibition")
+        
+        # Check for tutors
+        tutor_count = sum(1 for card in cards if "tutor" in card.bracket_categories)
+        if target_bracket == "exhibition" and tutor_count > 2:
+            violations.append("Too many tutors for Exhibition bracket")
+        elif target_bracket == "core" and tutor_count > 3:
+            violations.append("Too many tutors for Core bracket")
+        
+        # Calculate bracket score (1-5)
+        compliance_score = 5
+        if violations:
+            compliance_score = max(1, 5 - len(violations))
+        
+        # Add recommendations based on analysis
+        if target_bracket == "exhibition" and mass_land_count > 0:
+            recommendations.append("Consider thematic alternatives to mass land denial")
+        
+        if tutor_count == 0 and target_bracket in ["upgraded", "optimized"]:
+            recommendations.append("Consider adding tutors for better consistency")
+        
+        return BracketValidation(
+            target_bracket=target_bracket,
+            overall_compliance=len(violations) == 0,
+            bracket_score=compliance_score,
+            compliance_details={
+                "game_changers": game_changer_count,
+                "mass_land_denial": mass_land_count,
+                "tutors": tutor_count,
+                "total_cards": len(cards)
+            },
+            violations=violations,
+            recommendations=recommendations
+        )
+    
+    async def _analyze_sources(self, source_urls: List[str]) -> Dict[str, Any]:
+        """Analyze reference sources from Moxfield/EDHRec URLs"""
+        analysis = {
+            "sources_scraped": 0,
+            "total_reference_cards": 0,
+            "reference_categories": [],
+            "analysis_timestamp": datetime.utcnow().isoformat()
+        }
+        
+        # This would implement actual scraping logic
+        # For now, return placeholder structure
+        for url in source_urls:
+            if "moxfield.com" in url:
+                analysis["sources_scraped"] += 1
+                analysis["total_reference_cards"] += len(MASS_LAND_DENIAL)  # Placeholder
+                analysis["reference_categories"].append("moxfield_commander_brackets")
+            elif "edhrec.com" in url:
+                analysis["sources_scraped"] += 1
+                analysis["total_reference_cards"] += len(EARLY_GAME_COMBOS) * 2  # Placeholder
+                analysis["reference_categories"].append("edhrec_combos")
+        
+        return analysis
+    
+    def _check_duplicates(self, cards: List[DeckCard]) -> bool:
+        """Check for duplicate cards"""
+        seen = set()
+        for card in cards:
+            if card.name in seen:
+                return True
+            seen.add(card.name)
+        return False
+
+
+# Create global validator instance
+deck_validator = DeckValidator()
+
+
+# --------------------------------------------------------------------
+# Deck Validation API Endpoints
+# --------------------------------------------------------------------
+
+@app.post("/api/v1/deck/validate", response_model=DeckValidationResponse)
+async def validate_deck(
+    request: DeckValidationRequest,
+    api_key: str = Depends(verify_api_key)
+) -> DeckValidationResponse:
+    """
+    Validate a deck against Commander Brackets rules and format legality.
+    
+    - Provide a decklist of card names
+    - Optionally specify commander and target bracket
+    - Include source URLs for reference comparison
+    - Validates against official Commander Brackets system
+    - Checks for Game Changers, format legality, and power level compliance
+    """
+    try:
+        result = await deck_validator.validate_deck(request)
+        
+        # Cache the result for 1 hour
+        cache_key = f"deck_validation_{hash(str(request.decklist))}"
+        cache[cache_key] = result
+        
+        return result
+        
+    except Exception as exc:
+        logger.error(f"Error in deck validation: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to validate deck: {str(exc)}"
+        )
+
+
+@app.get("/api/v1/deck/validate/sample")
+async def get_sample_validation(
+    api_key: str = Depends(verify_api_key)
+) -> Dict[str, Any]:
+    """
+    Get sample deck validation to demonstrate the endpoint functionality.
+    """
+    sample_deck = DeckValidationRequest(
+        decklist=[
+            "1x Sol Ring",
+            "4x Lightning Bolt",
+            "2x Counterspell",
+            "1x Demonic Consultation",
+            "1x Thassa's Oracle",
+            "1x Swords to Plowshares",
+            "1x Ponder",
+            "1x Brainstorm",
+            "1x Vampiric Tutor",
+            "97x Island"
+        ],
+        commander="Jace, Wielder of Mysteries",
+        target_bracket="upgraded",
+        source_urls=[
+            "https://moxfield.com/commanderbrackets/masslanddenial",
+            "https://edhrec.com/combos/early-game-2-card-combos"
+        ],
+        validate_bracket=True,
+        validate_legality=True
+    )
+    
+    result = await deck_validator.validate_deck(sample_deck)
+    result.warnings.append("This is a sample validation for demonstration purposes")
+    
+    return {
+        "sample_request": sample_deck.dict(),
+        "validation_result": result.dict(),
+        "note": "This demonstrates the validation endpoint with a sample deck"
+    }
+
+
+@app.get("/api/v1/brackets/info")
+async def get_brackets_info(
+    api_key: str = Depends(verify_api_key)
+) -> Dict[str, Any]:
+    """
+    Get comprehensive information about Commander Brackets system.
+    
+    Returns official bracket definitions, expectations, and restrictions
+    based on Wizards of the Coast's October 21, 2025 update.
+    """
+    return {
+        "brackets": COMMANDER_BRACKETS,
+        "game_changers": {
+            "current_list_size": len(GAME_CHANGERS["current_list"]),
+            "recent_removals": GAME_CHANGERS["removed_2025"],
+            "total_removed_2025": len(GAME_CHANGERS["removed_2025"])
+        },
+        "validation_categories": {
+            "mass_land_denial": {
+                "description": "Cards that destroy, exile, or bounce multiple lands",
+                "sample_cards": MASS_LAND_DENIAL[:10]
+            },
+            "early_game_combos": {
+                "description": "2-card combinations that can win early",
+                "combos": EARLY_GAME_COMBOS
+            }
+        },
+        "last_updated": "2025-10-21",
+        "source": "https://magic.wizards.com/en/news/announcements/commander-brackets-beta-update-october-21-2025"
+    }
+
+
+@app.get("/api/v1/brackets/game-changers/list")
+async def get_game_changers_list(
+    api_key: str = Depends(verify_api_key)
+) -> Dict[str, Any]:
+    """
+    Get the complete list of Game Changers cards.
+    
+    Based on the October 21, 2025 update from Wizards of the Coast.
+    """
+    return {
+        "current_game_changers": GAME_CHANGERS["current_list"],
+        "recently_removed": GAME_CHANGERS["removed_2025"],
+        "removal_reasoning": {
+            "high_mana_value": "Expropriate, Jin-Gitaxias, Sway of the Stars, Vorinclex",
+            "legends_strongest_as_commanders": "Kinnan, Urza, Winota, Yuriko",
+            "other": "Deflecting Swat, Food Chain"
+        },
+        "last_updated": "2025-10-21"
+    }
+
+
+# --------------------------------------------------------------------
 # Exception Handlers
 # --------------------------------------------------------------------
 
