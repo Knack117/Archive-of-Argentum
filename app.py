@@ -3568,9 +3568,9 @@ async def validate_deck(
     try:
         result = await deck_validator.validate_deck(request)
         
-        # Cache the result for 1 hour
+        # Cache the result for 1 hour using the validator's cache
         cache_key = f"deck_validation_{hash(str(request.decklist))}"
-        cache[cache_key] = result
+        deck_validator.cache[cache_key] = result
         
         return result
         
