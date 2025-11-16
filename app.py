@@ -1282,6 +1282,75 @@ class CardSearchResponse(BaseModel):
 
 
 # --------------------------------------------------------------------
+# Moxfield Data Models
+# --------------------------------------------------------------------
+
+
+class MoxfieldCard(BaseModel):
+    """Individual card from Moxfield data"""
+    name: str
+    quantity: Optional[int] = 1
+    image_url: Optional[str] = None
+    moxfield_link: Optional[str] = None
+
+
+class MoxfieldDeckData(BaseModel):
+    """Moxfield deck structure"""
+    name: Optional[str] = None
+    commander: Optional[str] = None
+    cards: List[MoxfieldCard] = []
+    stats: Dict[str, Any] = {}
+
+
+class MoxfieldDeckResponse(BaseModel):
+    """Response structure for Moxfield deck data"""
+    success: bool
+    source: str = "moxfield"
+    deck_id: str
+    timestamp: str
+    data: MoxfieldDeckData
+
+
+class MoxfieldBracketCard(BaseModel):
+    """Individual card from Moxfield bracket category"""
+    name: str
+    image_url: Optional[str] = None
+    moxfield_link: Optional[str] = None
+
+
+class MoxfieldBracketData(BaseModel):
+    """Moxfield bracket category structure"""
+    bracket_slug: str
+    cards: List[MoxfieldBracketCard] = []
+    metadata: Dict[str, Any] = {}
+
+
+class MoxfieldBracketResponse(BaseModel):
+    """Response structure for Moxfield bracket data"""
+    success: bool
+    source: str = "moxfield"
+    bracket_slug: str
+    timestamp: str
+    data: MoxfieldBracketData
+
+
+class MoxfieldBracketInfo(BaseModel):
+    """Information about available bracket categories"""
+    slug: str
+    name: str
+    description: str
+
+
+class MoxfieldBracketsListResponse(BaseModel):
+    """Response structure for available bracket categories"""
+    success: bool
+    source: str = "moxfield"
+    available_brackets: List[MoxfieldBracketInfo]
+    timestamp: str
+    usage_note: str
+
+
+# --------------------------------------------------------------------
 # API Endpoints - General / Cards
 # --------------------------------------------------------------------
 
@@ -1621,6 +1690,246 @@ async def root():
     }
 
 
+# --------------------------------------------------------------------
+# Moxfield Integration Functions
+# --------------------------------------------------------------------
+
+class MoxfieldClient:
+    """
+    Python equivalent of moxfield-api library
+    Provides methods to interact with Moxfield's unofficial API
+    """
+    
+    def __init__(self):
+        self.base_url = "https://moxfield.com"
+        self.api_base = "https://api.moxfield.com/v2"  # Unofficial API endpoint
+        self.headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/91.0.4472.124 Safari/537.36"
+            ),
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+    
+    async def find_deck_by_id(self, deck_id: str) -> Dict[str, Any]:
+        """
+        Get decklist by ID (equivalent to moxfield-api's findById)
+        
+        Args:
+            deck_id: Moxfield deck ID (e.g., 'oEWXWHM5eEGMmopExLWRCA')
+            
+        Returns:
+            Deck data in structured format
+        """
+        try:
+            # Clean the deck ID if it's a full URL
+            if "moxfield.com" in deck_id:
+                # Extract ID from URL like https://moxfield.com/decks/abc123
+                deck_id = deck_id.split("/decks/")[-1]
+            
+            # Try the unofficial API first
+            api_url = f"{self.api_base}/decks/{deck_id}"
+            
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(api_url, headers=self.headers)
+                
+                if response.status_code == 200:
+                    return {"success": True, "data": response.json()}
+                
+                # Fallback to scraping the public deck page
+                return await self._scrape_deck_page(deck_id)
+                
+        except Exception as exc:
+            logger.error(f"Error fetching deck {deck_id}: {exc}")
+            # Fallback to scraping
+            return await self._scrape_deck_page(deck_id)
+    
+    async def _scrape_deck_page(self, deck_id: str) -> Dict[str, Any]:
+        """
+        Fallback method to scrape deck data from the public page
+        """
+        deck_url = f"{self.base_url}/decks/{deck_id}"
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(deck_url, headers=self.headers)
+                response.raise_for_status()
+                
+                # Parse the HTML to extract deck data
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Extract basic deck information
+                deck_data = {
+                    "success": True,
+                    "source": "scraped",
+                    "deck_id": deck_id,
+                    "url": deck_url,
+                    "data": self._parse_deck_soup(soup)
+                }
+                
+                return deck_data
+                
+        except Exception as exc:
+            logger.error(f"Error scraping deck page {deck_id}: {exc}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch deck data: {str(exc)}"
+            )
+    
+    def _parse_deck_soup(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """
+        Parse deck information from BeautifulSoup object
+        """
+        deck_data = {
+            "name": None,
+            "commander": None,
+            "cards": [],
+            "stats": {}
+        }
+        
+        try:
+            # Extract deck name
+            title_element = soup.find('title')
+            if title_element:
+                deck_data["name"] = title_element.get_text().strip()
+            
+            # Extract commander information
+            commander_element = soup.find('span', class_='commander-name')
+            if commander_element:
+                deck_data["commander"] = commander_element.get_text().strip()
+            
+            # Extract cards from the decklist
+            card_rows = soup.find_all('tr', class_='card-row')
+            for row in card_rows:
+                card_data = self._parse_card_row(row)
+                if card_data:
+                    deck_data["cards"].append(card_data)
+            
+            # Extract deck statistics
+            stats_elements = soup.find_all('div', class_='stat-value')
+            if stats_elements:
+                deck_data["stats"] = {
+                    "total_cards": len(deck_data["cards"]),
+                    "extracted_at": datetime.utcnow().isoformat()
+                }
+            
+        except Exception as exc:
+            logger.warning(f"Error parsing deck soup: {exc}")
+        
+        return deck_data
+    
+    def _parse_card_row(self, row) -> Optional[Dict[str, Any]]:
+        """
+        Parse individual card row from decklist
+        """
+        try:
+            # Extract card name
+            name_element = row.find('span', class_='card-name')
+            if not name_element:
+                return None
+            
+            # Extract quantity
+            quantity_element = row.find('span', class_='card-qty')
+            quantity = int(quantity_element.get_text()) if quantity_element else 1
+            
+            return {
+                "name": name_element.get_text().strip(),
+                "quantity": quantity
+            }
+            
+        except Exception:
+            return None
+    
+    async def get_commander_brackets(self, bracket_slug: str) -> Dict[str, Any]:
+        """
+        Get cards from commander bracket category (like 'masslanddenial')
+        
+        Args:
+            bracket_slug: Bracket category slug (e.g., 'masslanddenial')
+            
+        Returns:
+            List of cards in the bracket category
+        """
+        try:
+            bracket_url = f"{self.base_url}/commanderbrackets/{bracket_slug}"
+            
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(bracket_url, headers=self.headers)
+                response.raise_for_status()
+                
+                soup = BeautifulSoup(response.text, 'html.parser')
+                return self._parse_bracket_soup(soup, bracket_slug)
+                
+        except Exception as exc:
+            logger.error(f"Error fetching bracket {bracket_slug}: {exc}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch bracket data: {str(exc)}"
+            )
+    
+    def _parse_bracket_soup(self, soup: BeautifulSoup, bracket_slug: str) -> Dict[str, Any]:
+        """
+        Parse bracket category information from BeautifulSoup
+        """
+        bracket_data = {
+            "success": True,
+            "bracket_slug": bracket_slug,
+            "cards": [],
+            "metadata": {}
+        }
+        
+        try:
+            # Find all card entries
+            card_elements = soup.find_all('div', class_='card-item')
+            
+            for element in card_elements:
+                card_data = self._parse_bracket_card(element)
+                if card_data:
+                    bracket_data["cards"].append(card_data)
+            
+            # Extract bracket metadata
+            header_element = soup.find('h1')
+            if header_element:
+                bracket_data["metadata"]["name"] = header_element.get_text().strip()
+            
+            bracket_data["metadata"]["total_cards"] = len(bracket_data["cards"])
+            bracket_data["metadata"]["extracted_at"] = datetime.utcnow().isoformat()
+            
+        except Exception as exc:
+            logger.warning(f"Error parsing bracket soup: {exc}")
+        
+        return bracket_data
+    
+    def _parse_bracket_card(self, element) -> Optional[Dict[str, Any]]:
+        """
+        Parse individual card from bracket category
+        """
+        try:
+            # Extract card name
+            name_element = element.find('span', class_='card-name')
+            if not name_element:
+                return None
+            
+            # Extract image URL if available
+            img_element = element.find('img')
+            image_url = img_element.get('src') if img_element else None
+            
+            return {
+                "name": name_element.get_text().strip(),
+                "image_url": image_url,
+                "moxfield_link": element.get('data-card-link')
+            }
+            
+        except Exception:
+            return None
+
+
+# Create global Moxfield client instance
+moxfield_client = MoxfieldClient()
+
+
 # ----------------------------------------------
 # Commander Summary Endpoint
 # ----------------------------------------------
@@ -1835,6 +2144,175 @@ async def get_average_deck_summary(
         combos=combos_output,
         similar_commanders=similar_commanders_output,
         categories=categories_output,
+    )
+
+
+# ----------------------------------------------
+# Moxfield Integration Endpoints
+# ----------------------------------------------
+
+
+@app.get("/api/v1/moxfield/deck/{deck_id}", response_model=MoxfieldDeckResponse)
+async def get_moxfield_deck(
+    deck_id: str,
+    api_key: str = Depends(verify_api_key)
+) -> MoxfieldDeckResponse:
+    """
+    Fetch deck data from Moxfield by deck ID
+    
+    - Provide deck ID (e.g., 'oEWXWHM5eEGMmopExLWRCA')
+    - Or full Moxfield URL (e.g., 'https://moxfield.com/decks/oEWXWHM5eEGMmopExLWRCA')
+    
+    Returns deck composition, commander, and metadata
+    """
+    try:
+        result = await moxfield_client.find_deck_by_id(deck_id)
+        
+        if result["success"]:
+            # Cache the result for 1 hour
+            cache_key = f"moxfield_deck_{deck_id}"
+            cache[cache_key] = result
+            
+            return MoxfieldDeckResponse(
+                success=True,
+                source="moxfield",
+                deck_id=deck_id,
+                timestamp=datetime.utcnow().isoformat(),
+                data=MoxfieldDeckData(**result["data"])
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Deck not found: {deck_id}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Error fetching Moxfield deck {deck_id}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch deck: {str(exc)}"
+        )
+
+
+@app.get("/api/v1/moxfield/commander-brackets/{bracket_slug}", response_model=MoxfieldBracketResponse)
+async def get_moxfield_commander_brackets(
+    bracket_slug: str,
+    api_key: str = Depends(verify_api_key)
+) -> MoxfieldBracketResponse:
+    """
+    Fetch cards from Moxfield Commander Brackets category
+    
+    - Provide bracket slug (e.g., 'masslanddenial', 'stax', 'tutors', etc.)
+    - Returns categorized card list with metadata
+    
+    Examples:
+    - /api/v1/moxfield/commander-brackets/masslanddenial
+    - /api/v1/moxfield/commander-brackets/stax
+    - /api/v1/moxfield/commander-brackets/tutors
+    """
+    try:
+        result = await moxfield_client.get_commander_brackets(bracket_slug)
+        
+        if result["success"]:
+            # Cache the result for 24 hours
+            cache_key = f"moxfield_bracket_{bracket_slug}"
+            cache[cache_key] = result
+            
+            return MoxfieldBracketResponse(
+                success=True,
+                source="moxfield",
+                bracket_slug=bracket_slug,
+                timestamp=datetime.utcnow().isoformat(),
+                data=MoxfieldBracketData(**result)
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Bracket category not found: {bracket_slug}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Error fetching Moxfield bracket {bracket_slug}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch bracket data: {str(exc)}"
+        )
+
+
+@app.get("/api/v1/moxfield/search/available-brackets", response_model=MoxfieldBracketsListResponse)
+async def get_available_moxfield_brackets(
+    api_key: str = Depends(verify_api_key)
+) -> MoxfieldBracketsListResponse:
+    """
+    Get list of available Moxfield Commander Bracket categories
+    
+    Returns common bracket category slugs that can be used with 
+    the commander-brackets endpoint
+    """
+    # Common bracket categories based on Moxfield's Commander Brackets system
+    available_brackets = [
+        MoxfieldBracketInfo(
+            slug="masslanddenial",
+            name="Mass Land Denial",
+            description="Cards that destroy, exile, and bounce lands"
+        ),
+        MoxfieldBracketInfo(
+            slug="stax",
+            name="Stax",
+            description="Cards that create symmetrical restrictions and prison effects"
+        ),
+        MoxfieldBracketInfo(
+            slug="tutors",
+            name="Tutors",
+            description="Cards that search for other cards from the library"
+        ),
+        MoxfieldBracketInfo(
+            slug="combos",
+            name="Combos",
+            description="Cards that create infinite or game-winning combinations"
+        ),
+        MoxfieldBracketInfo(
+            slug="fastmana",
+            name="Fast Mana",
+            description="Cards that provide accelerated mana generation"
+        ),
+        MoxfieldBracketInfo(
+            slug="counterspells",
+            name="Counterspells",
+            description="Cards that prevent spells from resolving"
+        ),
+        MoxfieldBracketInfo(
+            slug="boardwipes",
+            name="Board Wipes",
+            description="Cards that destroy or exile multiple permanents"
+        ),
+        MoxfieldBracketInfo(
+            slug="ramp",
+            name="Ramp",
+            description="Cards that accelerate mana development"
+        ),
+        MoxfieldBracketInfo(
+            slug="carddraw",
+            name="Card Draw",
+            description="Cards that provide additional card advantage"
+        ),
+        MoxfieldBracketInfo(
+            slug="removal",
+            name="Removal",
+            description="Cards that destroy or exile individual permanents"
+        )
+    ]
+    
+    return MoxfieldBracketsListResponse(
+        success=True,
+        source="moxfield",
+        available_brackets=available_brackets,
+        timestamp=datetime.utcnow().isoformat(),
+        usage_note="Use bracket slugs with /api/v1/moxfield/commander-brackets/{bracket_slug}"
     )
 
 
