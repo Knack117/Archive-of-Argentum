@@ -3285,6 +3285,34 @@ EARLY_GAME_COMBOS = [
 ]
 
 
+# Cards that are allowed to break the traditional singleton rule.
+# Includes all basic lands, their snow-covered variants, and cards that
+# explicitly allow any number of copies in a deck under Commander rules.
+UNLIMITED_DUPLICATE_CARDS = {
+    # Basic lands
+    "plains",
+    "island",
+    "swamp",
+    "mountain",
+    "forest",
+    "wastes",
+    # Snow-covered basics
+    "snow-covered plains",
+    "snow-covered island",
+    "snow-covered swamp",
+    "snow-covered mountain",
+    "snow-covered forest",
+    "snow-covered wastes",
+    # Non-basic cards with explicit rules text
+    "relentless rats",
+    "shadowborn apostle",
+    "rat colony",
+    "dragon's approach",
+    "persistent petitioners",
+    "seven dwarves",
+}
+
+
 class DeckValidator:
     """Main deck validation class"""
     
@@ -3296,7 +3324,9 @@ class DeckValidator:
         try:
             # Parse and normalize decklist
             cards = await self._build_deck_cards(request.decklist)
-            
+
+            illegal_duplicates = self._find_illegal_duplicates(cards)
+
             # Load data for salt scoring
             data = await self._load_authoritative_data()
             
@@ -3323,7 +3353,9 @@ class DeckValidator:
             # Validate legality
             legality_results = {}
             if request.validate_legality:
-                legality_results = await self._validate_legality(cards, request.commander)
+                legality_results = await self._validate_legality(
+                    cards, request.commander, duplicate_cards=illegal_duplicates
+                )
             
             # Validate bracket
             bracket_validation = None
@@ -3344,7 +3376,8 @@ class DeckValidator:
                     "total_cards": self._calculate_total_card_count(cards),
                     "commander": request.commander,
                     "target_bracket": request.target_bracket,
-                    "has_duplicates": self._check_duplicates(cards)
+                    "has_duplicates": bool(illegal_duplicates),
+                    "illegal_duplicates": illegal_duplicates,
                 },
                 cards=cards,
                 bracket_validation=bracket_validation,
@@ -3847,11 +3880,19 @@ class DeckValidator:
         
         return detected_combos
     
-    async def _validate_legality(self, cards: List[DeckCard], commander: Optional[str]) -> Dict[str, Any]:
+    async def _validate_legality(
+        self,
+        cards: List[DeckCard],
+        commander: Optional[str],
+        duplicate_cards: Optional[Dict[str, int]] = None,
+    ) -> Dict[str, Any]:
         """Validate commander format legality"""
         legality_issues = []
         warnings = []
-        
+
+        if duplicate_cards is None:
+            duplicate_cards = self._find_illegal_duplicates(cards)
+
         # Basic commander format rules
         if commander:
             # Commander color identity check would go here
@@ -3867,17 +3908,28 @@ class DeckValidator:
                     f"detected {total_main_deck} non-commander cards and "
                     f"{'includes' if commander_present else 'excludes'} the commander)."
                 )
-        
+
+        if duplicate_cards:
+            duplicate_list = ", ".join(
+                f"{name} x{count}" for name, count in sorted(duplicate_cards.items())
+            )
+            legality_issues.append(
+                "Commander is a singleton format. Only basic lands and a handful of cards "
+                "that explicitly break this rule can appear more than once. Duplicate cards "
+                f"detected: {duplicate_list}."
+            )
+
         # Check for banned cards (placeholder - would need comprehensive banlist)
         banned_cards = ["Ancestral Recall", "Black Lotus", "Time Walk", "Mox Sapphire", "Mox Jet", "Mox Pearl", "Mox Ruby", "Mox Emerald"]
         for card in cards:
             if card.name in banned_cards:
                 legality_issues.append(f"Card '{card.name}' is banned in Commander")
-        
+
         return {
             "is_legal": len(legality_issues) == 0,
             "issues": legality_issues,
-            "warnings": warnings
+            "warnings": warnings,
+            "illegal_duplicates": duplicate_cards,
         }
     
     async def _infer_bracket(self, cards: List[DeckCard]) -> str:
@@ -4076,13 +4128,34 @@ class DeckValidator:
         )
     
     def _check_duplicates(self, cards: List[DeckCard]) -> bool:
-        """Check for duplicate cards"""
-        seen = set()
+        """Check for duplicate cards using total quantities per name."""
+        return bool(self._find_illegal_duplicates(cards))
+
+    def _find_illegal_duplicates(self, cards: List[DeckCard]) -> Dict[str, int]:
+        """Return a mapping of card names that violate the singleton rule."""
+        counts: Dict[str, int] = defaultdict(int)
+
         for card in cards:
-            if card.name in seen:
-                return True
-            seen.add(card.name)
-        return False
+            normalized_name = card.name.strip()
+            counts[normalized_name] += max(card.quantity, 1)
+
+        illegal_duplicates: Dict[str, int] = {}
+        for name, total in counts.items():
+            if total <= 1:
+                continue
+            if self._is_unlimited_card(name):
+                continue
+            illegal_duplicates[name] = total
+
+        return illegal_duplicates
+
+    def _is_unlimited_card(self, card_name: str) -> bool:
+        """Return True if the card is exempt from singleton restrictions."""
+        return card_name.strip().lower() in UNLIMITED_DUPLICATE_CARDS
+
+    def _calculate_total_card_count(self, cards: List[DeckCard]) -> int:
+        """Sum quantities to understand the real deck size."""
+        return sum(card.quantity for card in cards)
 
     def _calculate_total_card_count(self, cards: List[DeckCard]) -> int:
         """Sum quantities to understand the real deck size."""

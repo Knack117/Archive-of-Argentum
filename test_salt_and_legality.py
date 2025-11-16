@@ -42,6 +42,42 @@ async def test_legality_allows_99_cards_plus_commander():
     assert result["is_legal"], result["issues"]
 
 
+def test_duplicate_detection_counts_quantities():
+    validator = DeckValidator()
+    cards = [DeckCard(name="Sol Ring", quantity=2)]
+
+    assert validator._check_duplicates(cards)
+    assert validator._find_illegal_duplicates(cards) == {"Sol Ring": 2}
+
+
+def test_duplicate_detection_allows_basic_lands():
+    validator = DeckValidator()
+    cards = [DeckCard(name="Forest", quantity=12), DeckCard(name="Mountain", quantity=5)]
+
+    assert not validator._check_duplicates(cards)
+    assert validator._find_illegal_duplicates(cards) == {}
+
+
+@pytest.mark.asyncio
+async def test_legality_blocks_non_basic_duplicates():
+    validator = DeckValidator()
+    cards = [DeckCard(name="Sol Ring", quantity=2)]
+
+    result = await validator._validate_legality(cards, commander=None)
+    assert not result["is_legal"]
+    assert "Sol Ring" in result["illegal_duplicates"]
+
+
+@pytest.mark.asyncio
+async def test_legality_allows_basic_land_duplicates_only():
+    validator = DeckValidator()
+    cards = [DeckCard(name="Forest", quantity=20), DeckCard(name="Plains", quantity=10)]
+
+    result = await validator._validate_legality(cards, commander=None)
+    assert result["is_legal"]
+    assert result["illegal_duplicates"] == {}
+
+
 @pytest.mark.asyncio
 async def test_legality_allows_commander_list_included():
     validator = DeckValidator()
