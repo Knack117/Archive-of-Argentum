@@ -8,6 +8,7 @@ import asyncio
 import logging
 import time
 import json
+import random
 from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any, Tuple, Union, Set
 from collections import defaultdict
@@ -29,7 +30,7 @@ from cachetools import TTLCache
 cache = TTLCache(maxsize=500, ttl=3600)
 
 from config import settings
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 import re
 
 # Configure logger
@@ -3626,17 +3627,95 @@ class DeckValidator:
 
     async def _scrape_edhrec_salt_scores(self) -> Dict[str, float]:
         """
-        Scrape salt scores from EDHRec's top/salt page.
-        Returns a dictionary mapping card names to their salt scores.
+        Scrape salt scores from EDHRec's top/salt page using a headless browser.
+        Falls back to static HTTP scraping (and finally the bundled fallback data)
+        if the interactive scrape fails.
         """
+        salt_cards = await self._scrape_salt_scores_with_browser()
+        if salt_cards:
+            logger.info("Loaded EDHRec salt scores with browser automation")
+            return salt_cards
+
+        logger.info("Falling back to HTTP-based salt scraping")
+        salt_cards = await self._scrape_salt_scores_via_http()
+        if salt_cards:
+            return salt_cards
+
+        logger.warning("Unable to scrape salt scores, using fallback table")
+        return self._get_fallback_salt_scores()
+
+    async def _scrape_salt_scores_with_browser(self) -> Dict[str, float]:
+        """Use Playwright to click through the "Load More" button until all cards are loaded."""
+        try:
+            from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+            from playwright.async_api import Error as PlaywrightError
+        except ImportError:
+            logger.debug("Playwright is not installed, skipping browser scrape")
+            return {}
+
+        salt_url = "https://edhrec.com/top/salt"
+        user_agent = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
+        )
+
+        html_content = ""
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True, args=["--disable-gpu", "--no-sandbox"])
+                context = await browser.new_context(user_agent=user_agent, locale="en-US")
+                page = await context.new_page()
+                await page.goto(salt_url, wait_until="networkidle")
+
+                load_more_selector = "button:has-text('Load More')"
+                consecutive_failures = 0
+
+                while True:
+                    locator = page.locator(load_more_selector)
+                    if await locator.count() == 0:
+                        break
+
+                    try:
+                        if not await locator.is_enabled():
+                            break
+                        await locator.scroll_into_view_if_needed()
+                        await locator.click()
+                        await page.wait_for_timeout(random.randint(900, 1700))
+                        await page.wait_for_load_state("networkidle")
+                        consecutive_failures = 0
+                    except PlaywrightTimeoutError:
+                        consecutive_failures += 1
+                        if consecutive_failures >= 3:
+                            break
+                    except PlaywrightError:
+                        consecutive_failures += 1
+                        if consecutive_failures >= 3:
+                            break
+
+                html_content = await page.content()
+                await context.close()
+                await browser.close()
+
+        except Exception as exc:
+            logger.warning(f"Playwright salt scraping failed: {exc}")
+            return {}
+
+        salt_cards = self._parse_salt_scores_from_dom(html_content)
+        logger.info(f"Extracted {len(salt_cards)} salt scores using Playwright")
+        return salt_cards
+
+    async def _scrape_salt_scores_via_http(self) -> Dict[str, float]:
+        """Fallback HTTP scraping method that parses the static HTML."""
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/91.0.4472.124 Safari/537.36"
+                "Chrome/120.0.0.0 Safari/537.36"
             )
         }
-        
+
         salt_url = "https://edhrec.com/top/salt"
 
         try:
@@ -3651,15 +3730,88 @@ class DeckValidator:
                 salt_data = self._extract_salt_scores_from_html(soup)
 
                 if not salt_data:
-                    logger.warning("Could not extract salt scores from HTML, using fallback")
-                    return self._get_fallback_salt_scores()
+                    salt_data = self._parse_salt_scores_from_dom(html_content)
 
-                logger.info(f"Scraped {len(salt_data)} salt scores from EDHRec HTML page")
+                if salt_data:
+                    logger.info(f"Scraped {len(salt_data)} salt scores from EDHRec HTML page")
                 return salt_data
-                
+
         except Exception as exc:
             logger.error(f"Error scraping salt scores: {exc}")
-            return self._get_fallback_salt_scores()
+            return {}
+
+    def _parse_salt_scores_from_dom(self, html_content: str) -> Dict[str, float]:
+        """Parse salt scores from rendered HTML when JSON extraction fails."""
+        if not html_content:
+            return {}
+
+        soup = BeautifulSoup(html_content, "html.parser")
+        salt_data = self._extract_salt_scores_from_html(soup)
+        if salt_data:
+            return salt_data
+
+        parsed_scores: Dict[str, float] = {}
+        salt_labels = soup.find_all(string=SALT_LABEL_RE)
+
+        for label in salt_labels:
+            match = SALT_LABEL_RE.search(label)
+            if not match:
+                continue
+
+            try:
+                salt_score = float(match.group(1))
+            except ValueError:
+                continue
+
+            container = label.parent
+            steps = 0
+            card_name = ""
+
+            while container is not None and steps < 6 and not card_name:
+                card_name = self._extract_card_name_from_node(container)
+                container = container.parent if hasattr(container, "parent") else None
+                steps += 1
+
+            if card_name and 0 <= salt_score <= 5:
+                parsed_scores[card_name] = salt_score
+
+        return parsed_scores
+
+    def _extract_card_name_from_node(self, node: Any) -> str:
+        """Best-effort extraction of a card name from a DOM node."""
+        if not isinstance(node, Tag):
+            return ""
+
+        attr_name = node.get("data-card-name") or node.get("data-name")
+        if isinstance(attr_name, str) and attr_name.strip():
+            return attr_name.strip()
+
+        selectors = [
+            "[data-card-name]",
+            ".card-name",
+            ".card__name",
+            ".name",
+            "a.card",
+            "a[href*='/cards/']",
+            "a[href*='/commanders/']",
+            "a",
+            "strong",
+            "h3",
+            "h4",
+            "span",
+        ]
+
+        for selector in selectors:
+            target = node.select_one(selector)
+            if target and target.get_text(strip=True):
+                text = target.get_text(strip=True)
+                if text and not text.lower().startswith("salt score"):
+                    return text
+
+        text_content = node.get_text(" ", strip=True)
+        if "Salt Score" in text_content:
+            text_content = text_content.split("Salt Score")[0].strip(" -:\n")
+        return text_content
 
     def _extract_salt_scores_from_html(self, soup: BeautifulSoup) -> Dict[str, float]:
         """Extract salt scores from HTML structure using the correct JSON parsing"""
