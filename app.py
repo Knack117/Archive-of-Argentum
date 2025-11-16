@@ -3653,8 +3653,8 @@ class DeckValidator:
             # Commander color identity check would go here
             # For now, just basic validation
             
-            if len(cards) != 99:
-                legality_issues.append(f"Deck must have exactly 99 cards (currently has {len(cards)})")
+            if len(cards) != 100:
+                legality_issues.append(f"Deck must have exactly 99 cards plus 1 commander (total 100 cards, currently has {len(cards)})")
         
         # Check for banned cards (placeholder - would need comprehensive banlist)
         banned_cards = ["Ancestral Recall", "Black Lotus", "Time Walk", "Mox Sapphire", "Mox Jet", "Mox Pearl", "Mox Ruby", "Mox Emerald"]
@@ -3830,12 +3830,9 @@ class DeckValidator:
             # Combos are expected/allowed in these brackets
             recommendations.append(f"Deck contains {combo_count} 2-card combo(s) - appropriate for {target_bracket}")
         
-        # Check for tutors
+        # Check for tutors (no restrictions on tutor count per user request)
         tutor_count = sum(1 for card in cards if "tutor" in card.bracket_categories)
-        if target_bracket == "exhibition" and tutor_count > 2:
-            violations.append("Too many tutors for Exhibition bracket")
-        elif target_bracket == "core" and tutor_count > 3:
-            violations.append("Too many tutors for Core bracket")
+        # Removed tutor count restrictions - user indicated they don't care about "overpowered tutors"
         
         # Calculate bracket score (1-5)
         compliance_score = 5
