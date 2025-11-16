@@ -3607,60 +3607,12 @@ class DeckValidator:
             ("Splinter Twin", "Deceiver Exarch")
         ]
 
-        # Load salt scores from EDHRec (dynamically scraped from https://edhrec.com/top/salt)
+        # Load salt scores from EDHRec using the fixed scraping method
         try:
-            # Try to dynamically scrape salt scores from EDHRec
             salt_cards = await self._scrape_edhrec_salt_scores()
         except Exception as e:
             logger.warning(f"Failed to scrape salt scores from EDHRec: {e}")
-            # Fallback to hardcoded salt scores for high-impact cards
-            salt_cards = {
-                "Stasis": 3.06, "Winter Orb": 2.96, "Vivi Ornitier": 2.81, 
-                "Tergrid, God of Fright": 2.8, "Rhystic Study": 2.73, 
-                "The Tabernacle at Pendrell Vale": 2.68, "Armageddon": 2.67, 
-                "Static Orb": 2.62, "Vorinclex, Voice of Hunger": 2.61, 
-                "Thassa's Oracle": 2.59, "Grand Arbiter Augustin IV": 2.58, 
-                "Smothering Tithe": 2.58, "Jin-Gitaxias, Core Augur": 2.57, 
-                "The One Ring": 2.55, "Humility": 2.51, "Drannith Magistrate": 2.46, 
-                "Expropriate": 2.45, "Sunder": 2.44, "Obliterate": 2.42, 
-                "Devastation": 2.41, "Ravages of War": 2.39, "Cyclonic Rift": 2.36, 
-                "Jokulhaups": 2.36, "Apocalypse": 2.34, "Opposition Agent": 2.32, 
-                "Urza, Lord High Artificer": 2.31, "Fierce Guardianship": 2.3, 
-                "Hokori, Dust Drinker": 2.27, "Back to Basics": 2.23, 
-                "Nether Void": 2.23, "Jin-Gitaxias, Progress Tyrant": 2.22, 
-                "Braids, Cabal Minion": 2.21, "Worldfire": 2.2, 
-                "Toxrill, the Corrosive": 2.19, "Aura Shards": 2.18, 
-                "Gaea's Cradle": 2.17, "Kinnan, Bonder Prodigy": 2.15, 
-                "Yuriko, the Tiger's Shadow": 2.15, "Teferi's Protection": 2.13, 
-                "Blood Moon": 2.13, "Farewell": 2.13, "Rising Waters": 2.11, 
-                "Decree of Annihilation": 2.1, "Winter Moon": 2.08, 
-                "Smokestack": 2.08, "Orcish Bowmasters": 2.07, 
-                "Tectonic Break": 2.05, "Edgar Markov": 2.05, "Sen Triplets": 2.04, 
-                "Warp World": 2.04, "Sheoldred, the Apocalypse": 2.03, 
-                "Emrakul, the Promised End": 2.03, "Scrambleverse": 2.02, 
-                "Thieves' Auction": 2.02, "Force of Will": 2.01, 
-                "Narset, Parter of Veils": 2.01, "Glacial Chasm": 1.99, 
-                "Ruination": 1.99, "Mindslaver": 1.98, "Epicenter": 1.97, 
-                "The Ur-Dragon": 1.97, "Notion Thief": 1.96, "Void Winnower": 1.96, 
-                "Jodah, the Unifier": 1.94, "Storm, Force of Nature": 1.91, 
-                "Wake of Destruction": 1.91, "Force of Negation": 1.91, 
-                "Deadpool, Trading Card": 1.9, "Mana Drain": 1.89, 
-                "Blightsteel Colossus": 1.88, "Dictate of Erebos": 1.88, 
-                "Boil": 1.87, "Winota, Joiner of Forces": 1.85, 
-                "Mana Breach": 1.84, "Global Ruin": 1.84, "Catastrophe": 1.83, 
-                "Emrakul, the World Anew": 1.83, "Acid Rain": 1.83, 
-                "Time Stretch": 1.83, "Grave Pact": 1.82, 
-                "Impending Disaster": 1.82, "Ulamog, the Defiler": 1.82, 
-                "Demonic Consultation": 1.82, "Underworld Breach": 1.81, 
-                "Consecrated Sphinx": 1.8, "Divine Intervention": 1.79, 
-                "Thoughts of Ruin": 1.79, "Miirym, Sentinel Wyrm": 1.78, 
-                "Vorinclex, Monstrous Raider": 1.78, "Ad Nauseam": 1.78, 
-                "Seedborn Muse": 1.77, "Cataclysm": 1.76, 
-                "Elesh Norn, Mother of Machines": 1.76, "Boiling Seas": 1.76, 
-                "Magus of the Moon": 1.75, "Elesh Norn, Grand Cenobite": 1.74, 
-                "Sway of the Stars": 1.74, "Hullbreaker Horror": 1.74, 
-                "Necropotence": 1.73, "Atraxa, Praetors' Voice": 1.72
-            }
+            salt_cards = self._get_fallback_salt_scores()
 
         data = {
             "mass_land_denial": mass_land_denial,
@@ -3686,42 +3638,20 @@ class DeckValidator:
         }
         
         salt_url = "https://edhrec.com/top/salt"
-        salt_json_url = "https://json.edhrec.com/pages/top/salt.json"
 
         try:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-                # Try to load the structured JSON feed first (most reliable)
-                try:
-                    json_response = await client.get(salt_json_url, headers=headers)
-                    json_response.raise_for_status()
-                    salt_data = self._extract_salt_scores_from_json(json_response.json())
-                    if salt_data:
-                        logger.info(
-                            f"Scraped {len(salt_data)} salt scores from EDHRec JSON feed"
-                        )
-                        return salt_data
-                    logger.warning(
-                        "EDHRec JSON feed returned no salt data, falling back to HTML scrape"
-                    )
-                except Exception as json_exc:
-                    logger.warning(
-                        f"Unable to fetch JSON salt data ({json_exc}), falling back to HTML"
-                    )
-
-                # Fall back to scraping the HTML page directly
                 response = await client.get(salt_url, headers=headers)
                 response.raise_for_status()
 
                 html_content = response.text
                 soup = BeautifulSoup(html_content, "html.parser")
 
-                # Extract salt scores from the HTML
+                # Extract salt scores from the HTML using the correct JSON structure
                 salt_data = self._extract_salt_scores_from_html(soup)
 
                 if not salt_data:
-                    logger.warning(
-                        "Could not extract salt scores from HTML, using fallback"
-                    )
+                    logger.warning("Could not extract salt scores from HTML, using fallback")
                     return self._get_fallback_salt_scores()
 
                 logger.info(f"Scraped {len(salt_data)} salt scores from EDHRec HTML page")
@@ -3732,163 +3662,194 @@ class DeckValidator:
             return self._get_fallback_salt_scores()
 
     def _extract_salt_scores_from_html(self, soup: BeautifulSoup) -> Dict[str, float]:
-        """Extract salt scores from HTML structure"""
+        """Extract salt scores from HTML structure using the correct JSON parsing"""
         salt_data = {}
         
-        # Look for JSON data embedded in the page (Next.js __NEXT_DATA__)
-        script_tags = soup.find_all("script", type="application/json")
-        for script in script_tags:
+        # Look for the main JSON data in the __NEXT_DATA__ script
+        script_tag = soup.find("script", id="__NEXT_DATA__")
+        if script_tag and script_tag.string:
             try:
-                if not script.string:
+                data = json.loads(script_tag.string)
+                salt_data = self._extract_salt_scores_from_next_data(data)
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.error(f"Error parsing __NEXT_DATA__: {e}")
+        
+        return salt_data
+
+    def _extract_salt_scores_from_next_data(self, data: Dict[str, Any]) -> Dict[str, float]:
+        """Extract salt scores from the Next.js data structure"""
+        salt_data = {}
+        
+        try:
+            # Navigate through the nested structure to find card data
+            page_props = data.get("props", {}).get("pageProps", {})
+            page_data = page_props.get("data", {})
+            container = page_data.get("container", {})
+            json_dict = container.get("json_dict", {})
+            cardlists = json_dict.get("cardlists", [])
+            
+            # Look through all cardlists for salt score data
+            for cardlist in cardlists:
+                if not isinstance(cardlist, dict):
                     continue
-                data = json.loads(script.string)
-                extracted = self._extract_salt_scores_from_json(data)
-                if extracted:
-                    salt_data.update(extracted)
-                    break
-            except (json.JSONDecodeError, TypeError):
-                continue
-        
-        # If JSON parsing didn't work, try HTML parsing as fallback
-        if not salt_data:
-            # Look for cards in table rows or list items
-            table_rows = soup.find_all("tr")
-            for row in table_rows:
-                cells = row.find_all(["td", "th"])
-                if len(cells) >= 2:
-                    # Try to find card name and score
-                    for i, cell in enumerate(cells):
-                        text = cell.get_text(strip=True)
-                        # Try to extract number (salt score)
-                        import re
-                        numbers = re.findall(r"[0-9]+\.?[0-9]*", text)
-                        if numbers:
-                            try:
-                                score = float(numbers[-1])  # Take last number as score
-                                if 0 <= score <= 5:  # Reasonable salt score range
-                                    # Previous cell might be card name
-                                    if i > 0:
-                                        prev_cell = cells[i-1]
-                                        card_name = prev_cell.get_text(strip=True)
-                                        if card_name and len(card_name) > 2:
-                                            salt_data[card_name] = score
-                            except ValueError:
-                                continue
-        
-        return salt_data
-
-    def _extract_salt_scores_from_json(self, data: Dict[str, Any]) -> Dict[str, float]:
-        """Extract salt scores from EDHRec JSON data structures."""
-        if not isinstance(data, dict):
-            return {}
-
-        salt_data: Dict[str, float] = {}
-
-        # Traverse nested dictionaries/lists to locate "cardlists" entries or
-        # individual card dictionaries that expose a salt score.
-        stack: List[Any] = [data]
-        while stack:
-            current = stack.pop()
-            if isinstance(current, dict):
-                cardlist_candidate = current.get("cardlists")
-                if isinstance(cardlist_candidate, list):
-                    for cardlist in cardlist_candidate:
-                        self._extract_salt_from_cardlist(cardlist, salt_data)
-                        stack.append(cardlist)
-
-                name = (
-                    current.get("name")
-                    or current.get("card", {}).get("name")
-                    or ""
-                ).strip()
-                if name:
-                    salt_score = self._extract_salt_score_from_card(current)
+                    
+                cardviews = cardlist.get("cardviews", [])
+                for card_data in cardviews:
+                    if not isinstance(card_data, dict):
+                        continue
+                        
+                    # Extract card name and salt score
+                    card_name = card_data.get("name", "").strip()
+                    if not card_name:
+                        continue
+                    
+                    # Try multiple possible locations for salt score
+                    salt_score = None
+                    
+                    # Method 1: Direct salt field
+                    salt_score = card_data.get("salt")
+                    
+                    # Method 2: Check label text for "Salt Score: X.XX" pattern
+                    if salt_score is None:
+                        label = card_data.get("label", "")
+                        if label and "Salt" in label:
+                            match = re.search(r"Salt\s*Score:\s*([0-9.]+)", label)
+                            if match:
+                                try:
+                                    salt_score = float(match.group(1))
+                                except ValueError:
+                                    pass
+                    
+                    # Method 3: Check synergy field (sometimes used for salt scores)
+                    if salt_score is None:
+                        synergy = card_data.get("synergy")
+                        if isinstance(synergy, (int, float)) and 1.0 <= synergy <= 5.0:
+                            salt_score = synergy
+                    
+                    # Method 4: Check scores object
+                    if salt_score is None:
+                        scores = card_data.get("scores", {})
+                        if isinstance(scores, dict):
+                            salt_score = scores.get("salt")
+                    
                     if salt_score is not None and 0 <= salt_score <= 5:
-                        salt_data[name] = float(salt_score)
-
-                for value in current.values():
-                    if isinstance(value, (dict, list)):
-                        stack.append(value)
-            elif isinstance(current, list):
-                for item in current:
-                    if isinstance(item, (dict, list)):
-                        stack.append(item)
-
+                        salt_data[card_name] = float(salt_score)
+            
+            # Alternative approach: Look for the specific salt score cardlist
+            if not salt_data:
+                salt_data = self._extract_salt_scores_alternative_method(data)
+                
+        except Exception as e:
+            logger.error(f"Error extracting salt scores from Next data: {e}")
+        
         return salt_data
 
-    def _extract_salt_from_cardlist(self, cardlist: Dict[str, Any], salt_data: Dict[str, float]) -> None:
-        """Extract salt scores from a single cardlist block."""
-        if not isinstance(cardlist, dict):
-            return
-
-        cardviews = (
-            cardlist.get("cardviews")
-            or cardlist.get("cards")
-            or cardlist.get("list")
-            or []
-        )
-
-        for card_data in cardviews:
-            if not isinstance(card_data, dict):
-                continue
-
-            name = (card_data.get("name") or card_data.get("card", {}).get("name") or "").strip()
-            if not name:
-                continue
-
-            salt_score = self._extract_salt_score_from_card(card_data)
-            if salt_score is not None and 0 <= salt_score <= 5:
-                salt_data[name] = float(salt_score)
-
-    def _extract_salt_score_from_card(self, card_data: Dict[str, Any]) -> Optional[float]:
-        """Pull the salt score from a card entry, checking multiple known fields."""
-        if not isinstance(card_data, dict):
-            return None
-
-        possible_keys = ["salt", "salt_score", "saltiness"]
-
-        for key in possible_keys:
-            value = card_data.get(key)
-            if isinstance(value, (int, float)):
-                return float(value)
-
-        # Sometimes scores are nested inside a "scores" object
-        scores = card_data.get("scores")
-        if isinstance(scores, dict):
-            for key in possible_keys:
-                value = scores.get(key)
-                if isinstance(value, (int, float)):
-                    return float(value)
-
-        # EDHRec's current JSON embeds the salt score inside the label text
-        label = card_data.get("label")
-        if isinstance(label, str):
-            match = SALT_LABEL_RE.search(label)
-            if match:
-                try:
-                    return float(match.group(1))
-                except ValueError:
-                    pass
-
-        # Final fallback: some EDHRec data puts salt score under "synergy" when listing top salt cards
-        value = card_data.get("synergy")
-        if isinstance(value, (int, float)):
-            return float(value)
-
-        return None
+    def _extract_salt_scores_alternative_method(self, data: Dict[str, Any]) -> Dict[str, float]:
+        """Alternative method to extract salt scores if primary method fails"""
+        salt_data = {}
+        
+        try:
+            # Sometimes the data is in a different structure
+            # Look for any array that contains card objects with salt scores
+            def search_for_salt_scores(obj, path=""):
+                if isinstance(obj, dict):
+                    # Check if this looks like a card with salt data
+                    if "name" in obj and ("salt" in obj or "label" in obj):
+                        card_name = obj.get("name", "").strip()
+                        if card_name:
+                            salt_score = obj.get("salt")
+                            if salt_score is None:
+                                # Check label
+                                label = obj.get("label", "")
+                                if "Salt" in label:
+                                    match = re.search(r"Salt\s*Score:\s*([0-9.]+)", label)
+                                    if match:
+                                        try:
+                                            salt_score = float(match.group(1))
+                                        except ValueError:
+                                            pass
+                            
+                            if salt_score is not None and 0 <= salt_score <= 5:
+                                salt_data[card_name] = float(salt_score)
+                    
+                    # Recursively search nested objects
+                    for key, value in obj.items():
+                        search_for_salt_scores(value, f"{path}.{key}")
+                        
+                elif isinstance(obj, list):
+                    for i, item in enumerate(obj):
+                        search_for_salt_scores(item, f"{path}[{i}]")
+            
+            # Start search from the root of the data
+            search_for_salt_scores(data)
+            
+        except Exception as e:
+            logger.error(f"Error in alternative salt score extraction: {e}")
+        
+        return salt_data
 
     def _get_fallback_salt_scores(self) -> Dict[str, float]:
         """
-        Fallback salt scores for high-impact cards when scraping fails.
+        Fallback salt scores for when scraping fails.
+        This should match the data we can see on https://edhrec.com/top/salt
         """
         return {
-            "Stasis": 3.06, "Winter Orb": 2.96, "Vivi Ornitier": 2.81, 
-            "Tergrid, God of Fright": 2.8, "Rhystic Study": 2.73, 
-            "The Tabernacle at Pendrell Vale": 2.68, "Armageddon": 2.67, 
-            "Static Orb": 2.62, "Vorinclex, Voice of Hunger": 2.61, 
-            "Thassa's Oracle": 2.59, "Grand Arbiter Augustin IV": 2.58, 
-            "Smothering Tithe": 2.58, "Jin-Gitaxias, Core Augur": 2.57, 
-            "The One Ring": 2.55, "Humility": 2.51, "Drannith Magistrate": 2.46
+            "Stasis": 3.06,
+            "Winter Orb": 2.96, 
+            "Vivi Ornitier": 2.81,
+            "Tergrid, God of Fright": 2.80,
+            "Rhystic Study": 2.73,
+            "The Tabernacle at Pendrell Vale": 2.68,
+            "Armageddon": 2.67,
+            "Static Orb": 2.62,
+            "Vorinclex, Voice of Hunger": 2.61,
+            "Thassa's Oracle": 2.59,
+            "Grand Arbiter Augustin IV": 2.58,
+            "Smothering Tithe": 2.58,
+            "Jin-Gitaxias, Core Augur": 2.57,
+            "The One Ring": 2.55,
+            "Humility": 2.51,
+            "Drannith Magistrate": 2.46,
+            "Expropriate": 2.45,
+            "Sunder": 2.44,
+            "Obliterate": 2.42,
+            "Devastation": 2.41,
+            "Ravages of War": 2.39,
+            "Cyclonic Rift": 2.36,
+            "Jokulhaups": 2.36,
+            "Apocalypse": 2.34,
+            "Opposition Agent": 2.32,
+            "Urza, Lord High Artificer": 2.31,
+            "Fierce Guardianship": 2.30,
+            "Hokori, Dust Drinker": 2.27,
+            "Back to Basics": 2.23,
+            "Nether Void": 2.23,
+            "Jin-Gitaxias, Progress Tyrant": 2.22,
+            "Braids, Cabal Minion": 2.21,
+            "Worldfire": 2.20,
+            "Toxrill, the Corrosive": 2.19,
+            "Aura Shards": 2.18,
+            "Gaea's Cradle": 2.17,
+            "Kinnan, Bonder Prodigy": 2.15,
+            "Yuriko, the Tiger's Shadow": 2.15,
+            "Teferi's Protection": 2.13,
+            "Blood Moon": 2.13,
+            "Farewell": 2.13,
+            "Rising Waters": 2.11,
+            "Decree of Annihilation": 2.10,
+            "Winter Moon": 2.08,
+            "Smokestack": 2.08,
+            "Orcish Bowmasters": 2.07,
+            "Tectonic Break": 2.05,
+            "Edgar Markov": 2.05,
+            "Sen Triplets": 2.04,
+            "Warp World": 2.04,
+            "Sheoldred, the Apocalypse": 2.03,
+            "Emrakul, the Promised End": 2.03,
+            "Scrambleverse": 2.02,
+            "Thieves' Auction": 2.02,
+            "Force of Will": 2.01,
+            "Narset, Parter of Veils": 2.01
         }
 
     async def _classify_card(self, card_name: str, quantity: int, data: Dict[str, Set[str]]) -> DeckCard:
