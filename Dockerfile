@@ -10,7 +10,9 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies (including everything Chromium/Playwright needs)
+# Install system dependencies (including everything Chromium/Playwright needs).
+# Note: fonts-ubuntu is unavailable in the python:3.11-slim (Debian) apt repos,
+# so we omit it to keep the install step from failing.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -52,7 +54,6 @@ RUN apt-get update \
         libxtst6 \
         fonts-liberation \
         fonts-unifont \
-        fonts-ubuntu \
         && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better Docker layer caching
