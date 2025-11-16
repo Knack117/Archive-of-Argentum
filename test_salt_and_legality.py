@@ -33,6 +33,17 @@ def test_extract_salt_scores_from_json_structure():
     assert len(salt_scores) == 2
 
 
+def test_extract_salt_score_from_label_text():
+    validator = DeckValidator()
+    card_data = {
+        "name": "Stasis",
+        "label": "Salt Score: 3.06\n14259 decks",
+    }
+
+    salt_score = validator._extract_salt_score_from_card(card_data)
+    assert salt_score == pytest.approx(3.06)
+
+
 @pytest.mark.asyncio
 async def test_legality_allows_99_cards_plus_commander():
     validator = DeckValidator()

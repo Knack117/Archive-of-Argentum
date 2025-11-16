@@ -88,6 +88,8 @@ _theme_catalog_cache: Dict[str, Any] = {
 }
 _theme_catalog_lock = asyncio.Lock()
 
+SALT_LABEL_RE = re.compile(r"Salt\s*Score:\s*([0-9]+(?:\.[0-9]+)?)")
+
 # --------------------------------------------------------------------
 # EDHRec helper functions
 # --------------------------------------------------------------------
@@ -3825,6 +3827,16 @@ class DeckValidator:
                 value = scores.get(key)
                 if isinstance(value, (int, float)):
                     return float(value)
+
+        # EDHRec's current JSON embeds the salt score inside the label text
+        label = card_data.get("label")
+        if isinstance(label, str):
+            match = SALT_LABEL_RE.search(label)
+            if match:
+                try:
+                    return float(match.group(1))
+                except ValueError:
+                    pass
 
         # Final fallback: some EDHRec data puts salt score under "synergy" when listing top salt cards
         value = card_data.get("synergy")
