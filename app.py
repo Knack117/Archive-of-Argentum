@@ -2466,59 +2466,49 @@ async def debug_combo_search(
 def _extract_text_decklist_from_html(html: str) -> List[str]:
     """
     Extract text decklist from EDHRec average-decks page.
-    Supports new __NEXT_DATA__ JSON format as well as legacy HTML fallback.
+    Handles both new and legacy formats.
     """
     soup = BeautifulSoup(html, "html.parser")
-    candidates: List[str] = []
 
-    # --- New format: JSON inside <script id="__NEXT_DATA__"> ---
+    # --- Check __NEXT_DATA__ script JSON ---
     next_data = soup.find("script", id="__NEXT_DATA__", type="application/json")
     if next_data and next_data.string:
         try:
             data = json.loads(next_data.string)
-            page_data = (
-                data.get("props", {})
-                .get("pageProps", {})
-                .get("data", {})
-            )
-            container = page_data.get("container", {})
-            json_dict = container.get("json_dict", {})
+            json_paths = [
+                ["props", "pageProps", "data", "container", "json_dict", "export"],
+                ["props", "pageProps", "data", "container", "json_dict", "decklists"],
+                ["props", "pageProps", "data", "container", "json_dict", "text"],
+                ["props", "pageProps", "data", "container", "json_dict", "averageDeck", "export"],
+            ]
 
-            # EDHRec average decks usually have 'decklists' or 'export' text here
-            for key in ("decklists", "export", "deck", "text"):
-                text_data = json_dict.get(key)
-                if isinstance(text_data, str) and "\n" in text_data:
-                    lines = [ln.strip() for ln in text_data.splitlines() if ln.strip()]
+            def get_nested(obj, path):
+                for p in path:
+                    if isinstance(obj, dict):
+                        obj = obj.get(p)
+                    else:
+                        return None
+                return obj
+
+            for path in json_paths:
+                content = get_nested(data, path)
+                if isinstance(content, str) and "\n" in content:
+                    lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
                     if lines:
                         return lines
-                elif isinstance(text_data, list):
-                    # Some pages store multiple decklists
-                    for entry in text_data:
-                        if isinstance(entry, str) and "\n" in entry:
-                            lines = [ln.strip() for ln in entry.splitlines() if ln.strip()]
-                            if lines:
-                                return lines
+
         except Exception as e:
             logger.warning(f"Error parsing __NEXT_DATA__ JSON for decklist: {e}")
 
-    # --- Legacy fallback: look for <textarea>, <pre>, <code> ---
-    for ta in soup.find_all("textarea"):
-        text = ta.get_text("\n", strip=True)
+    # --- Legacy HTML fallback ---
+    for tag in soup.find_all(["textarea", "pre", "code"]):
+        text = tag.get_text("\n", strip=True)
         if text and "\n" in text and any(ch.isdigit() for ch in text):
-            candidates.append(text)
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            if lines:
+                return lines
 
-    if not candidates:
-        for tag in soup.find_all(["pre", "code"]):
-            text = tag.get_text("\n", strip=True)
-            if text and "\n" in text and any(ch.isdigit() for ch in text):
-                candidates.append(text)
-
-    if not candidates:
-        return []
-
-    raw = max(candidates, key=len)
-    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
-    return lines
+    return []
 
 
 async def fetch_average_deck(
