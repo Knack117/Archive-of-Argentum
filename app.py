@@ -1723,6 +1723,121 @@ async def get_commander_summary(
     )
 
 
+@app.get("/api/v1/average_deck/summary", response_model=CommanderSummary)
+async def get_average_deck_summary(
+    commander_name: Optional[str] = Query(None),
+    commander_slug: Optional[str] = Query(None),
+    bracket: Optional[str] = Query(
+        None,
+        description="Bracket type: exhibition, core, upgraded, optimized, or cedh.",
+    ),
+    api_key: str = Depends(verify_api_key),
+) -> CommanderSummary:
+    """
+    Fetch a summary of an EDHRec Average Deck page for a given commander.
+
+    Mirrors the /api/v1/commander/summary endpoint, but targets EDHRec
+    /average-decks/{commander} and optional bracket subpages.
+    """
+    if not commander_name and not commander_slug:
+        raise HTTPException(
+            status_code=400,
+            detail="You must provide either 'commander_name' or 'commander_slug'.",
+        )
+
+    # Normalize commander slug
+    if commander_slug:
+        slug = commander_slug.strip().lower()
+    else:
+        slug = normalize_commander_name(commander_name)
+
+    # Build average-decks URL (optionally bracketed)
+    base_url = f"{EDHREC_BASE_URL}average-decks/{slug}"
+    if bracket:
+        base_url += f"/{bracket.strip().lower()}"
+
+    try:
+        # Reuse existing scraping logic from commander summary
+        commander_data = await scrape_edhrec_commander_page(base_url)
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:
+        logger.error(f"Error fetching average deck summary for {slug}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch average deck summary: {str(exc)}",
+        )
+
+    # Build structured response identical to CommanderSummary
+    categories_output: Dict[str, List[CommanderCard]] = {}
+    for category_key, category_data in commander_data.get("categories", {}).items():
+        if not isinstance(category_data, dict):
+            continue
+
+        cards_data = category_data.get("cards", [])
+        card_objects: List[CommanderCard] = []
+
+        for card in cards_data:
+            if isinstance(card, dict):
+                card_objects.append(
+                    CommanderCard(
+                        name=card.get("name"),
+                        num_decks=card.get("num_decks"),
+                        potential_decks=card.get("potential_decks"),
+                        inclusion_percentage=card.get("inclusion_percentage"),
+                        synergy_percentage=card.get("synergy_percentage"),
+                        sanitized_name=card.get("sanitized_name"),
+                        card_url=card.get("card_url"),
+                    )
+                )
+
+        if card_objects:
+            categories_output[category_key] = card_objects
+
+    all_tags_output: List[CommanderTag] = []
+    for tag_data in commander_data.get("all_tags", []):
+        if isinstance(tag_data, dict):
+            all_tags_output.append(
+                CommanderTag(
+                    tag=tag_data.get("tag"),
+                    count=tag_data.get("count"),
+                    link=tag_data.get("url"),
+                )
+            )
+
+    combos_output: List[CommanderCombo] = []
+    for combo_data in commander_data.get("combos", []):
+        if isinstance(combo_data, dict):
+            combos_output.append(
+                CommanderCombo(
+                    combo=combo_data.get("name"),
+                    url=combo_data.get("url"),
+                )
+            )
+
+    similar_commanders_output: List[SimilarCommander] = []
+    for sim_cmd in commander_data.get("similar_commanders", []):
+        if isinstance(sim_cmd, dict):
+            similar_commanders_output.append(
+                SimilarCommander(
+                    name=sim_cmd.get("name"),
+                    url=sim_cmd.get("url"),
+                )
+            )
+
+    return CommanderSummary(
+        commander_name=commander_data.get("commander_name", slug.replace("-", " ").title()),
+        commander_url=base_url,
+        timestamp=datetime.utcnow().isoformat(),
+        commander_tags=commander_data.get("commander_tags", []),
+        top_10_tags=commander_data.get("top_10_tags", []),
+        all_tags=all_tags_output,
+        combos=combos_output,
+        similar_commanders=similar_commanders_output,
+        categories=categories_output,
+    )
+
+
 # ----------------------------------------------
 # Theme / Tag Endpoints
 # ----------------------------------------------
@@ -2463,225 +2578,15 @@ async def debug_combo_search(
 # --------------------------------------------------------------------
 
 
-def _extract_text_decklist_from_html(html: str) -> List[str]:
-    """
-    Extract text decklist from EDHRec average-decks page.
-    Handles all current JSON structures (2025) and legacy HTML fallbacks.
-    """
-    soup = BeautifulSoup(html, "html.parser")
-
-    next_data = soup.find("script", id="__NEXT_DATA__", type="application/json")
-    if next_data and next_data.string:
-        try:
-            data = json.loads(next_data.string)
-
-            # Possible locations of deck text within EDHRec's JSON
-            json_paths = [
-                ["props", "pageProps", "data", "container", "json_dict", "export"],
-                ["props", "pageProps", "data", "container", "json_dict", "decklists"],
-                ["props", "pageProps", "data", "container", "json_dict", "text"],
-                ["props", "pageProps", "data", "container", "json_dict", "averageDeck", "export"],
-                ["props", "pageProps", "data", "container", "json_dict", "average_deck", "export"],
-                ["props", "pageProps", "data", "container", "json_dict", "averageDeck", "deck"],
-                ["props", "pageProps", "data", "container", "json_dict", "decklist"],
-                ["props", "pageProps", "data", "container", "json_dict", "average_deck", "deck"],
-            ]
-
-            def get_nested(obj, path):
-                for p in path:
-                    if isinstance(obj, dict):
-                        obj = obj.get(p)
-                    else:
-                        return None
-                return obj
-
-            for path in json_paths:
-                content = get_nested(data, path)
-                if isinstance(content, str) and "\n" in content:
-                    lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
-                    if lines:
-                        return lines
-                elif isinstance(content, list):
-                    # Sometimes decklists is a list of text entries
-                    for entry in content:
-                        if isinstance(entry, str) and "\n" in entry:
-                            lines = [ln.strip() for ln in entry.splitlines() if ln.strip()]
-                            if lines:
-                                return lines
-                        elif isinstance(entry, dict):
-                            maybe_deck = entry.get("deck") or entry.get("export") or ""
-                            if isinstance(maybe_deck, str) and "\n" in maybe_deck:
-                                lines = [ln.strip() for ln in maybe_deck.splitlines() if ln.strip()]
-                                if lines:
-                                    return lines
-
-        except Exception as e:
-            logger.warning(f"Error parsing __NEXT_DATA__ JSON for decklist: {e}")
-
-    # --- Legacy HTML fallback ---
-    for tag in soup.find_all(["textarea", "pre", "code"]):
-        text = tag.get_text("\n", strip=True)
-        if text and "\n" in text and any(ch.isdigit() for ch in text):
-            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-            if lines:
-                return lines
-
-    return []
-
-
-async def fetch_average_deck(
-    commander: str,
-    bracket: Optional[str] = None,
-    commander_is_slug: bool = False,
-) -> AverageDeckResponse:
-    """
-    Fetch the EDHRec average deck (or bracket-specific average deck) for a commander.
-
-    - commander: either the name ("The Ur-Dragon") or slug ("the-ur-dragon")
-    - bracket: optional bracket slug (exhibition, core, upgraded, optimized, cedh)
-    - commander_is_slug: if True, treat 'commander' as already slugified
-    """
-    if commander_is_slug:
-        slug = commander.strip().lower()
-    else:
-        slug = normalize_commander_name(commander)
-
-    base_path = f"average-decks/{slug}"
-    if bracket:
-        bracket_sanitized = bracket.strip().lower()
-        path = f"{base_path}/{bracket_sanitized}"
-    else:
-        path = base_path
-
-    url = urljoin(EDHREC_BASE_URL, path)
-
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/91.0.4472.124 Safari/537.36"
-        )
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code == 404:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Average deck not found for the given commander/bracket.",
-                )
-            resp.raise_for_status()
-
-            deck_lines = _extract_text_decklist_from_html(resp.text)
-            if not deck_lines:
-                raise HTTPException(
-                    status_code=502,
-                    detail="Could not parse average deck list from EDHRec.",
-                )
-
-            commander_name = " ".join(
-                word.capitalize() for word in slug.replace("-", " ").split()
-            )
-
-            return AverageDeckResponse(
-                commander_name=commander_name,
-                commander_slug=slug,
-                bracket=bracket,
-                deck_url=str(resp.url),
-                decklist=deck_lines,
-                timestamp=datetime.utcnow().isoformat(),
-            )
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"Error fetching average deck for {commander}: {exc}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching average deck: {str(exc)}",
-        )
-
-
 # --------------------------------------------------------------------
 # Average Deck Endpoint
 # --------------------------------------------------------------------
 
 
-@app.get("/api/v1/average_deck", response_model=AverageDeckResponse)
-async def get_average_deck(
-    commander_name: Optional[str] = Query(
-        None,
-        description="Commander name (e.g. 'The Ur-Dragon'). If provided, will be slugified.",
-    ),
-    commander_slug: Optional[str] = Query(
-        None,
-        description="EDHRec commander slug (e.g. 'the-ur-dragon'). If provided, used directly.",
-    ),
-    bracket: Optional[str] = Query(
-        None,
-        description=(
-            "Optional bracket slug: "
-            "'exhibition', 'core', 'upgraded', 'optimized', or 'cedh'. "
-            "If omitted, uses the main average deck."
-        ),
-    ),
-    api_key: str = Depends(verify_api_key),
-) -> AverageDeckResponse:
-    """
-    Fetch the EDHRec average deck list (text-only) for a given commander.
-
-    - You can provide either:
-      * commander_name: full commander name, or
-      * commander_slug: EDHRec slug (e.g. 'the-ur-dragon').
-
-    - Optionally, specify a bracket:
-      * exhibition, core, upgraded, optimized, cedh.
-
-    Only the text decklist (as lines) is returned; EDHRec's category breakdown
-    below the text decklist is ignored.
-    """
-    if not commander_name and not commander_slug:
-        raise HTTPException(
-            status_code=400,
-            detail="You must provide either 'commander_name' or 'commander_slug'.",
-        )
-
-    if commander_slug:
-        # Use slug directly
-        return await fetch_average_deck(
-            commander_slug,
-            bracket=bracket,
-            commander_is_slug=True,
-        )
-
-    # Use name, slugify it
-    return await fetch_average_deck(
-        commander_name,
-        bracket=bracket,
-        commander_is_slug=False,
-    )
 
 
-@app.get("/api/v1/average_deck/{commander_name}", response_model=AverageDeckResponse)
-async def get_average_deck_by_commander(
-    commander_name: str,
-    api_key: str = Depends(verify_api_key),
-) -> AverageDeckResponse:
-    """
-    Fetch the EDHRec average deck list (text-only) for a given commander by commander name.
-    """
-    try:
-        # Fetch the average deck using the existing function
-        return await fetch_average_deck(commander_name, commander_is_slug=False)
-    except HTTPException as exc:
-        raise exc
-    except Exception as exc:
-        logger.error(f"Error fetching average deck for {commander_name}: {exc}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error fetching average deck: {str(exc)}",
-        )
+
+
 
 
 # --------------------------------------------------------------------
