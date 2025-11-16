@@ -33,6 +33,23 @@ def test_extract_salt_scores_from_json_structure():
     assert len(salt_scores) == 2
 
 
+def test_extract_salt_scores_without_cardlists():
+    validator = DeckValidator()
+    sample_json = {
+        "data": {
+            "top_cards": [
+                {"name": "Stasis", "salt": 3.06},
+                {"card": {"name": "Rhystic Study"}, "scores": {"salt": 2.73}},
+            ]
+        }
+    }
+
+    salt_scores = validator._extract_salt_scores_from_json(sample_json)
+    assert salt_scores["Stasis"] == pytest.approx(3.06)
+    assert salt_scores["Rhystic Study"] == pytest.approx(2.73)
+    assert len(salt_scores) == 2
+
+
 def test_extract_salt_score_from_label_text():
     validator = DeckValidator()
     card_data = {
@@ -64,6 +81,17 @@ def test_duplicate_detection_counts_quantities():
 def test_duplicate_detection_allows_basic_lands():
     validator = DeckValidator()
     cards = [DeckCard(name="Forest", quantity=12), DeckCard(name="Mountain", quantity=5)]
+
+    assert not validator._check_duplicates(cards)
+    assert validator._find_illegal_duplicates(cards) == {}
+
+
+def test_basic_land_duplicates_allow_arena_formatting():
+    validator = DeckValidator()
+    cards = [
+        DeckCard(name="Plains (ANA) 261", quantity=12),
+        DeckCard(name="Island [BRO] #270", quantity=8),
+    ]
 
     assert not validator._check_duplicates(cards)
     assert validator._find_illegal_duplicates(cards) == {}
