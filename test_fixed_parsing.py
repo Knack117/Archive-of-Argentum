@@ -5,6 +5,7 @@ Test the fixed parsing functions with real EDHRec data
 import json
 import sys
 import os
+from pathlib import Path
 
 # Add the app directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -15,7 +16,8 @@ def test_parsing_with_real_data():
     """Test parsing functions with the real EDHRec JSON sample"""
     
     # Load the sample JSON
-    with open('/workspace/edhrec_json_sample.json', 'r') as f:
+    sample_path = Path(__file__).with_name('edhrec_json_sample.json')
+    with sample_path.open('r') as f:
         json_data = json.load(f)
     
     print("=== Testing Fixed Parsing Functions ===")

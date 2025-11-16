@@ -2,14 +2,14 @@
 
 ## Overview
 
-This guide explains how to deploy the new deck validation endpoint to your existing MTG Mightstone GPT Render application. The endpoint provides comprehensive Commander Brackets validation, format legality checking, and integration with Moxfield/EDHRec data.
+This guide explains how to deploy the new deck validation endpoint to your existing MTG Mightstone GPT Render application. The endpoint provides comprehensive Commander Brackets validation, format legality checking, and integration with EDHRec data.
 
 ## New Features Added
 
 ### 1. Deck Validation Endpoint (`/api/v1/deck/validate`)
 - Validates deck against Commander Brackets rules (October 2025 update)
 - Checks commander format legality
-- Integrates with Moxfield Commander Brackets data
+- Bundles the latest Commander Brackets reference data
 - References EDHRec combo lists
 - Provides detailed compliance scoring and recommendations
 
@@ -20,7 +20,7 @@ This guide explains how to deploy the new deck validation endpoint to your exist
 ### 3. Commander Brackets Data Integration
 - Official bracket definitions from October 21, 2025 update
 - Current Game Changers list
-- Mass Land Denial cards from Moxfield
+- Curated mass land denial cards
 - Early game 2-card combos from EDHRec
 
 ## Installation Steps
@@ -92,8 +92,8 @@ curl -X POST "https://mtg-mightstone-gpt.onrender.com/api/v1/deck/validate" \\
     "commander": "Jace, Wielder of Mysteries",
     "target_bracket": "optimized",
     "source_urls": [
-      "https://moxfield.com/commanderbrackets/gamechangers",
-      "https://edics.com/combos/early-game-2-card-combos"
+      "https://archiveofargentum.com/reference/game-changers",
+      "https://edhrec.com/combos/early-game-2-card-combos"
     ],
     "validate_bracket": true,
     "validate_legality": true
@@ -160,9 +160,9 @@ async def validate_deck_with_gpt(decklist, commander, target_bracket):
         "validate_bracket": True,
         "validate_legality": True,
         "source_urls": [
-            "https://moxfield.com/commanderbrackets/masslanddenial",
-            "https://moxfield.com/commanderbrackets/gamechangers",
-            "https://edics.com/combos/early-game-2-card-combos"
+            "https://archiveofargentum.com/reference/mass-land-denial",
+            "https://archiveofargentum.com/reference/game-changers",
+            "https://edhrec.com/combos/early-game-2-card-combos"
         ]
     }
     
@@ -220,7 +220,7 @@ The API will return:
 - Basic format rules validation
 
 ### Reference Data Integration
-- **Moxfield Commander Brackets**: Mass land denial, game changers, etc.
+- **Commander Brackets Reference**: Mass land denial, game changers, etc.
 - **EDHRec Combos**: Early game 2-card combinations
 - **Official Wizards Data**: October 21, 2025 bracket updates
 
@@ -297,7 +297,7 @@ This will test all new endpoints with sample data.
 
 ## Future Enhancements
 
-1. **Enhanced Scraping**: Direct integration with live Moxfield/EDHRec data
+1. **Enhanced Scraping**: Direct integration with live EDHRec data
 2. **User Profiles**: Save user deck preferences and history
 3. **Advanced Analytics**: Power level trending and meta analysis
 4. **Community Features**: Share validation results and deck builds
