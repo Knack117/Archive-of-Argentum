@@ -83,7 +83,7 @@ curl -X POST "https://mtg-mightstone-gpt.onrender.com/api/v1/deck/validate" \\
   -d '{
     "decklist": [
       "1x Sol Ring",
-      "1x Demonic Consultation", 
+      "1x Demonic Consultation",
       "1x Thassa''s Oracle",
       "4x Lightning Bolt",
       "1x Counterspell",
@@ -97,6 +97,30 @@ curl -X POST "https://mtg-mightstone-gpt.onrender.com/api/v1/deck/validate" \\
     ],
     "validate_bracket": true,
     "validate_legality": true
+  }'
+```
+
+#### Handling Large Decklists
+
+Some GPT connectors limit how many individual array items can be submitted at once. The validation endpoint now accepts two addi
+tional helpers so you can keep the payload small:
+
+- `decklist_text`: Send the full decklist as a newline-delimited string
+- `decklist_chunks`: Send a list of newline-delimited text blobs when you must split the payload into multiple pieces
+
+Example using chunks:
+
+```bash
+curl -X POST "https://mtg-mightstone-gpt.onrender.com/api/v1/deck/validate" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "decklist_chunks": [
+      "1x Light-Paws, Emperor\'s Voice\n1x Esper Sentinel\n1x Sol Ring",
+      "1x Daybreak Coronet\n1x Shield of Duty and Reason\n1x Swiftfoot Boots"
+    ],
+    "commander": "Light-Paws, Emperor\'s Voice",
+    "target_bracket": "optimized"
   }'
 ```
 

@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException, Depends, status, Request, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from cachetools import TTLCache
 
 # Cache instantiation
@@ -3103,11 +3103,42 @@ async def health_check():
 
 class DeckValidationRequest(BaseModel):
     """Request model for deck validation (simplified, no user-supplied sources)"""
-    decklist: List[str] = Field(..., description="List of card names in the deck")
+    decklist: List[str] = Field(
+        default_factory=list,
+        description="List of card names in the deck. Useful for short requests.",
+    )
+    decklist_text: Optional[str] = Field(
+        default=None,
+        description="Optional multi-line decklist text blob. Each line should represent a card entry.",
+    )
+    decklist_chunks: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Optional list of decklist text chunks. Use this when client payload limits require splitting "
+            "a decklist into several strings."
+        ),
+    )
     commander: Optional[str] = Field(None, description="Commander name")
     target_bracket: Optional[str] = Field(None, description="Target bracket (exhibition, core, upgraded, optimized, cedh)")
     validate_bracket: bool = Field(default=True, description="Validate against bracket rules")
     validate_legality: bool = Field(default=True, description="Validate Commander format legality")
+
+    @model_validator(mode="after")
+    def _ensure_decklist_present(self) -> "DeckValidationRequest":
+        """Ensure that at least one decklist input method is provided."""
+        has_direct_list = any(entry.strip() for entry in self.decklist)
+        has_text_blob = bool(self.decklist_text and self.decklist_text.strip())
+        has_chunks = bool(
+            self.decklist_chunks
+            and any(chunk and chunk.strip() for chunk in self.decklist_chunks)
+        )
+
+        if not (has_direct_list or has_text_blob or has_chunks):
+            raise ValueError(
+                "A decklist must be supplied via 'decklist', 'decklist_text', or 'decklist_chunks'."
+            )
+
+        return self
 
 
 class DeckCard(BaseModel):
@@ -3326,12 +3357,31 @@ class DeckValidator:
     
     def __init__(self):
         self.cache = TTLCache(maxsize=1000, ttl=3600)  # 1 hour cache
-        
+
+    @staticmethod
+    def build_request_signature(request: DeckValidationRequest) -> str:
+        """Create a stable signature for caching deck validation results."""
+        parts: List[str] = []
+
+        if request.decklist:
+            parts.extend(request.decklist)
+        if request.decklist_text:
+            parts.append(request.decklist_text)
+        if request.decklist_chunks:
+            parts.extend(request.decklist_chunks)
+
+        parts.append(request.commander or "")
+        parts.append(request.target_bracket or "")
+
+        signature_source = "||".join(parts)
+        return str(hash(signature_source))
+
     async def validate_deck(self, request: DeckValidationRequest) -> DeckValidationResponse:
         """Main validation method"""
         try:
+            deck_entries = self._resolve_decklist_entries(request)
             # Parse and normalize decklist
-            cards = await self._build_deck_cards(request.decklist)
+            cards = await self._build_deck_cards(deck_entries)
 
             illegal_duplicates = self._find_illegal_duplicates(cards)
 
@@ -3410,6 +3460,48 @@ class DeckValidator:
                 salt_scores={}
             )
     
+    def _resolve_decklist_entries(self, request: DeckValidationRequest) -> List[str]:
+        """Combine decklist inputs (list, text blob, chunks) into a normalized list."""
+        entries: List[str] = []
+
+        if request.decklist:
+            entries.extend([line.strip() for line in request.decklist if line and line.strip()])
+
+        if request.decklist_text:
+            entries.extend(self._parse_decklist_block(request.decklist_text))
+
+        if request.decklist_chunks:
+            for chunk in request.decklist_chunks:
+                entries.extend(self._parse_decklist_block(chunk))
+
+        entries = [line for line in entries if line]
+
+        if not entries:
+            raise ValueError("Decklist cannot be empty after processing input.")
+
+        return entries
+
+    def _parse_decklist_block(self, block: Optional[str]) -> List[str]:
+        """Parse a block of text into decklist entries."""
+        if not block:
+            return []
+
+        normalized = block.replace("\r", "\n")
+        parsed: List[str] = []
+
+        for raw_line in normalized.split("\n"):
+            stripped = (raw_line or "").strip()
+            if not stripped:
+                continue
+
+            segments = [segment.strip() for segment in stripped.split(";") if segment.strip()]
+            if segments:
+                parsed.extend(segments)
+            else:
+                parsed.append(stripped)
+
+        return parsed
+
     async def _build_deck_cards(self, decklist: List[str]) -> List[DeckCard]:
         """Parse decklist and classify each card using authoritative scraped data."""
         data = await self._load_authoritative_data()
@@ -4425,9 +4517,10 @@ async def validate_deck(
     """
     try:
         result = await deck_validator.validate_deck(request)
-        
+
         # Cache the result for 1 hour using the validator's cache
-        cache_key = f"deck_validation_{hash(str(request.decklist))}"
+        signature = DeckValidator.build_request_signature(request)
+        cache_key = f"deck_validation_{signature}"
         deck_validator.cache[cache_key] = result
         
         return result
