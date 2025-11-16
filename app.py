@@ -3550,55 +3550,60 @@ class DeckValidator:
             ("Splinter Twin", "Deceiver Exarch")
         ]
 
-        # Top 100 Saltiest Cards from EDHRec
-        # Source: https://edhrec.com/top/salt
-        salt_cards = {
-            "Stasis": 3.06, "Winter Orb": 2.96, "Vivi Ornitier": 2.81, 
-            "Tergrid, God of Fright": 2.8, "Rhystic Study": 2.73, 
-            "The Tabernacle at Pendrell Vale": 2.68, "Armageddon": 2.67, 
-            "Static Orb": 2.62, "Vorinclex, Voice of Hunger": 2.61, 
-            "Thassa's Oracle": 2.59, "Grand Arbiter Augustin IV": 2.58, 
-            "Smothering Tithe": 2.58, "Jin-Gitaxias, Core Augur": 2.57, 
-            "The One Ring": 2.55, "Humility": 2.51, "Drannith Magistrate": 2.46, 
-            "Expropriate": 2.45, "Sunder": 2.44, "Obliterate": 2.42, 
-            "Devastation": 2.41, "Ravages of War": 2.39, "Cyclonic Rift": 2.36, 
-            "Jokulhaups": 2.36, "Apocalypse": 2.34, "Opposition Agent": 2.32, 
-            "Urza, Lord High Artificer": 2.31, "Fierce Guardianship": 2.3, 
-            "Hokori, Dust Drinker": 2.27, "Back to Basics": 2.23, 
-            "Nether Void": 2.23, "Jin-Gitaxias, Progress Tyrant": 2.22, 
-            "Braids, Cabal Minion": 2.21, "Worldfire": 2.2, 
-            "Toxrill, the Corrosive": 2.19, "Aura Shards": 2.18, 
-            "Gaea's Cradle": 2.17, "Kinnan, Bonder Prodigy": 2.15, 
-            "Yuriko, the Tiger's Shadow": 2.15, "Teferi's Protection": 2.13, 
-            "Blood Moon": 2.13, "Farewell": 2.13, "Rising Waters": 2.11, 
-            "Decree of Annihilation": 2.1, "Winter Moon": 2.08, 
-            "Smokestack": 2.08, "Orcish Bowmasters": 2.07, 
-            "Tectonic Break": 2.05, "Edgar Markov": 2.05, "Sen Triplets": 2.04, 
-            "Warp World": 2.04, "Sheoldred, the Apocalypse": 2.03, 
-            "Emrakul, the Promised End": 2.03, "Scrambleverse": 2.02, 
-            "Thieves' Auction": 2.02, "Force of Will": 2.01, 
-            "Narset, Parter of Veils": 2.01, "Glacial Chasm": 1.99, 
-            "Ruination": 1.99, "Mindslaver": 1.98, "Epicenter": 1.97, 
-            "The Ur-Dragon": 1.97, "Notion Thief": 1.96, "Void Winnower": 1.96, 
-            "Jodah, the Unifier": 1.94, "Storm, Force of Nature": 1.91, 
-            "Wake of Destruction": 1.91, "Force of Negation": 1.91, 
-            "Deadpool, Trading Card": 1.9, "Mana Drain": 1.89, 
-            "Blightsteel Colossus": 1.88, "Dictate of Erebos": 1.88, 
-            "Boil": 1.87, "Winota, Joiner of Forces": 1.85, 
-            "Mana Breach": 1.84, "Global Ruin": 1.84, "Catastrophe": 1.83, 
-            "Emrakul, the World Anew": 1.83, "Acid Rain": 1.83, 
-            "Time Stretch": 1.83, "Grave Pact": 1.82, 
-            "Impending Disaster": 1.82, "Ulamog, the Defiler": 1.82, 
-            "Demonic Consultation": 1.82, "Underworld Breach": 1.81, 
-            "Consecrated Sphinx": 1.8, "Divine Intervention": 1.79, 
-            "Thoughts of Ruin": 1.79, "Miirym, Sentinel Wyrm": 1.78, 
-            "Vorinclex, Monstrous Raider": 1.78, "Ad Nauseam": 1.78, 
-            "Seedborn Muse": 1.77, "Cataclysm": 1.76, 
-            "Elesh Norn, Mother of Machines": 1.76, "Boiling Seas": 1.76, 
-            "Magus of the Moon": 1.75, "Elesh Norn, Grand Cenobite": 1.74, 
-            "Sway of the Stars": 1.74, "Hullbreaker Horror": 1.74, 
-            "Necropotence": 1.73, "Atraxa, Praetors' Voice": 1.72
-        }
+        # Load salt scores from EDHRec (dynamically scraped from https://edhrec.com/top/salt)
+        try:
+            # Try to dynamically scrape salt scores from EDHRec
+            salt_cards = await self._scrape_edhrec_salt_scores()
+        except Exception as e:
+            logger.warning(f"Failed to scrape salt scores from EDHRec: {e}")
+            # Fallback to hardcoded salt scores for high-impact cards
+            salt_cards = {
+                "Stasis": 3.06, "Winter Orb": 2.96, "Vivi Ornitier": 2.81, 
+                "Tergrid, God of Fright": 2.8, "Rhystic Study": 2.73, 
+                "The Tabernacle at Pendrell Vale": 2.68, "Armageddon": 2.67, 
+                "Static Orb": 2.62, "Vorinclex, Voice of Hunger": 2.61, 
+                "Thassa's Oracle": 2.59, "Grand Arbiter Augustin IV": 2.58, 
+                "Smothering Tithe": 2.58, "Jin-Gitaxias, Core Augur": 2.57, 
+                "The One Ring": 2.55, "Humility": 2.51, "Drannith Magistrate": 2.46, 
+                "Expropriate": 2.45, "Sunder": 2.44, "Obliterate": 2.42, 
+                "Devastation": 2.41, "Ravages of War": 2.39, "Cyclonic Rift": 2.36, 
+                "Jokulhaups": 2.36, "Apocalypse": 2.34, "Opposition Agent": 2.32, 
+                "Urza, Lord High Artificer": 2.31, "Fierce Guardianship": 2.3, 
+                "Hokori, Dust Drinker": 2.27, "Back to Basics": 2.23, 
+                "Nether Void": 2.23, "Jin-Gitaxias, Progress Tyrant": 2.22, 
+                "Braids, Cabal Minion": 2.21, "Worldfire": 2.2, 
+                "Toxrill, the Corrosive": 2.19, "Aura Shards": 2.18, 
+                "Gaea's Cradle": 2.17, "Kinnan, Bonder Prodigy": 2.15, 
+                "Yuriko, the Tiger's Shadow": 2.15, "Teferi's Protection": 2.13, 
+                "Blood Moon": 2.13, "Farewell": 2.13, "Rising Waters": 2.11, 
+                "Decree of Annihilation": 2.1, "Winter Moon": 2.08, 
+                "Smokestack": 2.08, "Orcish Bowmasters": 2.07, 
+                "Tectonic Break": 2.05, "Edgar Markov": 2.05, "Sen Triplets": 2.04, 
+                "Warp World": 2.04, "Sheoldred, the Apocalypse": 2.03, 
+                "Emrakul, the Promised End": 2.03, "Scrambleverse": 2.02, 
+                "Thieves' Auction": 2.02, "Force of Will": 2.01, 
+                "Narset, Parter of Veils": 2.01, "Glacial Chasm": 1.99, 
+                "Ruination": 1.99, "Mindslaver": 1.98, "Epicenter": 1.97, 
+                "The Ur-Dragon": 1.97, "Notion Thief": 1.96, "Void Winnower": 1.96, 
+                "Jodah, the Unifier": 1.94, "Storm, Force of Nature": 1.91, 
+                "Wake of Destruction": 1.91, "Force of Negation": 1.91, 
+                "Deadpool, Trading Card": 1.9, "Mana Drain": 1.89, 
+                "Blightsteel Colossus": 1.88, "Dictate of Erebos": 1.88, 
+                "Boil": 1.87, "Winota, Joiner of Forces": 1.85, 
+                "Mana Breach": 1.84, "Global Ruin": 1.84, "Catastrophe": 1.83, 
+                "Emrakul, the World Anew": 1.83, "Acid Rain": 1.83, 
+                "Time Stretch": 1.83, "Grave Pact": 1.82, 
+                "Impending Disaster": 1.82, "Ulamog, the Defiler": 1.82, 
+                "Demonic Consultation": 1.82, "Underworld Breach": 1.81, 
+                "Consecrated Sphinx": 1.8, "Divine Intervention": 1.79, 
+                "Thoughts of Ruin": 1.79, "Miirym, Sentinel Wyrm": 1.78, 
+                "Vorinclex, Monstrous Raider": 1.78, "Ad Nauseam": 1.78, 
+                "Seedborn Muse": 1.77, "Cataclysm": 1.76, 
+                "Elesh Norn, Mother of Machines": 1.76, "Boiling Seas": 1.76, 
+                "Magus of the Moon": 1.75, "Elesh Norn, Grand Cenobite": 1.74, 
+                "Sway of the Stars": 1.74, "Hullbreaker Horror": 1.74, 
+                "Necropotence": 1.73, "Atraxa, Praetors' Voice": 1.72
+            }
 
         data = {
             "mass_land_denial": mass_land_denial,
@@ -3609,6 +3614,121 @@ class DeckValidator:
 
         self.cache["authoritative_data"] = data
         return data
+
+    async def _scrape_edhrec_salt_scores(self) -> Dict[str, float]:
+        """
+        Scrape salt scores from EDHRec's top/salt page.
+        Returns a dictionary mapping card names to their salt scores.
+        """
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/91.0.4472.124 Safari/537.36"
+            )
+        }
+        
+        salt_url = "https://edhrec.com/top/salt"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(salt_url, headers=headers)
+                response.raise_for_status()
+                
+                html_content = response.text
+                soup = BeautifulSoup(html_content, "html.parser")
+                
+                # Extract salt scores from the HTML
+                salt_data = self._extract_salt_scores_from_html(soup)
+                
+                if not salt_data:
+                    logger.warning("Could not extract salt scores from HTML, using fallback")
+                    return self._get_fallback_salt_scores()
+                
+                logger.info(f"Scraped {len(salt_data)} salt scores from EDHRec")
+                return salt_data
+                
+        except Exception as exc:
+            logger.error(f"Error scraping salt scores: {exc}")
+            return self._get_fallback_salt_scores()
+
+    def _extract_salt_scores_from_html(self, soup: BeautifulSoup) -> Dict[str, float]:
+        """Extract salt scores from HTML structure"""
+        salt_data = {}
+        
+        # Look for JSON data in script tags
+        script_tags = soup.find_all("script", type="application/json")
+        for script in script_tags:
+            try:
+                data = json.loads(script.string)
+                # Look for card data in the JSON structure
+                page_data = data.get("props", {}).get("pageProps", {}).get("data", {})
+                container = page_data.get("container", {})
+                json_dict = container.get("json_dict", {})
+                cardlists = json_dict.get("cardlists", [])
+                
+                for cardlist in cardlists:
+                    if not isinstance(cardlist, dict):
+                        continue
+                        
+                    header = cardlist.get("header", "").lower()
+                    if "salt" in header:
+                        cardviews = cardlist.get("cardviews", [])
+                        for card_data in cardviews:
+                            if isinstance(card_data, dict):
+                                name = card_data.get("name", "").strip()
+                                # Look for salt score in synergy field or other numeric fields
+                                salt_score = card_data.get("synergy")
+                                if isinstance(salt_score, (int, float)) and name:
+                                    salt_data[name] = float(salt_score)
+                
+                if salt_data:  # If we found data, return it
+                    break
+                    
+            except (json.JSONDecodeError, AttributeError, KeyError):
+                continue
+        
+        # If JSON parsing didn't work, try HTML parsing as fallback
+        if not salt_data:
+            # Look for cards in table rows or list items
+            table_rows = soup.find_all("tr")
+            for row in table_rows:
+                cells = row.find_all(["td", "th"])
+                if len(cells) >= 2:
+                    # Try to find card name and score
+                    for i, cell in enumerate(cells):
+                        text = cell.get_text(strip=True)
+                        # Try to extract number (salt score)
+                        import re
+                        numbers = re.findall(r"[0-9]+\.?[0-9]*", text)
+                        if numbers:
+                            try:
+                                score = float(numbers[-1])  # Take last number as score
+                                if 0 <= score <= 5:  # Reasonable salt score range
+                                    # Previous cell might be card name
+                                    if i > 0:
+                                        prev_cell = cells[i-1]
+                                        card_name = prev_cell.get_text(strip=True)
+                                        if card_name and len(card_name) > 2:
+                                            salt_data[card_name] = score
+                            except ValueError:
+                                continue
+        
+        return salt_data
+
+    def _get_fallback_salt_scores(self) -> Dict[str, float]:
+        """
+        Fallback salt scores for high-impact cards when scraping fails.
+        """
+        return {
+            "Stasis": 3.06, "Winter Orb": 2.96, "Vivi Ornitier": 2.81, 
+            "Tergrid, God of Fright": 2.8, "Rhystic Study": 2.73, 
+            "The Tabernacle at Pendrell Vale": 2.68, "Armageddon": 2.67, 
+            "Static Orb": 2.62, "Vorinclex, Voice of Hunger": 2.61, 
+            "Thassa's Oracle": 2.59, "Grand Arbiter Augustin IV": 2.58, 
+            "Smothering Tithe": 2.58, "Jin-Gitaxias, Core Augur": 2.57, 
+            "The One Ring": 2.55, "Humility": 2.51, "Drannith Magistrate": 2.46
+        }
 
     async def _classify_card(self, card_name: str, quantity: int, data: Dict[str, Set[str]]) -> DeckCard:
         """Classify a single card using authoritative scraped lists."""
