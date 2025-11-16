@@ -3408,12 +3408,114 @@ class DeckValidator:
             "Winter Orb", "Worldfire", "Worldpurge", "Worldslayer"
         }
 
-        # Early game combo pieces (placeholder - can be expanded)
-        early_game_combos = set()
+        # Early game 2-card combo pairs from EDHRec
+        # Source: https://edhrec.com/combos/early-game-2-card-combos
+        # Format: List of tuples (card1, card2) - both pieces must be present to flag as combo
+        early_game_combo_pairs = [
+            ("Demonic Consultation", "Thassa's Oracle"),
+            ("Tainted Pact", "Thassa's Oracle"),
+            ("Tainted Pact", "Laboratory Maniac"),
+            ("Demonic Consultation", "Laboratory Maniac"),
+            ("Exquisite Blood", "Sanguine Bond"),
+            ("Exquisite Blood", "Vito, Thorn of the Dusk Rose"),
+            ("Dramatic Reversal", "Isochron Scepter"),
+            ("Dualcaster Mage", "Twinflame"),
+            ("Dualcaster Mage", "Heat Shimmer"),
+            ("Niv-Mizzet, Parun", "Curiosity"),
+            ("Niv-Mizzet, Parun", "Ophidian Eye"),
+            ("Niv-Mizzet, Parun", "Tandem Lookout"),
+            ("Niv-Mizzet, the Firemind", "Curiosity"),
+            ("Niv-Mizzet, the Firemind", "Ophidian Eye"),
+            ("Niv-Mizzet, the Firemind", "Tandem Lookout"),
+            ("Gravecrawler", "Phyrexian Altar"),
+            ("Gravecrawler", "Pitiless Plunderer"),
+            ("Exquisite Blood", "Bloodthirsty Conqueror"),
+            ("Sanguine Bond", "Bloodthirsty Conqueror"),
+            ("Chatterfang, Squirrel General", "Pitiless Plunderer"),
+            ("Bloodchief Ascension", "Mindcrank"),
+            ("Basalt Monolith", "Rings of Brighthearth"),
+            ("Basalt Monolith", "Forsaken Monument"),
+            ("Exquisite Blood", "Marauding Blight-Priest"),
+            ("Heliod, Sun-Crowned", "Walking Ballista"),
+            ("Maddening Cacophony", "Bruvac the Grandiloquent"),
+            ("Maddening Cacophony", "Fraying Sanity"),
+            ("Enduring Tenacity", "Peregrin Took"),
+            ("Nuka-Cola Vending Machine", "Kinnan, Bonder Prodigy"),
+            ("Dualcaster Mage", "Molten Duplication"),
+            ("Felidar Guardian", "Restoration Angel"),
+            ("Peregrine Drake", "Deadeye Navigator"),
+            ("The Gitrog Monster", "Dakmor Salvage"),
+            ("Squee, the Immortal", "Food Chain"),
+            ("Eternal Scourge", "Food Chain"),
+            ("Blasphemous Act", "Repercussion"),
+            ("Experimental Confectioner", "The Reaver Cleaver"),
+            ("Aggravated Assault", "Sword of Feast and Famine"),
+            ("Aggravated Assault", "Bear Umbra"),
+            ("Aggravated Assault", "Savage Ventmaw"),
+            ("Aggravated Assault", "Neheb, the Eternal"),
+            ("Kiki-Jiki, Mirror Breaker", "Zealous Conscripts"),
+            ("Kiki-Jiki, Mirror Breaker", "Felidar Guardian"),
+            ("Kiki-Jiki, Mirror Breaker", "Restoration Angel"),
+            ("Kiki-Jiki, Mirror Breaker", "Village Bell-Ringer"),
+            ("Kiki-Jiki, Mirror Breaker", "Combat Celebrant"),
+            ("Staff of Domination", "Priest of Titania"),
+            ("Staff of Domination", "Elvish Archdruid"),
+            ("Staff of Domination", "Circle of Dreams Druid"),
+            ("Staff of Domination", "Bloom Tender"),
+            ("Umbral Mantle", "Priest of Titania"),
+            ("Umbral Mantle", "Elvish Archdruid"),
+            ("Umbral Mantle", "Circle of Dreams Druid"),
+            ("Umbral Mantle", "Bloom Tender"),
+            ("Umbral Mantle", "Selvala, Heart of the Wilds"),
+            ("Dualcaster Mage", "Saw in Half"),
+            ("Godo, Bandit Warlord", "Helm of the Host"),
+            ("Scurry Oak", "Ivy Lane Denizen"),
+            ("Ashaya, Soul of the Wild", "Quirion Ranger"),
+            ("Ashaya, Soul of the Wild", "Scryb Ranger"),
+            ("Marwyn, the Nurturer", "Umbral Mantle"),
+            ("Malcolm, Keen-Eyed Navigator", "Glint-Horn Buccaneer"),
+            ("Storm-Kiln Artist", "Haze of Rage"),
+            ("Karn, the Great Creator", "Mycosynth Lattice"),
+            ("Traumatize", "Maddening Cacophony"),
+            ("Traumatize", "Bruvac the Grandiloquent"),
+            ("Kaalia of the Vast", "Master of Cruelties"),
+            ("Forensic Gadgeteer", "Toralf, God of Fury"),
+            ("Professor Onyx", "Chain of Smog"),
+            ("Witherbloom Apprentice", "Chain of Smog"),
+            ("Solphim, Mayhem Dominus", "Heartless Hidetsugu"),
+            ("Cut Your Losses", "Bruvac the Grandiloquent"),
+            ("Starscape Cleric", "Peregrin Took"),
+            ("Ondu Spiritdancer", "Secret Arcade"),
+            ("Ondu Spiritdancer", "Dusty Parlor"),
+            ("Vandalblast", "Toralf, God of Fury"),
+            ("Nest of Scarabs", "Blowfly Infestation"),
+            ("Duskmantle Guildmage", "Mindcrank"),
+            ("Rosie Cotton of South Lane", "Peregrin Took"),
+            ("Terisian Mindbreaker", "Maddening Cacophony"),
+            ("Bloom Tender", "Freed from the Real"),
+            ("Priest of Titania", "Freed from the Real"),
+            ("Devoted Druid", "Swift Reconfiguration"),
+            ("Basking Broodscale", "Ivy Lane Denizen"),
+            ("Ratadrabik of Urborg", "Boromir, Warden of the Tower"),
+            ("Dualcaster Mage", "Electroduplicate"),
+            ("Abdel Adrian, Gorion's Ward", "Animate Dead"),
+            ("Animate Dead", "Worldgorger Dragon"),
+            ("Tivit, Seller of Secrets", "Time Sieve"),
+            ("Satya, Aetherflux Genius", "Lightning Runner"),
+            ("Ghostly Flicker", "Naru Meha, Master Wizard"),
+            ("Ghostly Flicker", "Dualcaster Mage"),
+            ("Vizkopa Guildmage", "Exquisite Blood"),
+            ("Doomsday", "Thassa's Oracle"),
+            ("Doomsday", "Laboratory Maniac"),
+            ("Heliod, Sun-Crowned", "Triskelion"),
+            ("Grindstone", "Painter's Servant"),
+            ("Splinter Twin", "Pestermite"),
+            ("Splinter Twin", "Deceiver Exarch")
+        ]
 
         data = {
             "mass_land_denial": mass_land_denial,
-            "early_game_combos": early_game_combos,
+            "early_game_combo_pairs": early_game_combo_pairs,
             "game_changers": game_changers,
         }
 
@@ -3427,8 +3529,6 @@ class DeckValidator:
 
         if card_name in data["mass_land_denial"]:
             categories.append("mass_land_denial")
-        if card_name in data["early_game_combos"]:
-            categories.append("early_game_combo")
         if card_name in data["game_changers"]:
             categories.append("game_changer")
             is_game_changer = True
@@ -3440,6 +3540,20 @@ class DeckValidator:
             bracket_categories=categories,
             legality_status="pending"
         )
+    
+    def _detect_combos(self, cards: List[DeckCard], combo_pairs: List[tuple]) -> List[tuple]:
+        """
+        Detect complete 2-card combos in the deck.
+        Returns list of combo pairs found where BOTH pieces are present.
+        """
+        card_names = {card.name for card in cards}
+        detected_combos = []
+        
+        for card1, card2 in combo_pairs:
+            if card1 in card_names and card2 in card_names:
+                detected_combos.append((card1, card2))
+        
+        return detected_combos
     
     async def _validate_legality(self, cards: List[DeckCard], commander: Optional[str]) -> Dict[str, Any]:
         """Validate commander format legality"""
@@ -3477,6 +3591,10 @@ class DeckValidator:
                 recommendations=[f"Valid brackets: {', '.join(COMMANDER_BRACKETS.keys())}"]
             )
         
+        # Load authoritative data to get combo pairs
+        data = await self._load_authoritative_data()
+        combo_pairs = data.get("early_game_combo_pairs", [])
+        
         bracket_info = COMMANDER_BRACKETS[target_bracket]
         violations = []
         recommendations = []
@@ -3494,6 +3612,19 @@ class DeckValidator:
         mass_land_count = sum(1 for card in cards if "mass_land_denial" in card.bracket_categories)
         if target_bracket == "exhibition" and mass_land_count > 2:
             violations.append("Too many mass land denial effects for Exhibition")
+        
+        # Check for 2-card combos
+        detected_combos = self._detect_combos(cards, combo_pairs)
+        combo_count = len(detected_combos)
+        
+        # Brackets 1, 2, 3 (exhibition, core, upgraded) should have ZERO combos
+        if target_bracket in ["exhibition", "core", "upgraded"] and combo_count > 0:
+            combo_list = ", ".join([f"{c1} + {c2}" for c1, c2 in detected_combos])
+            violations.append(f"Early-game 2-card combos detected in {target_bracket} bracket: {combo_list}")
+            recommendations.append(f"Deck contains {combo_count} 2-card combo(s) - should be upgraded to at least Bracket 4 (Optimized)")
+        elif target_bracket in ["optimized", "cedh"] and combo_count > 0:
+            # Combos are expected/allowed in these brackets
+            recommendations.append(f"Deck contains {combo_count} 2-card combo(s) - appropriate for {target_bracket}")
         
         # Check for tutors
         tutor_count = sum(1 for card in cards if "tutor" in card.bracket_categories)
@@ -3521,6 +3652,8 @@ class DeckValidator:
             compliance_details={
                 "game_changers": game_changer_count,
                 "mass_land_denial": mass_land_count,
+                "early_game_combos": combo_count,
+                "detected_combos": [f"{c1} + {c2}" for c1, c2 in detected_combos],
                 "tutors": tutor_count,
                 "total_cards": len(cards)
             },
