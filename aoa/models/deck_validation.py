@@ -24,6 +24,13 @@ class DeckValidationRequest(BaseModel):
             "a decklist into several strings."
         ),
     )
+    decklist_url: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional URL to a deck on supported platforms (Moxfield, Archidekt). "
+            "The validator will extract the decklist from this URL."
+        ),
+    )
     commander: Optional[str] = Field(None, description="Commander name")
     target_bracket: Optional[str] = Field(
         None, description="Target bracket (exhibition, core, upgraded, optimized, cedh)"
@@ -44,10 +51,11 @@ class DeckValidationRequest(BaseModel):
             self.decklist_chunks
             and any(chunk and chunk.strip() for chunk in self.decklist_chunks)
         )
+        has_url = bool(self.decklist_url and self.decklist_url.strip())
 
-        if not (has_direct_list or has_text_blob or has_chunks):
+        if not (has_direct_list or has_text_blob or has_chunks or has_url):
             raise ValueError(
-                "A decklist must be supplied via 'decklist', 'decklist_text', or 'decklist_chunks'."
+                "A decklist must be supplied via 'decklist', 'decklist_text', 'decklist_chunks', or 'decklist_url'."
             )
 
         return self
