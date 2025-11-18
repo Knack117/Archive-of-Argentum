@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import deque
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -13,6 +14,31 @@ from aoa.constants import EDHREC_BASE_URL
 from aoa.services.edhrec import fetch_edhrec_json
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_page_data(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the commander data block regardless of how Next.js nests it."""
+
+    if not isinstance(payload, dict):
+        return {}
+
+    queue: Deque[Any] = deque([payload])
+    while queue:
+        node = queue.popleft()
+        if isinstance(node, dict):
+            page_props = node.get("pageProps")
+            if isinstance(page_props, dict):
+                data_block = page_props.get("data")
+                if isinstance(data_block, dict):
+                    return data_block
+            for value in node.values():
+                if isinstance(value, (dict, list, tuple)):
+                    queue.append(value)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                if isinstance(item, (dict, list, tuple)):
+                    queue.append(item)
+    return {}
 
 
 def extract_build_id_from_html(html: str) -> Optional[str]:
@@ -156,7 +182,7 @@ async def scrape_edhrec_commander_page(commander_url: str) -> Dict[str, Any]:
 
 def extract_commander_json_data(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Extract commander data from the live EDHRec JSON payload."""
-    page_data = payload.get("pageProps", {}).get("data", {})
+    page_data = _extract_page_data(payload)
     panels = page_data.get("panels", {})
     container = page_data.get("container", {})
 
@@ -270,7 +296,7 @@ def extract_commander_json_data(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def extract_commander_tags_from_json(payload: Dict[str, Any]) -> List[str]:
     """Extract commander tags from EDHRec JSON payloads."""
-    data = payload.get("pageProps", {}).get("data", {})
+    data = _extract_page_data(payload)
     panels = data.get("panels", {})
     taglinks = panels.get("taglinks", [])
     tags: List[str] = []
@@ -288,7 +314,7 @@ def extract_commander_tags_from_json(payload: Dict[str, Any]) -> List[str]:
 
 def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, List[str]]:
     """Extract commander card sections from EDHRec JSON payloads."""
-    data = payload.get("pageProps", {}).get("data", {})
+    data = _extract_page_data(payload)
     sections: Dict[str, List[str]] = {}
 
     cardlists = data.get("cardlists") or []
