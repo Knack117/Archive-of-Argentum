@@ -359,25 +359,28 @@ class DeckValidator:
             if not stripped:
                 continue
 
-            # First try semicolon separation
-            segments = [segment.strip() for segment in stripped.split(";") if segment.strip()]
-            if segments:
-                parsed.extend(segments)
-                continue
+            # First try semicolon separation (only if semicolons actually exist)
+            if ";" in stripped:
+                segments = [segment.strip() for segment in stripped.split(";") if segment.strip()]
+                if len(segments) > 1:  # Only if we found multiple segments
+                    parsed.extend(segments)
+                    continue
 
-            # Check if this looks like it might contain multiple cards
-            # Look for multiple "number + card name" patterns
+            # Check if this line contains potential deck entries
+            # Look for "number + card name" patterns
             card_pattern_matches = len(re.findall(r'\d+\s*x?\s+[A-Za-z]', stripped))
             
-            if card_pattern_matches > 1:
-                # Multiple cards detected - try to split them
-                cards = self._split_continuous_deck_text(stripped)
-                parsed.extend(cards)
-            elif card_pattern_matches == 1:
-                # Single card - append as-is
-                parsed.append(stripped)
+            if card_pattern_matches > 0:
+                # This line has card entries
+                if card_pattern_matches == 1:
+                    # Single card - append as-is
+                    parsed.append(stripped)
+                else:
+                    # Multiple cards - use split function
+                    cards = self._split_continuous_deck_text(stripped)
+                    parsed.extend(cards)
             else:
-                # No card patterns detected - might be text description, add as-is
+                # No card patterns - might be text description
                 parsed.append(stripped)
 
         return parsed
@@ -386,7 +389,7 @@ class DeckValidator:
         """
         Split continuous deck text like '1 Card1 1 Card2 1 Card3' into individual entries.
         
-        Uses a greedy approach to handle complex card names with commas, apostrophes, etc.
+        Uses a greedy approach that finds all number+card patterns and extracts the full names.
         
         Args:
             text: Continuous text that may contain multiple card entries
@@ -396,46 +399,40 @@ class DeckValidator:
         """
         import re
         
-        # Find all instances of "number + starting word" 
-        # Card names typically start with uppercase letter
-        pattern = r'(\d+)\s*x?\s+([A-Za-z])'
+        # Find all number+word patterns to locate card boundaries
+        number_pattern = r'(\d+)\s*x?\s+([A-Za-z])'
+        number_matches = list(re.finditer(number_pattern, text, re.IGNORECASE))
         
-        matches = list(re.finditer(pattern, text, re.IGNORECASE))
-        
-        if len(matches) <= 1:
-            # Not enough matches to be multiple cards
+        if len(number_matches) <= 1:
             return [text]
         
         cards = []
         
-        for i, match in enumerate(matches):
+        for i, match in enumerate(number_matches):
             quantity = match.group(1)
-            start_pos = match.start(2)  # Start of the card name
+            start_pos = match.start(2)  # Start of card name
             
-            # Find end position: either start of next card or end of text
-            if i < len(matches) - 1:
-                # Not the last card - end is just before the next number
-                end_pos = matches[i + 1].start()
+            # Find end position - either next number or end of text
+            if i < len(number_matches) - 1:
+                # End is just before the next quantity starts (group 1, not group 2)
+                end_pos = number_matches[i + 1].start(1)  # Start of next quantity
             else:
-                # Last card - go to end of text
+                # Last card - go to end
                 end_pos = len(text)
             
-            # Extract the card name
+            # Extract card name
             card_name = text[start_pos:end_pos].strip()
             
-            # Clean up the card name
-            # Remove trailing punctuation and extra whitespace
+            # Clean up: remove trailing punctuation and extra whitespace
             while card_name and card_name[-1] in '.,;:':
                 card_name = card_name[:-1].strip()
             
-            # Handle cases where the next card's number might be attached
-            # Look for patterns like "Marshal1Adorned" -> "Marshal"
+            # Remove any trailing numbers that might be from incomplete parsing
             card_name = re.sub(r'\s*\d+\s*$', '', card_name).strip()
             
-            if card_name:  # Only add if we have a valid card name
+            if card_name:
                 cards.append(f"{quantity} {card_name}")
         
-        # If we got good results, return them; otherwise fallback to original text
         return cards if len(cards) >= 2 else [text]
 
     async def _build_deck_cards(self, decklist: List[str]) -> List[DeckCard]:
