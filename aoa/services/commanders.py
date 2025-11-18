@@ -156,7 +156,53 @@ async def scrape_edhrec_commander_page(commander_url: str) -> Dict[str, Any]:
             raise HTTPException(status_code=404, detail="Could not find build ID in page")
 
         commander_name = extract_commander_name_from_url(commander_url)
-        json_data = extract_commander_json_data(soup, build_id)
+        
+        # Enhanced extraction with multiple fallbacks
+        json_data = {}
+        
+        # Primary extraction method
+        try:
+            json_data = extract_commander_json_data(soup, build_id)
+            # Check if we got meaningful data
+            if not json_data.get("categories"):
+                raise ValueError("No categories found in primary extraction")
+        except Exception as primary_error:
+            logger.warning(f"Primary extraction failed: {primary_error}, trying fallback methods")
+            
+            # Fallback: extract sections directly from the JSON payload
+            try:
+                next_data_script = soup.find("script", {"id": "__NEXT_DATA__", "type": "application/json"})
+                if next_data_script and next_data_script.string:
+                    data = json.loads(next_data_script.string)
+                    sections = extract_commander_sections_from_json(data)
+                    
+                    # Convert sections format to the expected format
+                    categories = {}
+                    for section_name, card_names in sections.items():
+                        if card_names:
+                            categories[section_name] = {"cards": [{"name": name} for name in card_names]}
+                    
+                    json_data = {
+                        "commander_tags": [],
+                        "top_10_tags": [],
+                        "all_tags": [],
+                        "combos": [],
+                        "similar_commanders": [],
+                        "categories": categories
+                    }
+                else:
+                    raise ValueError("No __NEXT_DATA__ script found")
+            except Exception as fallback_error:
+                logger.warning(f"Fallback extraction failed: {fallback_error}")
+                # If all extraction methods fail, return empty data
+                json_data = {
+                    "commander_tags": [],
+                    "top_10_tags": [],
+                    "all_tags": [],
+                    "combos": [],
+                    "similar_commanders": [],
+                    "categories": {}
+                }
         return {
             "commander_name": commander_name,
             "commander_url": commander_url,
@@ -224,32 +270,58 @@ def extract_commander_json_data(soup: BeautifulSoup, build_id: str) -> Dict[str,
                         }
                     )
 
+            # Updated extraction logic based on successful web extractions
             categories = {}
-            category_data = panels.get("jsonCardLists", [])
-            for panel in category_data:
-                if not isinstance(panel, dict):
-                    continue
-                header = panel.get("header") or panel.get("label")
-                cards = panel.get("cards") or panel.get("cardviews")
-                if not header or not isinstance(cards, list):
-                    continue
-                normalized_cards = []
-                for card in cards:
-                    if isinstance(card, dict) and card.get("name"):
-                        normalized_cards.append(
-                            {
-                                "name": card.get("name"),
-                                "num_decks": card.get("num_decks"),
-                                "potential_decks": card.get("potential_decks"),
-                                "inclusion_percentage": card.get("inclusion_percentage"),
-                                "synergy_percentage": card.get("synergy_percentage"),
-                                "sanitized_name": card.get("sanitized_name"),
-                                "card_url": card.get("card_url"),
-                            }
-                        )
-                if normalized_cards:
-                    categories[header] = {"cards": normalized_cards}
+            
+            # PRIMARY: Look for card_lists structure (from successful extraction analysis)
+            card_lists = page_data.get("card_lists", {})
+            if card_lists:
+                logger.info(f"Found card_lists with sections: {list(card_lists.keys())}")
+                for section_name, cards in card_lists.items():
+                    if isinstance(cards, list):
+                        normalized_cards = []
+                        for card in cards:
+                            if isinstance(card, dict) and card.get("name"):
+                                normalized_cards.append({
+                                    "name": card.get("name"),
+                                    "inclusion_percentage": card.get("inclusion_percentage"),
+                                    "decks_with_card": card.get("decks_with_card"),
+                                    "total_decks_considered": card.get("total_decks_considered"),
+                                    "synergy_percentage": card.get("synergy_percentage"),
+                                    "num_decks": card.get("num_decks") or card.get("decks_in"),
+                                    "sanitized_name": card.get("sanitized_name"),
+                                    "card_url": card.get("card_url"),
+                                })
+                        if normalized_cards:
+                            categories[section_name] = {"cards": normalized_cards}
+                            logger.info(f"Extracted {len(normalized_cards)} cards from {section_name}")
+            
+            # FALLBACK: Try original panels structure if card_lists is empty
+            if not categories:
+                json_card_lists = panels.get("jsonCardLists", [])
+                for panel in json_card_lists:
+                    if isinstance(panel, dict):
+                        header = panel.get("header") or panel.get("label")
+                        cards = panel.get("cards") or panel.get("cardviews", [])
+                        if header and isinstance(cards, list):
+                            normalized_cards = []
+                            for card in cards:
+                                if isinstance(card, dict) and card.get("name"):
+                                    normalized_cards.append({
+                                        "name": card.get("name"),
+                                        "inclusion_percentage": card.get("inclusion_percentage"),
+                                        "decks_with_card": card.get("decks_with_card"),
+                                        "total_decks_considered": card.get("total_decks_considered"),
+                                        "synergy_percentage": card.get("synergy_percentage"),
+                                        "num_decks": card.get("num_decks"),
+                                        "sanitized_name": card.get("sanitized_name"),
+                                        "card_url": card.get("card_url"),
+                                    })
+                            if normalized_cards:
+                                categories[header] = {"cards": normalized_cards}
+                                logger.info(f"Fallback: Extracted {len(normalized_cards)} cards from {header}")
 
+            logger.info(f"Successfully extracted {len(categories)} categories with card data")
             return {
                 "commander_tags": commander_tags,
                 "top_10_tags": top_10_tags,
