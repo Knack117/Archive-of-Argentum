@@ -326,7 +326,7 @@ class DeckValidator:
             )
     
     def _resolve_decklist_entries(self, request: DeckValidationRequest) -> List[str]:
-        """Combine decklist inputs (list, text blob, chunks) into a normalized list."""
+        """Combine decklist inputs (list, text blob, chunks, URL) into a normalized list."""
         entries: List[str] = []
 
         if request.decklist:
@@ -339,12 +339,108 @@ class DeckValidator:
             for chunk in request.decklist_chunks:
                 entries.extend(self._parse_decklist_block(chunk))
 
+        if request.decklist_url:
+            url_entries = self._extract_decklist_from_url(request.decklist_url)
+            entries.extend(url_entries)
+
         entries = [line for line in entries if line]
 
         if not entries:
             raise ValueError("Decklist cannot be empty after processing input.")
 
         return entries
+
+    def _extract_decklist_from_url(self, deck_url: str) -> List[str]:
+        """
+        Extract decklist from supported platform URLs (Moxfield, Archidekt).
+        
+        Args:
+            deck_url: URL to a deck on a supported platform
+            
+        Returns:
+            List of decklist entries
+            
+        Raises:
+            ValueError: If URL is not supported or extraction fails
+        """
+        import httpx
+        import mtg_parser
+        import os
+        
+        # Detect platform
+        deck_url = deck_url.strip()
+        if not deck_url.startswith(('http://', 'https://')):
+            raise ValueError("URL must start with http:// or https://")
+        
+        if 'moxfield.com/decks/' in deck_url.lower():
+            return self._extract_from_moxfield(deck_url)
+        elif 'archidekt.com/decks/' in deck_url.lower():
+            return self._extract_from_archidekt(deck_url)
+        else:
+            supported_platforms = ["moxfield.com", "archidekt.com"]
+            raise ValueError(f"URL must be from a supported platform: {', '.join(supported_platforms)}")
+
+    def _extract_from_moxfield(self, deck_url: str) -> List[str]:
+        """Extract decklist from Moxfield URL."""
+        import httpx
+        import mtg_parser
+        import os
+        
+        # Moxfield requires custom User-Agent to be respectful
+        # Set a generic user agent for the library
+        custom_headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; MagicDeckValidator/1.0; +https://github.com/magic/deck-validator)'
+        }
+        
+        try:
+            with httpx.Client(headers=custom_headers, timeout=30.0) as http_client:
+                cards = mtg_parser.parse_deck(deck_url, http_client)
+                
+            if not cards:
+                raise ValueError("No cards found in the Moxfield deck")
+                
+            # Convert Card objects to list format
+            decklist_entries = []
+            for card in cards:
+                if card.quantity and card.quantity > 0:
+                    if card.quantity == 1:
+                        decklist_entries.append(card.name)
+                    else:
+                        decklist_entries.append(f"{card.quantity} {card.name}")
+            
+            logger.info(f"Successfully extracted {len(decklist_entries)} cards from Moxfield deck: {deck_url}")
+            return decklist_entries
+            
+        except Exception as exc:
+            logger.error(f"Failed to extract deck from Moxfield {deck_url}: {exc}")
+            raise ValueError(f"Failed to extract decklist from Moxfield URL: {str(exc)}")
+
+    def _extract_from_archidekt(self, deck_url: str) -> List[str]:
+        """Extract decklist from Archidekt URL."""
+        import mtg_parser
+        
+        try:
+            # Archidekt works with regular HTTP client
+            cards = mtg_parser.parse_deck(deck_url)
+            
+            if not cards:
+                raise ValueError("No cards found in the Archidekt deck")
+                
+            # Convert Card objects to list format
+            decklist_entries = []
+            for card in cards:
+                if card.quantity and card.quantity > 0:
+                    if card.quantity == 1:
+                        decklist_entries.append(card.name)
+                    else:
+                        decklist_entries.append(f"{card.quantity} {card.name}")
+            
+            logger.info(f"Successfully extracted {len(decklist_entries)} cards from Archidekt deck: {deck_url}")
+            return decklist_entries
+            
+        except Exception as exc:
+            logger.error(f"Failed to extract deck from Archidekt {deck_url}: {exc}")
+            raise ValueError(f"Failed to extract decklist from Archidekt URL: {str(exc)}")
 
     def _parse_decklist_block(self, block: Optional[str]) -> List[str]:
         """Parse a block of text into decklist entries."""
@@ -1404,7 +1500,11 @@ async def validate_deck(
     """
     Validate a deck against Commander Brackets rules and format legality.
     
-    - Provide a decklist of card names
+    - Provide a decklist via:
+      * List of card names
+      * Multi-line text blob
+      * Text chunks
+      * Deck URL (Moxfield or Archidekt)
     - Optionally specify commander and target bracket
     - Validates against official Commander Brackets system
     - Checks for Game Changers, format legality, and power level compliance
