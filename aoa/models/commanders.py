@@ -35,7 +35,7 @@ class CommanderSummary(BaseModel):
     commander_url: Optional[str] = None
     timestamp: Optional[str] = None
     commander_tags: List[str] = Field(default_factory=list)
-    top_10_tags: List[str] = Field(default_factory=list)
+    top_10_tags: List[CommanderTag] = Field(default_factory=list)
     all_tags: List[CommanderTag] = Field(default_factory=list)
     combos: List[CommanderCombo] = Field(default_factory=list)
     similar_commanders: List[SimilarCommander] = Field(default_factory=list)
