@@ -25,6 +25,7 @@ from aoa.models import (
     DeckValidationResponse,
 )
 from aoa.security import verify_api_key
+from aoa.services.salt_cache import get_salt_cache, refresh_salt_cache
 
 logger = logging.getLogger(__name__)
 
@@ -245,8 +246,14 @@ class DeckValidator:
             # Get commander salt score
             commander_salt_score = await self._get_commander_salt_score(request.commander) if request.commander else 0.0
             
-            # Calculate deck salt score
-            deck_salt_score = self._calculate_salt_score(cards, data)
+            # Calculate deck salt score using cache service
+            salt_cache = get_salt_cache()
+            await salt_cache.ensure_loaded()
+            
+            card_names = [card.name for card in cards for _ in range(card.quantity)]
+            salt_result = salt_cache.calculate_deck_salt(card_names)
+            
+            deck_salt_score = salt_result['total_salt']
             
             # Calculate combined salt score (weighted average)
             combined_salt_score = round((commander_salt_score + deck_salt_score) / 2, 2)
@@ -256,10 +263,14 @@ class DeckValidator:
                 "commander_salt_score": commander_salt_score,
                 "deck_salt_score": deck_salt_score,
                 "combined_salt_score": combined_salt_score,
+                "salt_tier": salt_result['salt_tier'],
                 "commander_salt_description": self._get_salt_level_description(commander_salt_score),
                 "deck_salt_description": self._get_salt_level_description(deck_salt_score),
                 "combined_salt_description": self._get_salt_level_description(combined_salt_score),
-                "salt_level": self._get_salt_level_description(combined_salt_score)
+                "salt_level": self._get_salt_level_description(combined_salt_score),
+                "top_offenders": salt_result['top_offenders'],
+                "salty_card_count": salt_result['salty_card_count'],
+                "average_salt_per_card": salt_result['average_salt']
             }
             
             # Validate legality
@@ -552,11 +563,13 @@ class DeckValidator:
             ("Splinter Twin", "Deceiver Exarch")
         ]
 
-        # Load salt scores from EDHRec using the fixed scraping method
-        try:
-            salt_cards = await self._scrape_edhrec_salt_scores()
-        except Exception as e:
-            logger.warning(f"Failed to scrape salt scores from EDHRec: {e}")
+        # Load salt scores from cache (fast, comprehensive)
+        salt_cache = get_salt_cache()
+        await salt_cache.ensure_loaded()
+        salt_cards = salt_cache.get_all_salt_scores()
+        
+        if not salt_cards:
+            logger.warning("Salt cache empty, using fallback scores")
             salt_cards = self._get_fallback_salt_scores()
 
         data = {
@@ -1432,6 +1445,72 @@ async def get_game_changers_list(
             "other": "Deflecting Swat, Food Chain"
         },
         "last_updated": "2025-10-21"
+    }
+
+
+@router.post("/api/v1/salt/refresh")
+async def refresh_salt_data(
+    api_key: str = Depends(verify_api_key)
+) -> Dict[str, Any]:
+    """
+    Manually refresh the salt score cache from EDHRec.
+    
+    This fetches all 30,000+ cards with salt scores from EDHRec's JSON API
+    and saves them to the local cache. The cache never expires automatically -
+    only use this endpoint when you want fresh data.
+    
+    Recommended refresh interval: Every 3 months.
+    """
+    try:
+        result = await refresh_salt_cache()
+        return {
+            "message": "Salt cache refresh completed",
+            "result": result
+        }
+    except Exception as exc:
+        logger.error(f"Error refreshing salt cache: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to refresh salt cache: {str(exc)}"
+        )
+
+
+@router.get("/api/v1/salt/info")
+async def get_salt_cache_info(
+    api_key: str = Depends(verify_api_key)
+) -> Dict[str, Any]:
+    """
+    Get information about the current salt score cache.
+    
+    Returns cache status, card count, and last refresh time.
+    """
+    salt_cache = get_salt_cache()
+    return salt_cache.get_cache_info()
+
+
+@router.get("/api/v1/salt/card/{card_name}")
+async def get_card_salt_score(
+    card_name: str,
+    api_key: str = Depends(verify_api_key)
+) -> Dict[str, Any]:
+    """
+    Get the salt score for a specific card.
+    
+    Args:
+        card_name: The name of the card (case-insensitive)
+    
+    Returns:
+        Card name and salt score
+    """
+    salt_cache = get_salt_cache()
+    await salt_cache.ensure_loaded()
+    
+    salt_score = salt_cache.get_card_salt(card_name)
+    
+    return {
+        "card_name": card_name,
+        "salt_score": salt_score,
+        "found": salt_score > 0
     }
 
 
