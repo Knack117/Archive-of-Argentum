@@ -1442,6 +1442,40 @@ class DeckValidator:
         
         return round(normalized_score, 2)
 
+    def _generate_commander_lookup_names(self, commander_name: str) -> List[str]:
+        """Generate normalized variations of a commander name for cache lookups."""
+
+        if not commander_name:
+            return []
+
+        normalized = self._normalize_card_name(commander_name)
+        normalized = normalized.replace("’", "'").replace("`", "'")
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+
+        candidates: List[str] = []
+
+        def _add_candidate(value: str) -> None:
+            value = value.strip()
+            if value and value not in candidates:
+                candidates.append(value)
+
+        _add_candidate(normalized)
+
+        # Handle split cards or MDFCs that might include both faces
+        if "//" in normalized:
+            _add_candidate(normalized.split("//")[0].strip())
+
+        # Some clients provide the commander with parenthetical print details
+        if normalized.endswith(")"):
+            simplified = re.sub(r"\s*\([^)]*\)\s*$", "", normalized).strip()
+            _add_candidate(simplified)
+
+        # Remove commas when callers omit them (e.g., "Atraxa Praetors' Voice")
+        if "," in normalized:
+            _add_candidate(normalized.replace(",", ""))
+
+        return candidates
+
     async def _get_commander_salt_score(self, commander_name: str) -> float:
         """
         Get salt score for a commander from EDHRec.
@@ -1449,14 +1483,16 @@ class DeckValidator:
         """
         if not commander_name:
             return 0.0
-        
+
         # First, try to get from the salt cache (same data source as deck cards)
         salt_cache = get_salt_cache()
         await salt_cache.ensure_loaded()
-        cache_score = salt_cache.get_card_salt(commander_name)
-        if cache_score > 0:
-            return cache_score
-        
+
+        for candidate in self._generate_commander_lookup_names(commander_name):
+            cache_score = salt_cache.get_card_salt(candidate)
+            if cache_score > 0:
+                return round(cache_score, 2)
+
         # Fallback: Try to fetch from EDHRec commander page
         try:
             # Normalize commander name for URL
