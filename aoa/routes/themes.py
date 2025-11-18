@@ -1,6 +1,7 @@
 """Theme and tag scraping routes."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -385,9 +386,14 @@ async def fetch_theme_tag(theme_slug: str, color_identity: Optional[str] = None)
             last_error = detail
             if exc.status_code == 404:
                 continue
+            
+            # Add a small delay for rate limiting when getting non-404 errors
+            if exc.status_code in [403, 429, 500, 502]:
+                await asyncio.sleep(1.0)
             continue
         except Exception as exc:  # pragma: no cover - defensive
             last_error = str(exc)
+            await asyncio.sleep(0.5)  # Brief delay on unexpected errors
             continue
 
         page_data = payload.get("pageProps", {}).get("data", {})
