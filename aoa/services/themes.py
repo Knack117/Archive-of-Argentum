@@ -82,55 +82,87 @@ async def scrape_edhrec_theme_page(theme_url: str) -> Dict[str, Any]:
 
 def extract_theme_data_from_json(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Extract theme data from the Next.js payload."""
-    # Find the data block
-    page_props = payload.get("props", {}).get("pageProps", {})
-    data = page_props.get("data", {})
-    
-    if not data:
-        logger.warning("No data found in theme JSON payload")
-        return {}
-
-    header = data.get("header", "Theme")
-    description = data.get("description", "")
-    container = data.get("container", {})
-    json_dict = container.get("json_dict", {})
-    cardlists = json_dict.get("cardlists", [])
-    
-    collections = []
-    for cardlist in cardlists:
-        if not isinstance(cardlist, dict):
-            continue
-            
-        list_header = cardlist.get("header") or cardlist.get("label") or "Cards"
-        cardviews = cardlist.get("cardviews") or cardlist.get("cards") or []
+    try:
+        # Navigate to the correct data structure
+        page_props = payload.get("props", {}).get("pageProps", {})
+        data = page_props.get("data", {})
+        container = data.get("container", {})
+        json_dict = container.get("json_dict", {})
+        cardlists = json_dict.get("cardlists", [])
         
-        items = []
-        for card_data in cardviews:
-            if not isinstance(card_data, dict):
+        # Extract header and description
+        header = data.get("header", container.get("title", "Theme"))
+        description = container.get("description", data.get("description", ""))
+        
+        # Extract color identity deck statistics from related_info
+        deck_stats = {}
+        related_info = data.get("related_info", [])
+        for section in related_info:
+            section_header = section.get("header", "")
+            items = section.get("items", [])
+            for item in items:
+                color_identity = item.get("textLeft", "")
+                count = item.get("count", 0)
+                if color_identity and count:
+                    deck_stats[color_identity] = count
+        
+        # Extract card collections
+        collections = []
+        for cardlist in cardlists:
+            if not isinstance(cardlist, dict):
                 continue
                 
-            card_name = card_data.get("cardname") or card_data.get("name") or "Unknown"
-            inclusion = card_data.get("popularity") or card_data.get("inclusion") or "N/A"
-            synergy = card_data.get("synergy") or card_data.get("synergy_percentage") or "N/A"
+            list_header = cardlist.get("header") or cardlist.get("tag", "Cards")
+            cardviews = cardlist.get("cardviews", [])
             
-            items.append({
-                "card_name": card_name,
-                "inclusion_percentage": str(inclusion),
-                "synergy_percentage": str(synergy),
-            })
-        
-        if items:
-            collections.append({
-                "header": list_header,
-                "items": items
-            })
+            items = []
+            for card_data in cardviews:
+                if not isinstance(card_data, dict):
+                    continue
+                    
+                card_name = card_data.get("name", "Unknown")
+                inclusion = card_data.get("inclusion", 0)
+                synergy = card_data.get("synergy", 0)
+                label = card_data.get("label", "")
+                num_decks = card_data.get("num_decks", inclusion)
+                potential_decks = card_data.get("potential_decks", 0)
+                
+                # Calculate inclusion percentage
+                inclusion_percentage = 0
+                if potential_decks > 0:
+                    inclusion_percentage = (inclusion / potential_decks) * 100
+                
+                items.append({
+                    "card_name": card_name,
+                    "inclusion": inclusion,
+                    "inclusion_percentage": f"{inclusion_percentage:.1f}%",
+                    "synergy": synergy,
+                    "synergy_percentage": f"{synergy * 100:.0f}%" if synergy else "0%",
+                    "num_decks": num_decks,
+                    "potential_decks": potential_decks,
+                    "label": label
+                })
+            
+            if items:
+                collections.append({
+                    "header": list_header,
+                    "items": items
+                })
 
-    return {
-        "header": header,
-        "description": description,
-        "collections": collections,
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+        return {
+            "header": header,
+            "description": description,
+            "deck_statistics": deck_stats,
+            "collections": collections,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        
+    except Exception as exc:
+        logger.error("Error extracting theme data from JSON: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to parse theme data: {str(exc)}"
+        )
 
 
 def build_theme_url(theme_slug: str) -> str:
