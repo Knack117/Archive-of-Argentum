@@ -14,6 +14,7 @@ from aoa.constants import COLOR_SLUG_MAP, EDHREC_BASE_URL, SORTED_COLOR_IDENTIFI
 from aoa.models import PageTheme, ThemeCollection, ThemeItem, ThemeContainer
 from aoa.security import verify_api_key
 from aoa.services.edhrec import fetch_edhrec_json
+from aoa.services.themes import scrape_edhrec_theme_by_slug, extract_theme_data_from_json
 
 router = APIRouter(prefix="/api/v1", tags=["themes"])
 logger = logging.getLogger(__name__)
@@ -374,6 +375,7 @@ async def fetch_theme_tag(theme_slug: str, color_identity: Optional[str] = None)
     )
 
     last_error: Optional[str] = None
+    tried_html_scraping = False
 
     for candidate in candidates:
         page_path = candidate["page_path"]
@@ -384,6 +386,45 @@ async def fetch_theme_tag(theme_slug: str, color_identity: Optional[str] = None)
             detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
             last_error = detail
             if exc.status_code == 404:
+                continue
+            # If it's a 403 (blocked access), try HTML scraping as fallback
+            elif exc.status_code == 403 and not tried_html_scraping:
+                logger.info("JSON access blocked (403), trying HTML scraping for theme: %s", sanitized_slug)
+                try:
+                    scraped_data = await scrape_edhrec_theme_by_slug(sanitized_slug)
+                    if scraped_data and scraped_data.get("collections"):
+                        collections = []
+                        for collection_data in scraped_data.get("collections", []):
+                            items = [
+                                ThemeItem(
+                                    card_name=item["card_name"],
+                                    inclusion_percentage=item["inclusion_percentage"],
+                                    synergy_percentage=item["synergy_percentage"],
+                                )
+                                for item in collection_data.get("items", [])
+                            ]
+                            if items:
+                                collections.append(
+                                    ThemeCollection(
+                                        header=collection_data["header"],
+                                        items=items,
+                                    )
+                                )
+                        
+                        if collections:
+                            return PageTheme(
+                                header=scraped_data.get("header", f"{base_theme.title()} Theme"),
+                                description=scraped_data.get("description", f"EDHRec {base_theme} theme data"),
+                                tags=[base_theme],
+                                container=ThemeContainer(collections=collections),
+                                source_url=f"{EDHREC_BASE_URL}tags/{sanitized_slug}",
+                            )
+                    tried_html_scraping = True
+                    last_error = None  # Clear the JSON error since we found data via scraping
+                except Exception as scrape_exc:
+                    logger.warning("HTML scraping failed for theme %s: %s", sanitized_slug, scrape_exc)
+                    last_error = f"Both JSON API and HTML scraping failed: {scrape_exc}"
+                    tried_html_scraping = True
                 continue
             continue
         except Exception as exc:  # pragma: no cover - defensive
