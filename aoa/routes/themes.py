@@ -14,7 +14,8 @@ from aoa.constants import COLOR_SLUG_MAP, EDHREC_BASE_URL, SORTED_COLOR_IDENTIFI
 from aoa.models import PageTheme, ThemeCollection, ThemeItem, ThemeContainer
 from aoa.security import verify_api_key
 from aoa.services.edhrec import fetch_edhrec_json
-from aoa.services.themes import scrape_edhrec_theme_by_slug
+from aoa.services.themes import scrape_edhrec_theme_by_slug, build_theme_url_with_colors
+from aoa.services.tag_cache import get_tag_cache, validate_theme_slug
 
 router = APIRouter(prefix="/api/v1", tags=["themes"])
 logger = logging.getLogger(__name__)
@@ -51,6 +52,66 @@ def _split_color_prefixed_theme_slug(theme_slug: str) -> Tuple[Optional[str], Op
     if len(parts) == 2 and parts[0] in COLOR_SLUG_MAP:
         return parts[0], parts[1]
     return None, None
+
+
+def _build_theme_route_candidates_with_cache(
+    theme_slug: str,
+    theme_name: Optional[str] = None,
+    color_identity: Optional[str] = None,
+    cache=None,
+) -> List[Dict[str, str]]:
+    """Build URL candidates using cache validation and correct theme-color pattern."""
+    candidates: List[Dict[str, str]] = []
+    sanitized = (theme_slug or "").strip().lower()
+    derived_theme, derived_color, _ = _split_theme_slug(sanitized)
+
+    base_theme = (theme_name or derived_theme or sanitized or "").strip("-")
+    color_value = color_identity or derived_color
+
+    # Normalize color mapping
+    single_color_mapping = {
+        "w": "white", "white": "white",
+        "u": "blue", "blue": "blue", 
+        "b": "black", "black": "black",
+        "r": "red", "red": "red",
+        "g": "green", "green": "green",
+    }
+
+    normalized_color = (
+        single_color_mapping.get(color_value.lower(), color_value)
+        if color_value
+        else None
+    )
+
+    color_variants: Set[str] = set()
+    if normalized_color in ["white", "blue", "black", "red", "green"]:
+        color_variants.add(normalized_color)
+        color_variants.add(f"mono-{normalized_color}")
+    elif normalized_color:
+        color_variants.add(normalized_color)
+
+    def add_candidate(page_path: str) -> None:
+        normalized = page_path.strip("/")
+        candidates.append({
+            "page_path": normalized,
+            "json_path": f"{normalized}.json",
+        })
+
+    # Priority 1: Correct theme-color pattern (e.g., goblins-izzet)
+    if color_value and base_theme:
+        for color_variant in color_variants:
+            # Try theme-color first (correct pattern)
+            add_candidate(f"tags/{base_theme}-{color_variant}")
+            
+            # Check if this exists in cache before trying color-theme
+            composite_slug = f"{base_theme}-{color_variant}"
+            # Fallback to color-theme only if not found as theme-color
+            # add_candidate(f"tags/{color_variant}/{base_theme}")
+
+    # Priority 2: Base theme only
+    add_candidate(f"tags/{base_theme}")
+
+    return candidates
 
 
 def _build_theme_route_candidates(
@@ -361,17 +422,23 @@ def _validate_theme_slug_against_catalog(theme_slug: str, catalog: Set[str]) -> 
     )
 
 
-async def fetch_theme_tag(theme_slug: str, color_identity: Optional[str] = None) -> PageTheme:
-    """Fetch theme data from EDHRec."""
+async def fetch_theme_tag(theme_slug: str, color_identity: Optional[str] = None, cache = Depends(get_tag_cache)) -> PageTheme:
+    """Fetch theme data from EDHRec with tag cache validation."""
     sanitized_slug = (theme_slug or "").strip().lower()
+    
+    # Validate theme slug against cache first
+    await validate_theme_slug(sanitized_slug, cache)
+    
     theme_name, derived_color, _ = _split_theme_slug(sanitized_slug)
     base_theme = theme_name or sanitized_slug
     effective_color = color_identity or derived_color
 
-    candidates = _build_theme_route_candidates(
+    # Build URL candidates with correct theme-color pattern
+    candidates = _build_theme_route_candidates_with_cache(
         sanitized_slug,
         theme_name=base_theme,
         color_identity=effective_color,
+        cache=cache,
     )
 
     last_error: Optional[str] = None
@@ -391,7 +458,16 @@ async def fetch_theme_tag(theme_slug: str, color_identity: Optional[str] = None)
             elif exc.status_code == 403 and not tried_html_scraping:
                 logger.info("JSON access blocked (403), trying HTML scraping for theme: %s", sanitized_slug)
                 try:
-                    scraped_data = await scrape_edhrec_theme_by_slug(sanitized_slug)
+                    # For composite slugs like "izzet-goblins", try the correct order
+                    theme_to_scrape = sanitized_slug
+                    if '-' in sanitized_slug:
+                        parts = sanitized_slug.split('-', 1)
+                        if len(parts) == 2:
+                            # Try theme-color pattern
+                            corrected_slug = f"{parts[1]}-{parts[0]}"  # color-theme -> theme-color
+                            theme_to_scrape = corrected_slug
+                    
+                    scraped_data = await scrape_edhrec_theme_by_slug(theme_to_scrape)
                     if scraped_data and scraped_data.get("collections"):
                         collections = []
                         for collection_data in scraped_data.get("collections", []):
@@ -555,10 +631,90 @@ async def get_available_tags(api_key: str = Depends(verify_api_key)) -> Dict[str
 
 
 @router.get("/themes/{theme_slug}", response_model=PageTheme)
-async def get_theme(theme_slug: str, api_key: str = Depends(verify_api_key)) -> PageTheme:
+async def get_theme(theme_slug: str, api_key: str = Depends(verify_api_key), cache = Depends(get_tag_cache)) -> PageTheme:
     """Fetch EDHRec theme or tag data."""
     sanitized = theme_slug.strip().lower()
     _, color_identifier, _ = _split_theme_slug(sanitized)
     if color_identifier:
-        return await fetch_theme_tag(sanitized, color_identifier)
-    return await fetch_theme_tag(sanitized, None)
+        return await fetch_theme_tag(sanitized, color_identifier, cache)
+    return await fetch_theme_tag(sanitized, None, cache)
+
+
+@router.post("/tags/refresh-cache")
+async def refresh_tags_cache(
+    force_refresh: bool = False,
+    api_key: str = Depends(verify_api_key),
+    cache = Depends(get_tag_cache),
+) -> Dict[str, Any]:
+    """Refresh the EDHRec tags cache from the source."""
+    try:
+        # Import the caching system
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        from tag_caching_system import get_cached_tags
+        
+        if force_refresh or not await cache.is_cache_fresh():
+            logger.info("Refreshing tags cache...")
+            tags = await get_cached_tags()
+            await cache.refresh_cache_from_source(tags)
+            
+            return {
+                "success": True,
+                "message": f"Successfully refreshed cache with {len(tags)} tags",
+                "cached_at": datetime.utcnow().isoformat(),
+                "tags_count": len(tags),
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        else:
+            tags = await cache.get_available_tags()
+            return {
+                "success": True,
+                "message": f"Cache is still fresh ({len(tags)} tags available)",
+                "cached_at": (await cache.load_cache(), cache._cache_data.get('cached_at'))[1],
+                "tags_count": len(tags),
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to refresh tags cache: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to refresh cache: {str(e)}")
+
+
+@router.get("/tags/catalog")
+async def get_tags_catalog(cache = Depends(get_tag_cache)) -> Dict[str, Any]:
+    """Get the complete tags catalog with examples and usage info."""
+    await cache.load_cache()
+    tags = await cache.get_available_tags()
+    
+    examples = [
+        {
+            "description": "Base theme (all colors)",
+            "slug": "goblins",
+            "endpoint": "/api/v1/themes/goblins",
+        },
+        {
+            "description": "Color-specific theme (Goblin Izzet)",
+            "slug": "goblins-izzet", 
+            "endpoint": "/api/v1/themes/goblins-izzet",
+        },
+        {
+            "description": "Another example (Aristocrats Orzhov)",
+            "slug": "aristocrats-orzhov",
+            "endpoint": "/api/v1/themes/aristocrats-orzhov",
+        },
+    ]
+    
+    return {
+        "success": True,
+        "tags": tags,
+        "count": len(tags),
+        "color_identifiers": list(COLOR_SLUG_MAP.keys()),
+        "examples": examples,
+        "usage": {
+            "base_theme": "Use theme slug directly (e.g., 'goblins', 'aristocrats', 'tokens')",
+            "color_specific": "Use theme-color pattern (e.g., 'goblins-izzet', 'aristocrats-orzhov')",
+            "available_colors": list(COLOR_SLUG_MAP.keys()),
+        },
+        "timestamp": datetime.utcnow().isoformat(),
+    }
