@@ -166,14 +166,26 @@ def extract_theme_data_from_json(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_theme_url(theme_slug: str) -> str:
-    """Build the EDHRec URL for a theme."""
+    """Build the EDHRec URL for a theme (legacy function)."""
     sanitized = theme_slug.strip().lower().replace(" ", "-")
     return f"{EDHREC_BASE_URL}tags/{sanitized}"
 
 
-async def scrape_edhrec_theme_by_slug(theme_slug: str) -> Dict[str, Any]:
-    """Scrape theme data by theme slug."""
-    theme_url = build_theme_url(theme_slug)
+def build_theme_url_with_colors(theme_slug: str, color_identity: Optional[str] = None) -> str:
+    """Build EDHRec URL with correct theme-color pattern."""
+    sanitized = theme_slug.strip().lower().replace(" ", "-")
+    
+    if color_identity:
+        # Use correct pattern: theme-color, not color-theme
+        normalized_color = color_identity.lower().replace(" ", "-")
+        return f"{EDHREC_BASE_URL}tags/{sanitized}-{normalized_color}"
+    else:
+        return f"{EDHREC_BASE_URL}tags/{sanitized}"
+
+
+async def scrape_edhrec_theme_by_slug(theme_slug: str, color_identity: Optional[str] = None) -> Dict[str, Any]:
+    """Scrape theme data by theme slug with optional color identity."""
+    theme_url = build_theme_url_with_colors(theme_slug, color_identity)
     return await scrape_edhrec_theme_page(theme_url)
 
 
@@ -181,5 +193,6 @@ __all__ = [
     "scrape_edhrec_theme_page",
     "scrape_edhrec_theme_by_slug", 
     "build_theme_url",
+    "build_theme_url_with_colors",
     "extract_theme_data_from_json",
 ]
