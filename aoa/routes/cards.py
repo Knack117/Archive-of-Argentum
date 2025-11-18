@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import httpx
 import logging
-from typing import Any, Dict
+from datetime import datetime
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from aoa.models import Card, CardSearchRequest, CardSearchResponse
 from aoa.security import verify_api_key
+from aoa.services.special_cards import fetch_gamechangers, fetch_banned_cards, fetch_mass_land_destruction
 
 router = APIRouter(prefix="/api/v1/cards", tags=["cards"])
 logger = logging.getLogger(__name__)
@@ -213,3 +215,90 @@ async def get_card(card_id: str, api_key: str = Depends(verify_api_key)) -> Card
     except Exception as exc:
         logger.error(f"Error fetching card {card_id}: {exc}")
         raise HTTPException(status_code=500, detail=f"Error fetching card: {exc}")
+
+
+@router.get("/gamechangers")
+async def get_gamechangers(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
+    """Get list of Commander Game Changer cards from Scryfall.
+    
+    Returns cards that are tagged as "gamechanger" on Scryfall, 
+    sorted by USD price in descending order.
+    """
+    try:
+        cards = await fetch_gamechangers()
+        
+        return {
+            "success": True,
+            "data": cards,
+            "count": len(cards),
+            "source": "scryfall",
+            "description": "Commander Game Changer cards sorted by USD price (descending)",
+            "query": "is:gamechanger",
+            "order": "usd",
+            "direction": "desc",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Error fetching gamechanger cards: {exc}")
+        raise HTTPException(status_code=500, detail=f"Error fetching gamechanger cards: {str(exc)}")
+
+
+@router.get("/banned")
+async def get_banned_cards(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
+    """Get list of banned Commander cards from Scryfall.
+    
+    Returns cards that are banned in the Commander format,
+    sorted alphabetically by name.
+    """
+    try:
+        cards = await fetch_banned_cards()
+        
+        return {
+            "success": True,
+            "data": cards,
+            "count": len(cards),
+            "source": "scryfall",
+            "description": "Cards banned in Commander format",
+            "query": "banned:commander",
+            "order": "name",
+            "direction": "asc",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Error fetching banned cards: {exc}")
+        raise HTTPException(status_code=500, detail=f"Error fetching banned cards: {str(exc)}")
+
+
+@router.get("/mass-land-destruction")
+async def get_mass_land_destruction(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
+    """Get list of Mass Land Destruction cards from Moxfield.
+    
+    Returns cards identified as 'Mass Land Denial' by Wizards of the Coast.
+    These cards regularly destroy, exile, and bounce other lands, keep lands tapped,
+    or change what mana is produced by four or more lands per player without replacing them.
+    """
+    try:
+        cards = await fetch_mass_land_destruction()
+        
+        return {
+            "success": True,
+            "data": cards,
+            "count": len(cards),
+            "source": "moxfield",
+            "url": "https://moxfield.com/commanderbrackets/masslanddenial",
+            "description": "Mass Land Denial cards as defined by Wizards of the Coast",
+            "definition": "Cards that regularly destroy, exile, and bounce other lands, keep lands tapped, or change what mana is produced by four or more lands per player without replacing them.",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Error fetching Mass Land Destruction cards: {exc}")
+        raise HTTPException(status_code=500, detail=f"Error fetching Mass Land Destruction cards: {str(exc)}")
