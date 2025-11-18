@@ -421,11 +421,16 @@ class DeckValidator:
         """Extract decklist from Archidekt URL."""
         import mtg_parser
         
+        # Archidekt requires custom User-Agent to be respectful
+        custom_headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; MagicDeckValidator/1.0; +https://github.com/magic/deck-validator)'
+        }
+        
         try:
-            # Archidekt works with regular HTTP client
-            cards = mtg_parser.parse_deck(deck_url)
-            # Convert generator to list since mtg_parser returns a generator
-            cards = list(cards)
+            with httpx.Client(headers=custom_headers, timeout=30.0) as http_client:
+                cards = mtg_parser.parse_deck(deck_url, http_client)
+                # Convert generator to list since mtg_parser returns a generator
+                cards = list(cards)
             
             if not cards:
                 raise ValueError("No cards found in the Archidekt deck")
