@@ -8,8 +8,8 @@ class CommanderCard(BaseModel):
     name: Optional[str] = None
     num_decks: Optional[int] = None
     potential_decks: Optional[int] = None
-    inclusion_percentage: Optional[str] = None
-    synergy_percentage: Optional[str] = None
+    inclusion_percentage: Optional[float] = None
+    synergy_percentage: Optional[float] = None
     sanitized_name: Optional[str] = None
     card_url: Optional[str] = None
 
