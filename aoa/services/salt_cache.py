@@ -26,13 +26,14 @@ DEFAULT_CACHE_FILE = os.path.join(
 class SaltCacheService:
     """Service for managing EDHRec salt score cache."""
     
-    # Salt tier thresholds for deck total salt scores
+    # Salt tier thresholds for deck average salt scores (0-5 scale)
     SALT_TIERS = {
-        'Friendly': (0, 15),
-        'Mild': (15, 30),
-        'Salty': (30, 50),
-        'Very Salty': (50, 75),
-        'Toxic': (75, float('inf'))
+        'Casual': (0.0, 1.0),
+        'Slightly Salty': (1.0, 1.5),
+        'Moderately Salty': (1.5, 2.0),
+        'Very Salty': (2.0, 2.5),
+        'Extremely Salty': (2.5, 3.0),
+        'Toxic': (3.0, float('inf'))
     }
     
     def __init__(self, cache_file: Optional[str] = None):
@@ -183,18 +184,18 @@ class SaltCacheService:
         """
         return self.salt_data.get(card_name.lower().strip(), 0.0)
     
-    def get_salt_tier(self, total_salt: float) -> str:
+    def get_salt_tier(self, average_salt: float) -> str:
         """
-        Get the salt tier for a given total salt score.
+        Get the salt tier for a given average salt score.
         
         Args:
-            total_salt: Total salt score
+            average_salt: Average salt score per card (0-5 scale)
         
         Returns:
-            Tier name (e.g., "Friendly", "Salty", "Toxic")
+            Tier name (e.g., "Casual", "Salty", "Toxic")
         """
         for tier, (min_val, max_val) in self.SALT_TIERS.items():
-            if min_val <= total_salt < max_val:
+            if min_val <= average_salt < max_val:
                 return tier
         return "Unknown"
     
@@ -233,11 +234,11 @@ class SaltCacheService:
         card_count = len(card_names)
         
         return {
-            'total_salt': total_salt,
-            'salt_tier': self.get_salt_tier(total_salt),
+            'total_salt': total_salt,  # Keep for backward compatibility
+            'average_salt': round(total / card_count, 2) if card_count > 0 else 0,
+            'salt_tier': self.get_salt_tier(round(total / card_count, 2) if card_count > 0 else 0),
             'card_count': card_count,
             'salty_card_count': len(card_scores),
-            'average_salt': round(total / card_count, 2) if card_count > 0 else 0,
             'top_offenders': card_scores[:10],
             'all_salty_cards': card_scores,
             'unknown_cards': unknown
