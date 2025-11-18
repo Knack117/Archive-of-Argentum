@@ -36,6 +36,10 @@ async def search_cards(request: CardSearchRequest, api_key: str = Depends(verify
             if request.page and request.page > 1:
                 params["page"] = request.page
             
+            # Log the query for debugging large result sets
+            if request.per_page and request.per_page > 50:
+                logger.info(f"Large page size requested: {request.per_page} for query: {request.query}")
+            
             response = await client.get(scryfall_url, params=params)
             response.raise_for_status()
             
@@ -53,12 +57,18 @@ async def search_cards(request: CardSearchRequest, api_key: str = Depends(verify
             
             return CardSearchResponse(
                 object="list",
-                total_cards=len(cards),
+                total_cards=scryfall_data.get("total_cards", len(cards)),  # Use Scryfall's total if available
                 data=cards
             )
     except httpx.HTTPStatusError as exc:
         logger.error("Scryfall API error: %s", exc)
-        raise HTTPException(status_code=502, detail="Error communicating with card database")
+        if exc.response.status_code == 429:
+            detail = "Rate limit exceeded. Please try again later or use more specific queries with pagination."
+        elif "too many results" in str(exc).lower():
+            detail = "Query returns too many results. Use per_page and page parameters for pagination, or make your query more specific."
+        else:
+            detail = "Error communicating with card database"
+        raise HTTPException(status_code=502, detail=detail)
     except Exception as exc:
         logger.error("Error searching cards: %s", exc)
         raise HTTPException(status_code=500, detail=f"Error searching cards: {exc}")
