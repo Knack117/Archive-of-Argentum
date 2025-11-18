@@ -92,12 +92,23 @@ async def get_commander_summary(
                 )
             )
 
+    top_10_tags_output: List[CommanderTag] = []
+    for tag_data in commander_data.get("top_10_tags", []):
+        if isinstance(tag_data, dict):
+            top_10_tags_output.append(
+                CommanderTag(
+                    tag=tag_data.get("tag"),
+                    count=tag_data.get("count"),
+                    link=tag_data.get("url"),
+                )
+            )
+
     return CommanderSummary(
         commander_name=commander_data.get("commander_name", ""),
         commander_url=commander_data.get("commander_url"),
         timestamp=commander_data.get("timestamp"),
         commander_tags=commander_data.get("commander_tags", []),
-        top_10_tags=commander_data.get("top_10_tags", []),
+        top_10_tags=top_10_tags_output,
         all_tags=all_tags_output,
         combos=combos_output,
         similar_commanders=similar_commanders_output,
@@ -195,12 +206,23 @@ async def get_average_deck_summary(
                 )
             )
 
+    top_10_tags_output: List[CommanderTag] = []
+    for tag_data in commander_data.get("top_10_tags", []):
+        if isinstance(tag_data, dict):
+            top_10_tags_output.append(
+                CommanderTag(
+                    tag=tag_data.get("tag"),
+                    count=tag_data.get("count"),
+                    link=tag_data.get("url"),
+                )
+            )
+
     return CommanderSummary(
         commander_name=commander_data.get("commander_name", ""),
         commander_url=commander_data.get("commander_url"),
         timestamp=commander_data.get("timestamp"),
         commander_tags=commander_data.get("commander_tags", []),
-        top_10_tags=commander_data.get("top_10_tags", []),
+        top_10_tags=top_10_tags_output,
         all_tags=all_tags_output,
         combos=combos_output,
         similar_commanders=similar_commanders_output,
