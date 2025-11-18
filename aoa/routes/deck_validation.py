@@ -395,6 +395,8 @@ class DeckValidator:
         try:
             with httpx.Client(headers=custom_headers, timeout=30.0) as http_client:
                 cards = mtg_parser.parse_deck(deck_url, http_client)
+                # Convert generator to list since mtg_parser returns a generator
+                cards = list(cards)
                 
             if not cards:
                 raise ValueError("No cards found in the Moxfield deck")
@@ -422,6 +424,8 @@ class DeckValidator:
         try:
             # Archidekt works with regular HTTP client
             cards = mtg_parser.parse_deck(deck_url)
+            # Convert generator to list since mtg_parser returns a generator
+            cards = list(cards)
             
             if not cards:
                 raise ValueError("No cards found in the Archidekt deck")
