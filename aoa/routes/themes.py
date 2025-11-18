@@ -14,7 +14,7 @@ from aoa.constants import COLOR_SLUG_MAP, EDHREC_BASE_URL, SORTED_COLOR_IDENTIFI
 from aoa.models import PageTheme, ThemeCollection, ThemeItem, ThemeContainer
 from aoa.security import verify_api_key
 from aoa.services.edhrec import fetch_edhrec_json
-from aoa.services.themes import scrape_edhrec_theme_by_slug, extract_theme_data_from_json
+from aoa.services.themes import scrape_edhrec_theme_by_slug
 
 router = APIRouter(prefix="/api/v1", tags=["themes"])
 logger = logging.getLogger(__name__)
