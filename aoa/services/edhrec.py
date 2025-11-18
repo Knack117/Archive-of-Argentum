@@ -45,8 +45,47 @@ def build_edhrec_json_url(path_or_url: str) -> str:
     return f"{base}/{path}"
 
 
+async def verify_edhrec_page_exists(path_or_url: str) -> bool:
+    """
+    Verify that an EDHRec page exists by checking the HTML endpoint.
+    
+    This helps distinguish between 403 (access denied) and 404 (not found) errors,
+    as S3 returns 403 for non-existent JSON files instead of 404.
+    """
+    from aoa.constants import EDHREC_BASE_URL
+    
+    normalized = _normalize_edhrec_path(path_or_url)
+    html_url = f"{EDHREC_BASE_URL.rstrip('/')}/{normalized}"
+    
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    
+    try:
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = await client.get(html_url, headers=headers)
+            return response.status_code == 200
+    except Exception as exc:
+        logger.warning("Error verifying EDHRec page %s: %s", html_url, exc)
+        return False
+
+
 async def fetch_edhrec_json(path_or_url: str) -> Dict[str, Any]:
-    """Fetch JSON payloads directly from the EDHRec live data service."""
+    """
+    Fetch JSON payloads directly from the EDHRec live data service.
+    
+    First verifies the page exists to provide better error messages when
+    commanders don't exist on EDHRec.
+    """
     json_url = build_edhrec_json_url(path_or_url)
     headers = {
         "User-Agent": (
@@ -55,6 +94,8 @@ async def fetch_edhrec_json(path_or_url: str) -> Dict[str, Any]:
             "Chrome/122.0.0.0 Safari/537.36"
         ),
         "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://edhrec.com/",
     }
 
     try:
@@ -67,6 +108,29 @@ async def fetch_edhrec_json(path_or_url: str) -> Dict[str, Any]:
             response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         status_code = exc.response.status_code
+        
+        # If we get a 403, verify if the page actually exists
+        if status_code == 403:
+            logger.info("Received 403 for %s, verifying page existence", json_url)
+            page_exists = await verify_edhrec_page_exists(path_or_url)
+            
+            if not page_exists:
+                logger.warning("Page does not exist on EDHRec: %s", path_or_url)
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"Commander page not found on EDHRec: '{path_or_url}'. "
+                        "Please verify the commander name is correct and exists on EDHRec.com"
+                    ),
+                ) from exc
+            else:
+                # Page exists but JSON is blocked - this is a real 403
+                logger.warning("EDHRec JSON blocked (403) for existing page: %s", json_url)
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"EDHRec blocked access to data for '{path_or_url}'",
+                ) from exc
+        
         logger.warning("EDHRec JSON responded with %s for %s", status_code, json_url)
         raise HTTPException(
             status_code=status_code,
@@ -90,4 +154,5 @@ __all__ = [
     "build_edhrec_json_path",
     "build_edhrec_json_url",
     "fetch_edhrec_json",
+    "verify_edhrec_page_exists",
 ]
