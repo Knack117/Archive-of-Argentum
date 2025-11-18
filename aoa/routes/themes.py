@@ -7,13 +7,13 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException
 
 from aoa.constants import COLOR_SLUG_MAP, EDHREC_BASE_URL, SORTED_COLOR_IDENTIFIERS
 from aoa.models import PageTheme, ThemeCollection, ThemeItem, ThemeContainer
 from aoa.security import verify_api_key
+from aoa.services.edhrec import fetch_edhrec_json
 
 router = APIRouter(prefix="/api/v1", tags=["themes"])
 logger = logging.getLogger(__name__)
@@ -367,103 +367,76 @@ async def fetch_theme_tag(theme_slug: str, color_identity: Optional[str] = None)
     base_theme = theme_name or sanitized_slug
     effective_color = color_identity or derived_color
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    }
-
     candidates = _build_theme_route_candidates(
         sanitized_slug,
         theme_name=base_theme,
         color_identity=effective_color,
     )
 
-    last_error: Optional[Exception] = None
+    last_error: Optional[str] = None
 
-    async with httpx.AsyncClient(
-        timeout=30.0,
-        follow_redirects=True,
-        trust_env=False,
-    ) as client:
-        for candidate in candidates:
-            page_path = candidate["page_path"]
-            url = f"{EDHREC_BASE_URL}{page_path}"
-            try:
-                response = await client.get(url, headers=headers)
-            except Exception as exc:
-                last_error = exc
+    for candidate in candidates:
+        page_path = candidate["page_path"]
+        json_path = candidate["json_path"]
+        try:
+            payload = await fetch_edhrec_json(json_path)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            last_error = detail
+            if exc.status_code == 404:
                 continue
+            continue
+        except Exception as exc:  # pragma: no cover - defensive
+            last_error = str(exc)
+            continue
 
-            if response.status_code == 404:
+        page_data = payload.get("pageProps", {}).get("data", {})
+        header = page_data.get("header", f"{base_theme.title()} Theme")
+        description = page_data.get("description", f"EDHRec {base_theme} theme data")
+        container = page_data.get("container", {})
+        json_dict = container.get("json_dict", {})
+        cardlists = json_dict.get("cardlists", []) or page_data.get("cardlists", [])
+
+        collections: List[ThemeCollection] = []
+        for cardlist in cardlists:
+            if not isinstance(cardlist, dict):
                 continue
-
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                last_error = exc
+            list_header = (cardlist.get("header") or cardlist.get("label") or "Unknown").title()
+            cardviews = cardlist.get("cardviews") or cardlist.get("cards") or []
+            if not cardviews:
                 continue
-
-            html_content = response.text
-            soup = BeautifulSoup(html_content, "html.parser")
-            next_data_script = soup.find("script", {"id": "__NEXT_DATA__", "type": "application/json"})
-
-            collections: List[ThemeCollection] = []
-            header = f"{base_theme.title()} Theme"
-            description = f"EDHRec {base_theme} theme data"
-            source_url = str(response.url)
-            parsed_successfully = False
-
-            if next_data_script and next_data_script.string:
-                try:
-                    data = json.loads(next_data_script.string)
-                    page_data = data.get("props", {}).get("pageProps", {}).get("data", {})
-                    header = page_data.get("header", header)
-                    description = page_data.get("description", description)
-                    container = page_data.get("container", {})
-                    json_dict = container.get("json_dict", {})
-                    cardlists = json_dict.get("cardlists", [])
-
-                    for cardlist in cardlists:
-                        if not isinstance(cardlist, dict):
-                            continue
-                        list_header = cardlist.get("header", "Unknown")
-                        cardviews = cardlist.get("cardviews", [])
-                        if not cardviews:
-                            continue
-                        items: List[ThemeItem] = []
-                        for card_data in cardviews:
-                            if isinstance(card_data, dict):
-                                items.append(
-                                    ThemeItem(
-                                        card_name=card_data.get("cardname", card_data.get("name", "Unknown")),
-                                        inclusion_percentage=card_data.get("popularity", "N/A"),
-                                        synergy_percentage=card_data.get("synergy", "N/A"),
-                                    )
-                                )
-                        if items:
-                            collections.append(
-                                ThemeCollection(
-                                    header=list_header.title(),
-                                    items=items,
-                                )
-                            )
-                    if collections:
-                        parsed_successfully = True
-                except Exception as exc:
-                    last_error = exc
-
-            if parsed_successfully:
-                return PageTheme(
-                    header=header,
-                    description=description,
-                    tags=[base_theme],
-                    container=ThemeContainer(collections=collections),
-                    source_url=source_url,
+            items: List[ThemeItem] = []
+            for card_data in cardviews:
+                if not isinstance(card_data, dict):
+                    continue
+                card_name = card_data.get("cardname") or card_data.get("name") or "Unknown"
+                inclusion = card_data.get("popularity") or card_data.get("inclusion") or "N/A"
+                synergy = card_data.get("synergy") or card_data.get("synergy_percentage") or "N/A"
+                items.append(
+                    ThemeItem(
+                        card_name=card_name,
+                        inclusion_percentage=str(inclusion),
+                        synergy_percentage=str(synergy),
+                    )
+                )
+            if items:
+                collections.append(
+                    ThemeCollection(
+                        header=list_header,
+                        items=items,
+                    )
                 )
 
-    error_message = "Error fetching theme data"
-    if last_error:
-        error_message = str(last_error)
+        if collections:
+            return PageTheme(
+                header=header,
+                description=description,
+                tags=[base_theme],
+                container=ThemeContainer(collections=collections),
+                source_url=f"{EDHREC_BASE_URL}{page_path}",
+            )
 
+    error_message = last_error or "Error fetching theme data"
     return PageTheme(
         header=f"Theme: {base_theme}",
         description="Error fetching theme data",
@@ -478,74 +451,66 @@ async def fetch_theme_tag(theme_slug: str, color_identity: Optional[str] = None)
 async def get_available_tags(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
     """Fetch the complete list of available tags/themes from EDHRec."""
     tags_url = f"{EDHREC_BASE_URL}tags/themes"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     try:
-        async with httpx.AsyncClient(
-            timeout=30.0,
-            follow_redirects=True,
-            trust_env=False,
-        ) as client:
-            response = await client.get(tags_url, headers=headers)
-            response.raise_for_status()
-            html_content = response.text
-            soup = BeautifulSoup(html_content, "html.parser")
+        payload = await fetch_edhrec_json("tags/themes")
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Error fetching themes JSON: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch themes from EDHRec") from exc
 
-        theme_slugs: List[str] = []
-        next_data_script = soup.find("script", id="__NEXT_DATA__")
-        if next_data_script and next_data_script.string:
-            json_data = json.loads(next_data_script.string)
-            page_props = json_data.get("props", {}).get("pageProps", {})
-            container = page_props.get("data", {}).get("container", {})
-            cardlists = container.get("json_dict", {}).get("cardlists", [])
-            for cardlist in cardlists:
-                if "cardviews" in cardlist:
-                    for cardview in cardlist["cardviews"]:
-                        url = cardview.get("url", "")
-                        if url:
-                            slug = url.replace("/tags/", "").strip("/")
-                            if slug and re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", slug):
-                                theme_slugs.append(slug)
+    page_props = payload.get("pageProps", {}).get("data", {})
+    container = page_props.get("container", {})
+    cardlists = container.get("json_dict", {}).get("cardlists", [])
 
-        sorted_themes = sorted(theme_slugs)
-        examples = [
-            {
-                "description": "Base theme (all colors)",
-                "slug": "aristocrats",
-                "endpoint": "/api/v1/themes/aristocrats",
-            },
-            {
-                "description": "Color-specific theme (Orzhov Aristocrats)",
-                "slug": "orzhov-aristocrats",
-                "endpoint": "/api/v1/themes/orzhov-aristocrats",
-            },
-            {
-                "description": "Another color-specific example (Temur Spellslinger)",
-                "slug": "temur-spellslinger",
-                "endpoint": "/api/v1/themes/temur-spellslinger",
-            },
-        ]
+    theme_slugs: List[str] = []
+    for cardlist in cardlists:
+        if not isinstance(cardlist, dict):
+            continue
+        for cardview in cardlist.get("cardviews", []):
+            if not isinstance(cardview, dict):
+                continue
+            url = cardview.get("url", "")
+            if not url:
+                continue
+            slug = url.replace("/tags/", "").strip("/")
+            if slug and re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", slug):
+                theme_slugs.append(slug)
 
-        return {
-            "success": True,
-            "themes": sorted_themes,
-            "count": len(sorted_themes),
-            "color_identities": list(COLOR_SLUG_MAP.keys()),
-            "examples": examples,
-            "usage": {
-                "base_theme": "Use theme slug directly (e.g., 'aristocrats', 'tokens', 'voltron')",
-                "color_specific": "Prefix with color identity (e.g., 'orzhov-aristocrats', 'temur-spellslinger')",
-                "available_colors": list(COLOR_SLUG_MAP.keys()),
-            },
-            "source_url": tags_url,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-    except httpx.RequestError as exc:
-        logger.error("Error fetching themes page: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch themes from EDHRec: {exc}")
-    except Exception as exc:
-        logger.error("Error processing themes page: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Error processing themes data: {exc}")
+    sorted_themes = sorted(set(theme_slugs))
+    examples = [
+        {
+            "description": "Base theme (all colors)",
+            "slug": "aristocrats",
+            "endpoint": "/api/v1/themes/aristocrats",
+        },
+        {
+            "description": "Color-specific theme (Orzhov Aristocrats)",
+            "slug": "orzhov-aristocrats",
+            "endpoint": "/api/v1/themes/orzhov-aristocrats",
+        },
+        {
+            "description": "Another color-specific example (Temur Spellslinger)",
+            "slug": "temur-spellslinger",
+            "endpoint": "/api/v1/themes/temur-spellslinger",
+        },
+    ]
+
+    return {
+        "success": True,
+        "themes": sorted_themes,
+        "count": len(sorted_themes),
+        "color_identities": list(COLOR_SLUG_MAP.keys()),
+        "examples": examples,
+        "usage": {
+            "base_theme": "Use theme slug directly (e.g., 'aristocrats', 'tokens', 'voltron')",
+            "color_specific": "Prefix with color identity (e.g., 'orzhov-aristocrats', 'temur-spellslinger')",
+            "available_colors": list(COLOR_SLUG_MAP.keys()),
+        },
+        "source_url": tags_url,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 @router.get("/themes/{theme_slug}", response_model=PageTheme)

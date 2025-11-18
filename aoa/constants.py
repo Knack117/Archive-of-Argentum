@@ -10,6 +10,7 @@ from cachetools import TTLCache
 from config import settings
 
 EDHREC_BASE_URL = "https://edhrec.com/"
+EDHREC_JSON_BASE_URL = "https://json.edhrec.com/pages/"
 COMMANDERSPELLBOOK_BASE_URL = "https://backend.commanderspellbook.com/"
 COMMANDERSPELLBOOK_PUBLIC_SEARCH_URL = "https://commanderspellbook.com/search/?q="
 EDHREC_ALLOWED_HOSTS = {"edhrec.com", "www.edhrec.com"}
@@ -64,6 +65,7 @@ _theme_catalog_lock = asyncio.Lock()
 
 __all__ = [
     "EDHREC_BASE_URL",
+    "EDHREC_JSON_BASE_URL",
     "COMMANDERSPELLBOOK_BASE_URL",
     "COMMANDERSPELLBOOK_PUBLIC_SEARCH_URL",
     "EDHREC_ALLOWED_HOSTS",

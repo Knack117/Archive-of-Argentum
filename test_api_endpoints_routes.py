@@ -66,7 +66,80 @@ def test_system_endpoints(client: TestClient) -> None:
     assert health.json()["status"] == "healthy"
 
 
-def test_card_routes(client: TestClient) -> None:
+def test_card_routes(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    sample_card = {
+        "id": "sample-123",
+        "name": "Lightning Bolt",
+        "mana_cost": "{R}",
+        "cmc": 1,
+        "type_line": "Instant",
+        "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+        "colors": ["R"],
+        "color_identity": ["R"],
+        "keywords": [],
+        "legalities": {"commander": "legal"},
+        "games": ["paper"],
+        "reserved": False,
+        "foil": True,
+        "nonfoil": True,
+        "oversized": False,
+        "promo": False,
+        "reprint": True,
+        "variation": False,
+        "set_id": "sample-set",
+        "set": "SMP",
+        "set_name": "Sample Set",
+        "set_type": "core",
+        "set_uri": "https://example.com/set",
+        "set_search_uri": "https://example.com/set/search",
+        "rulings_uri": "https://example.com/set/rulings",
+        "prints_search_uri": "https://example.com/set/prints",
+        "collector_number": "150",
+        "digital": False,
+        "rarity": "common",
+        "artist": "John Doe",
+        "artist_ids": ["artist-1"],
+        "illustration_id": "illus-1",
+        "border_color": "black",
+        "frame": "1993",
+        "full_art": False,
+        "textless": False,
+        "booster": True,
+        "story_spotlight": False,
+        "edhrec_rank": 1,
+        "penny_rank": 1,
+        "prices": {"usd": 1.0},
+        "related_uris": {"edhrec": "https://edhrec.com/cards/lightning-bolt"},
+    }
+
+    class DummyResponse:
+        def __init__(self, data: Dict[str, Any]) -> None:
+            self.status_code = 200
+            self._data = data
+
+        def raise_for_status(self) -> None:  # pragma: no cover - behaviourally empty
+            return None
+
+        def json(self) -> Dict[str, Any]:  # pragma: no cover - deterministic
+            return self._data
+
+    class DummyClient:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self) -> "DummyClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def get(self, url: str, params=None) -> DummyResponse:
+            if "cards/search" in url:
+                return DummyResponse({"data": [sample_card]})
+            return DummyResponse(sample_card)
+
+    monkeypatch.setattr("aoa.routes.cards.httpx.AsyncClient", DummyClient)
+
     search = client.post(
         "/api/v1/cards/search",
         headers=API_HEADERS,
@@ -86,6 +159,8 @@ def test_card_routes(client: TestClient) -> None:
     card = client.get("/api/v1/cards/mock1", headers=API_HEADERS)
     assert card.status_code == 200
     assert card.json()["name"] == "Lightning Bolt"
+
+
 
 
 def test_commander_summary_endpoint(
@@ -202,64 +277,34 @@ def test_theme_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_available_tags_endpoint(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    next_data = {
-        "props": {
-            "pageProps": {
-                "data": {
-                    "container": {
-                        "json_dict": {
-                            "cardlists": [
-                                {
-                                    "cardviews": [
-                                        {"url": "/tags/dragons"},
-                                        {"url": "/tags/spellslinger"},
-                                    ]
-                                }
-                            ]
-                        }
+    payload = {
+        "pageProps": {
+            "data": {
+                "container": {
+                    "json_dict": {
+                        "cardlists": [
+                            {
+                                "cardviews": [
+                                    {"url": "/tags/dragons"},
+                                    {"url": "/tags/spellslinger"},
+                                ]
+                            }
+                        ]
                     }
                 }
             }
         }
     }
-    html = (
-        "<html>{}\n<script id=\"__NEXT_DATA__\" type=\"application/json\">{}</script></html>".format(
-            '{"buildId":"BUILD"}',
-            json.dumps(next_data),
-        )
-    )
 
-    created_clients: List[Dict[str, object]] = []
+    async def fake_fetch(_: str) -> Dict[str, object]:  # pragma: no cover - behaviourally simple
+        return payload
 
-    class DummyResponse:
-        def __init__(self, url: str) -> None:
-            self.status_code = 200
-            self.text = html
-            self.url = url
-
-        def raise_for_status(self) -> None:  # pragma: no cover - behaviourally empty
-            return None
-
-    class DummyClient:
-        def __init__(self, *_, **kwargs) -> None:
-            created_clients.append(kwargs)
-
-        async def __aenter__(self) -> "DummyClient":
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb) -> None:
-            return None
-
-        async def get(self, url: str, headers=None) -> DummyResponse:
-            return DummyResponse(url)
-
-    monkeypatch.setattr("aoa.routes.themes.httpx.AsyncClient", DummyClient)
+    monkeypatch.setattr("aoa.routes.themes.fetch_edhrec_json", fake_fetch)
 
     response = client.get("/api/v1/tags/available", headers=API_HEADERS)
     assert response.status_code == 200
     payload = response.json()
     assert payload["count"] == 2
-    assert created_clients and created_clients[0].get("trust_env") is False
 
 
 def test_deck_validation_endpoints(client: TestClient) -> None:
@@ -290,51 +335,45 @@ def test_deck_validation_endpoints(client: TestClient) -> None:
 
 @pytest.mark.asyncio
 async def test_scrape_commander_page_bypasses_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
-    next_data = {
-        "props": {
-            "pageProps": {
-                "data": {
-                    "panels": {
-                        "taglinks": [{"tag": "dragons", "count": 10, "url": "/tags/dragons"}],
-                        "combos": [{"name": "Combo", "url": "https://combo", "cards": [{"name": "Card"}]}],
-                        "similarCommanders": [{"name": "Scion", "url": "https://example.com"}],
-                        "jsonCardLists": [
-                            {
-                                "header": "Ramp",
-                                "cards": [
-                                    {
-                                        "name": "Sol Ring",
-                                        "num_decks": 100,
-                                        "potential_decks": 200,
-                                        "inclusion_percentage": "50%",
-                                        "synergy_percentage": "10%",
-                                        "sanitized_name": "sol-ring",
-                                        "card_url": "https://example.com/sol-ring",
-                                    }
-                                ],
-                            }
-                        ],
-                    }
+    payload = {
+        "pageProps": {
+            "data": {
+                "panels": {
+                    "taglinks": [{"tag": "dragons", "count": 10, "url": "/tags/dragons"}],
+                    "combos": [{"name": "Combo", "url": "https://combo", "cards": [{"name": "Card"}]}],
+                    "similarCommanders": [{"name": "Scion", "url": "https://example.com"}],
+                    "jsonCardLists": [
+                        {
+                            "header": "Ramp",
+                            "cards": [
+                                {
+                                    "name": "Sol Ring",
+                                    "num_decks": 100,
+                                    "potential_decks": 200,
+                                    "inclusion_percentage": "50%",
+                                    "synergy_percentage": "10%",
+                                    "sanitized_name": "sol-ring",
+                                    "card_url": "https://example.com/sol-ring",
+                                }
+                            ],
+                        }
+                    ],
                 }
             }
         }
     }
-    html = (
-        "<html>{}\n<script id=\"__NEXT_DATA__\" type=\"application/json\">{}</script></html>".format(
-            '{"buildId":"BUILD"}',
-            json.dumps(next_data),
-        )
-    )
 
     created_clients: List[Dict[str, object]] = []
 
     class DummyResponse:
         def __init__(self) -> None:
             self.status_code = 200
-            self.text = html
 
-        def raise_for_status(self) -> None:
+        def raise_for_status(self) -> None:  # pragma: no cover - simple passthrough
             return None
+
+        def json(self) -> Dict[str, object]:  # pragma: no cover - deterministic
+            return payload
 
     class DummyClient:
         def __init__(self, *_, **kwargs) -> None:
@@ -349,7 +388,7 @@ async def test_scrape_commander_page_bypasses_proxy(monkeypatch: pytest.MonkeyPa
         async def get(self, *_args, **_kwargs) -> DummyResponse:
             return DummyResponse()
 
-    monkeypatch.setattr("aoa.services.commanders.httpx.AsyncClient", DummyClient)
+    monkeypatch.setattr("aoa.services.edhrec.httpx.AsyncClient", DummyClient)
 
     data = await scrape_edhrec_commander_page("https://edhrec.com/commanders/test")
     assert created_clients and created_clients[0].get("trust_env") is False
@@ -358,49 +397,42 @@ async def test_scrape_commander_page_bypasses_proxy(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.asyncio
 async def test_fetch_theme_tag_bypasses_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
-    next_data = {
-        "props": {
-            "pageProps": {
-                "data": {
-                    "header": "Dragons",
-                    "description": "Dragon theme",
-                    "container": {
-                        "json_dict": {
-                            "cardlists": [
-                                {
-                                    "header": "Top Cards",
-                                    "cardviews": [
-                                        {
-                                            "cardname": "Sol Ring",
-                                            "popularity": "60%",
-                                            "synergy": "10%",
-                                        }
-                                    ],
-                                }
-                            ]
-                        }
+    payload = {
+        "pageProps": {
+            "data": {
+                "header": "Dragons",
+                "description": "Dragon theme",
+                "container": {
+                    "json_dict": {
+                        "cardlists": [
+                            {
+                                "header": "Top Cards",
+                                "cardviews": [
+                                    {
+                                        "cardname": "Sol Ring",
+                                        "popularity": "60%",
+                                        "synergy": "10%",
+                                    }
+                                ],
+                            }
+                        ]
                     }
                 }
             }
         }
     }
-    html = (
-        "<html>{}\n<script id=\"__NEXT_DATA__\" type=\"application/json\">{}</script></html>".format(
-            '{"buildId":"BUILD"}',
-            json.dumps(next_data),
-        )
-    )
 
     created_clients: List[Dict[str, object]] = []
 
     class DummyResponse:
-        def __init__(self, url: str) -> None:
+        def __init__(self) -> None:
             self.status_code = 200
-            self.text = html
-            self.url = url
 
-        def raise_for_status(self) -> None:
+        def raise_for_status(self) -> None:  # pragma: no cover - simple passthrough
             return None
+
+        def json(self) -> Dict[str, object]:  # pragma: no cover - deterministic
+            return payload
 
     class DummyClient:
         def __init__(self, *_, **kwargs) -> None:
@@ -413,9 +445,9 @@ async def test_fetch_theme_tag_bypasses_proxy(monkeypatch: pytest.MonkeyPatch) -
             return None
 
         async def get(self, url: str, headers=None) -> DummyResponse:
-            return DummyResponse(url)
+            return DummyResponse()
 
-    monkeypatch.setattr("aoa.routes.themes.httpx.AsyncClient", DummyClient)
+    monkeypatch.setattr("aoa.services.edhrec.httpx.AsyncClient", DummyClient)
 
     page = await fetch_theme_tag("dragons")
     assert created_clients and created_clients[0].get("trust_env") is False
