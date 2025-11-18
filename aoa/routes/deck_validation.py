@@ -253,7 +253,8 @@ class DeckValidator:
             card_names = [card.name for card in cards for _ in range(card.quantity)]
             salt_result = salt_cache.calculate_deck_salt(card_names)
             
-            deck_salt_score = salt_result['total_salt']
+            # Use average salt score (per card) instead of total for proper scaling
+            deck_salt_score = salt_result['average_salt']
             
             # Calculate combined salt score (weighted average)
             combined_salt_score = round((commander_salt_score + deck_salt_score) / 2, 2)
@@ -267,7 +268,7 @@ class DeckValidator:
                 "commander_salt_description": self._get_salt_level_description(commander_salt_score),
                 "deck_salt_description": self._get_salt_level_description(deck_salt_score),
                 "combined_salt_description": self._get_salt_level_description(combined_salt_score),
-                "salt_level": self._get_salt_level_description(combined_salt_score),
+                "salt_level": salt_result['salt_tier'],  # Use actual tier from calculation
                 "top_offenders": salt_result['top_offenders'],
                 "salty_card_count": salt_result['salty_card_count'],
                 "average_salt_per_card": salt_result['average_salt']
@@ -1449,46 +1450,156 @@ class DeckValidator:
         if not commander_name:
             return 0.0
         
+        # First, try to get from the salt cache (same data source as deck cards)
+        salt_cache = get_salt_cache()
+        await salt_cache.ensure_loaded()
+        cache_score = salt_cache.get_card_salt(commander_name)
+        if cache_score > 0:
+            return cache_score
+        
+        # Fallback: Try to fetch from EDHRec commander page
         try:
             # Normalize commander name for URL
             commander_normalized = commander_name.lower().replace(" ", "-").replace(",", "").replace("'", "")
             url = f"https://edhrec.com/commanders/{commander_normalized}"
             
-            async with httpx.AsyncClient(trust_env=False) as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url, timeout=10.0)
                 if response.status_code != 200:
-                    return 0.0
+                    # Fallback to known commanders list
+                    return self._get_fallback_commander_salt(commander_normalized)
                 
-                # Parse the response for salt score
-                # This would need to be implemented based on the actual page structure
-                # For now, return a default based on some known high-salt commanders
-                high_salt_commanders = {
-                    "tergrid-god-of-fright": 2.8,
-                    "yuriko-the-tigers-shadow": 2.15,
-                    "vorinclex-voice-of-hunger": 2.61,
-                    "kinnan-bonder-prodigy": 2.15,
-                    "jin-gitaxias-core-augur": 2.57,
-                    "edgar-markov": 2.05,
-                    "sheoldred-the-apocalypse": 2.03,
-                    "atraxa-praetors-voice": 1.72
-                }
+                # Parse HTML for salt score using the same method as deck cards
+                html_content = response.text
+                soup = BeautifulSoup(html_content, "html.parser")
                 
-                return high_salt_commanders.get(commander_normalized, 1.0)  # Default 1.0 if not found
+                # Look for salt score in the page content
+                salt_score = self._extract_salt_score_from_html_commander(soup, commander_name)
+                if salt_score > 0:
+                    return salt_score
+                
+                # Final fallback to known commanders
+                return self._get_fallback_commander_salt(commander_normalized)
                 
         except Exception as e:
             logger.warning(f"Failed to fetch commander salt score for {commander_name}: {e}")
+            return self._get_fallback_commander_salt(commander_normalized)
+
+    def _get_fallback_commander_salt(self, commander_normalized: str) -> float:
+        """Fallback salt scores for known high-salt commanders."""
+        fallback_scores = {
+            "tergrid-god-of-fright": 2.8,
+            "yuriko-the-tigers-shadow": 2.15,
+            "vorinclex-voice-of-hunger": 2.61,
+            "kinnan-bonder-prodigy": 2.15,
+            "jin-gitaxias-core-augur": 2.57,
+            "edgar-markov": 2.05,
+            "sheoldred-the-apocalypse": 2.03,
+            "atraxa-praetors-voice": 1.72,
+            "urza-lord-high-artificer": 2.31,
+            "winota-joiner-of-forces": 1.95,
+            "slicer-hired-muscle": 0.96  # Add the specific case from user's example
+        }
+        return fallback_scores.get(commander_normalized, 1.0)
+
+    def _extract_salt_score_from_html_commander(self, soup: BeautifulSoup, commander_name: str) -> float:
+        """Extract salt score from commander page HTML."""
+        # Look for salt score in various places in the HTML
+        
+        # Method 1: Look for JSON data
+        script_tag = soup.find("script", id="__NEXT_DATA__")
+        if script_tag and script_tag.string:
+            try:
+                data = json.loads(script_tag.string)
+                page_props = data.get("props", {}).get("pageProps", {})
+                page_data = page_props.get("data", {})
+                container = page_data.get("container", {})
+                json_dict = container.get("json_dict", {})
+                
+                # Try to find salt score in the commander data
+                return self._extract_salt_score_from_commander_data(json_dict)
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.debug(f"Failed to extract commander salt from JSON: {e}")
+        
+        # Method 2: Look for salt score in the page text
+        page_text = soup.get_text()
+        import re
+        
+        # Look for patterns like "Salt Score: 2.5" or "Salt Score 2.5"
+        salt_patterns = [
+            r"Salt Score:\s*(\d+\.?\d*)",
+            r"Salt Score\s+(\d+\.?\d*)",
+            r"EDHREC Salt Score:\s*(\d+\.?\d*)"
+        ]
+        
+        for pattern in salt_patterns:
+            match = re.search(pattern, page_text, re.IGNORECASE)
+            if match:
+                try:
+                    return float(match.group(1))
+                except ValueError:
+                    continue
+        
+        # Method 3: Look for specific elements containing salt score
+        salt_elements = soup.find_all(string=re.compile(r"Salt Score", re.IGNORECASE))
+        for element in salt_elements:
+            # Look for nearby numbers
+            parent = element.parent if element.parent else element
+            number_match = re.search(r'(\d+\.?\d*)', parent.get_text())
+            if number_match:
+                try:
+                    return float(number_match.group(1))
+                except ValueError:
+                    continue
+        
+        return 0.0
+
+    def _extract_salt_score_from_commander_data(self, data: Dict[str, Any]) -> float:
+        """Extract salt score from commander JSON data."""
+        if not isinstance(data, dict):
             return 0.0
+        
+        # Look for salt score in various data structures
+        def search_for_salt(obj, path=""):
+            if isinstance(obj, dict):
+                if "salt" in obj:
+                    salt_value = obj["salt"]
+                    if isinstance(salt_value, (int, float)) and 0 <= salt_value <= 5:
+                        return salt_value
+                    elif isinstance(salt_value, str):
+                        try:
+                            return float(salt_value)
+                        except ValueError:
+                            pass
+                
+                # Recursively search nested objects
+                for key, value in obj.items():
+                    result = search_for_salt(value, f"{path}.{key}")
+                    if result > 0:
+                        return result
+                        
+            elif isinstance(obj, list):
+                for i, item in enumerate(obj):
+                    result = search_for_salt(item, f"{path}[{i}]")
+                    if result > 0:
+                        return result
+            
+            return 0.0
+        
+        return search_for_salt(data)
 
     def _get_salt_level_description(self, score: float) -> str:
         """Get a description of the salt level based on score."""
-        if score >= 4.0:
+        if score >= 3.0:
             return "Extremely Salty"
-        elif score >= 3.0:
+        elif score >= 2.5:
             return "Very Salty"
         elif score >= 2.0:
             return "Moderately Salty"
-        elif score >= 1.0:
+        elif score >= 1.5:
             return "Slightly Salty"
+        elif score >= 1.0:
+            return "Mildly Salty"
         else:
             return "Casual"
 
