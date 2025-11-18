@@ -22,6 +22,14 @@ def _extract_page_data(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
 
+    # Check if payload is already the data block (new EDHRec API format)
+    # The data block typically has keys like 'panels', 'similar', 'cardlists', 'container'
+    data_indicators = {'panels', 'similar', 'cardlists', 'container'}
+    if any(key in payload for key in data_indicators):
+        logger.debug("Payload appears to be direct data block (new format)")
+        return payload
+
+    # Otherwise, search for pageProps.data (old format with Next.js wrapper)
     queue: Deque[Any] = deque([payload])
     while queue:
         node = queue.popleft()
@@ -30,6 +38,7 @@ def _extract_page_data(payload: Dict[str, Any]) -> Dict[str, Any]:
             if isinstance(page_props, dict):
                 data_block = page_props.get("data")
                 if isinstance(data_block, dict):
+                    logger.debug("Found data block in pageProps.data (old format)")
                     return data_block
             for value in node.values():
                 if isinstance(value, (dict, list, tuple)):
@@ -38,6 +47,8 @@ def _extract_page_data(payload: Dict[str, Any]) -> Dict[str, Any]:
             for item in node:
                 if isinstance(item, (dict, list, tuple)):
                     queue.append(item)
+    
+    logger.warning("Could not find commander data in payload")
     return {}
 
 
