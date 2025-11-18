@@ -27,3 +27,7 @@ starlette==0.27.0
 # Development and testing (optional)
 pytest==8.2.2
 pytest-asyncio==0.21.1
+
+# Parser for deck sites like Moxfield and Archidekt
+mtg_parser==0.0.1a50
+cachetools==5.3.2
