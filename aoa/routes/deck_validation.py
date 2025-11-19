@@ -1687,9 +1687,10 @@ class DeckValidator:
         card_count = 0
         
         for card in cards:
-            # Normalize card name for lookup
-            card_name = card.name.strip()
-            salt_score = salt_cards.get(card_name, 0.0)
+            # Use centralized normalization from SaltCacheService
+            from aoa.services.salt_cache import SaltCacheService
+            normalized_name = SaltCacheService.normalize_card_name(card.name)
+            salt_score = salt_cards.get(normalized_name, 0.0)
 
             # Weight by quantity if present
             weighted_salt = salt_score * card.quantity
@@ -1785,8 +1786,18 @@ class DeckValidator:
         except Exception as e:
             logger.warning(f"Failed live fetch for commander salt ({commander_name}): {e}")
 
-        # 5️⃣ Last fallback
-        return self._get_fallback_commander_salt(commander_name.lower().replace(" ", "-"))
+        # 5️⃣ Last fallback - use centralized normalization with comprehensive variants
+        from aoa.services.salt_cache import SaltCacheService
+        
+        variants = SaltCacheService.generate_name_variants(commander_name)
+        
+        for variant in variants:
+            score = self._get_fallback_commander_salt(variant)
+            if score != 1.0:  # 1.0 is the default "not found" value
+                return score
+        
+        # If no variants work, return the default
+        return self._get_fallback_commander_salt(variants[0] if variants else commander_name)
 
     def _get_fallback_commander_salt(self, commander_normalized: str) -> float:
         """Fallback salt scores for known high-salt commanders."""
