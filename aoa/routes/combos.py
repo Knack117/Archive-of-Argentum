@@ -558,32 +558,34 @@ async def debug_combo_search(
 
 
 
-def check_late_game_combos_in_cards(card_names: List[str]) -> List[Dict[str, Any]]:
+@router.get("/combos/early-game", response_model=Dict[str, Any])
+async def get_early_game_combos(
+    api_key: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
     """
-    Check if any late-game 2-card combos are present in the given card list.
+    Get the complete list of early-game 2-card combos.
     
-    Args:
-        card_names: List of card names to check
-        
-    Returns:
-        List of combos found in the card list
+    These combos are NOT acceptable for brackets 1 (Exhibition), 2 (Core), or 3 (Upgraded).
+    They are only acceptable for brackets 4 (Optimized) and 5 (cEDH).
     """
-    found_combos = []
-    # Normalize card names for comparison
-    normalized_cards = {name.lower().strip() for name in card_names}
+    from aoa.routes.deck_validation import EARLY_GAME_COMBO_PAIRS
     
-    for combo in LATE_GAME_COMBOS:
-        combo_cards = [card.lower().strip() for card in combo["cards"]]
-        # Check if both cards of the combo are in the deck
-        if all(card in normalized_cards for card in combo_cards):
-            found_combos.append({
-                "cards": combo["cards"],
-                "effects": combo["effects"],
-                "acceptable_brackets": LATE_GAME_COMBO_BRACKETS,
-                "bracket_recommendation": "Acceptable for brackets 3, 4, and 5"
-            })
-    
-    return found_combos
+    return {
+        "success": True,
+        "total_combos": len(EARLY_GAME_COMBO_PAIRS),
+        "acceptable_brackets": ["4", "5"],
+        "bracket_description": "Acceptable ONLY for brackets 4 (Optimized) and 5 (cEDH)",
+        "combos": [
+            {
+                "cards": [combo[0], combo[1]],
+                "card_1": combo[0],
+                "card_2": combo[1]
+            }
+            for combo in EARLY_GAME_COMBO_PAIRS
+        ],
+        "source": "https://edhrec.com/combos/early-game-2-card-combos",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 @router.get("/combos/late-game", response_model=Dict[str, Any])
@@ -615,40 +617,43 @@ async def get_late_game_combos(
     }
 
 
-@router.post("/combos/check-late-game", response_model=Dict[str, Any])
-async def check_deck_for_late_game_combos(
-    card_names: List[str],
+@router.get("/combos/search-early-game", response_model=Dict[str, Any])
+async def search_early_game_combos_by_card(
+    card_name: str = Query(..., description="Card name to search for in early-game combos"),
     api_key: str = Depends(verify_api_key),
 ) -> Dict[str, Any]:
     """
-    Check if a card list contains any late-game 2-card combos.
+    Search for early-game combos containing a specific card.
     
-    Send a list of card names in the request body.
-    Returns any late-game combos found and their acceptability in different brackets.
-    
-    Example request body:
-    ```json
-    ["Mikaeus, the Unhallowed", "Triskelion", "Sol Ring", "Command Tower"]
-    ```
+    Returns all early-game 2-card combos that include the specified card.
     """
-    if not card_names:
+    from aoa.routes.deck_validation import EARLY_GAME_COMBO_PAIRS
+    
+    if not card_name or not card_name.strip():
         raise HTTPException(
             status_code=400,
-            detail="Card names list is required and cannot be empty",
+            detail="Card name is required and cannot be empty",
         )
     
-    found_combos = check_late_game_combos_in_cards(card_names)
+    normalized_search = card_name.lower().strip()
+    matching_combos = []
+    
+    for card1, card2 in EARLY_GAME_COMBO_PAIRS:
+        if normalized_search in card1.lower() or normalized_search in card2.lower():
+            partner_card = card2 if normalized_search in card1.lower() else card1
+            matching_combos.append({
+                "cards": [card1, card2],
+                "partner_card": partner_card,
+                "acceptable_brackets": ["4", "5"],
+            })
     
     return {
         "success": True,
-        "cards_checked": len(card_names),
-        "combos_found": len(found_combos),
-        "combos": found_combos,
-        "recommendation": (
-            f"Found {len(found_combos)} late-game combo(s). "
-            "These combos are acceptable for brackets 3, 4, and 5."
-        ) if found_combos else "No late-game combos detected in this card list.",
-        "acceptable_brackets": LATE_GAME_COMBO_BRACKETS,
+        "search_query": card_name,
+        "combos_found": len(matching_combos),
+        "combos": matching_combos,
+        "acceptable_brackets": ["4", "5"],
+        "bracket_recommendation": "These combos are acceptable ONLY for brackets 4 and 5",
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -701,11 +706,13 @@ async def get_combo_api_info(
     
     Provides an overview of available endpoints, combo categories, and usage examples.
     """
+    from aoa.routes.deck_validation import EARLY_GAME_COMBO_PAIRS
+    
     return {
         "success": True,
         "name": "Commander Combo API",
-        "version": "1.0.0",
-        "description": "Search Commander combos and check for bracket-appropriate 2-card combinations",
+        "version": "2.0.0",
+        "description": "Search Commander combos and explore bracket-appropriate 2-card combinations",
         "endpoints": {
             "/api/v1/combos/commander/{commander_name}": {
                 "method": "GET",
@@ -718,16 +725,21 @@ async def get_combo_api_info(
                 "parameters": {"card_name": "Card name to search for"},
                 "example": "/api/v1/combos/search?card_name=Thassa's%20Oracle"
             },
+            "/api/v1/combos/early-game": {
+                "method": "GET",
+                "description": f"Get the complete list of early-game 2-card combos ({len(EARLY_GAME_COMBO_PAIRS)} combos)",
+                "bracket_info": "Acceptable ONLY for brackets 4 and 5"
+            },
+            "/api/v1/combos/search-early-game": {
+                "method": "GET",
+                "description": "Search for early-game combos containing a specific card",
+                "parameters": {"card_name": "Card name to search for"},
+                "example": "/api/v1/combos/search-early-game?card_name=Thassa's%20Oracle"
+            },
             "/api/v1/combos/late-game": {
                 "method": "GET",
-                "description": "Get the complete list of late-game 2-card combos (97 combos)",
+                "description": f"Get the complete list of late-game 2-card combos ({len(LATE_GAME_COMBOS)} combos)",
                 "bracket_info": "Acceptable for brackets 3, 4, and 5"
-            },
-            "/api/v1/combos/check-late-game": {
-                "method": "POST",
-                "description": "Check if a card list contains any late-game 2-card combos",
-                "body": "Array of card names",
-                "example_body": '["Mikaeus, the Unhallowed", "Triskelion"]'
             },
             "/api/v1/combos/search-late-game": {
                 "method": "GET",
@@ -746,6 +758,12 @@ async def get_combo_api_info(
                 "description": "Full combo database from Commander Spellbook",
                 "includes": "All card combos with effects and results"
             },
+            "early_game_combos": {
+                "description": "Community-voted early-game 2-card combos",
+                "total": len(EARLY_GAME_COMBO_PAIRS),
+                "acceptable_brackets": ["4", "5"],
+                "source": "https://edhrec.com/combos/early-game-2-card-combos"
+            },
             "late_game_combos": {
                 "description": "Community-voted late-game 2-card combos",
                 "total": len(LATE_GAME_COMBOS),
@@ -760,5 +778,6 @@ async def get_combo_api_info(
             "4_optimized": "All combos acceptable",
             "5_cedh": "All combos acceptable"
         },
+        "note": "For deck validation (checking if your deck contains these combos), use the /api/v1/deck/validate endpoint",
         "timestamp": datetime.utcnow().isoformat(),
     }
