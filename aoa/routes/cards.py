@@ -187,35 +187,6 @@ async def get_random_card(api_key: str = Depends(verify_api_key)) -> Card:
         raise HTTPException(status_code=500, detail=f"Error fetching random card: {exc}")
 
 
-@router.get("/{card_id}", response_model=Card)
-async def get_card(card_id: str, api_key: str = Depends(verify_api_key)) -> Card:
-    """Return a specific card by ID from Scryfall API."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            # Scryfall supports both exact card IDs and "!" notation for exact card lookup
-            # Try exact ID first, then try named lookup
-            urls_to_try = [
-                f"https://api.scryfall.com/cards/{card_id}",
-                f"https://api.scryfall.com/cards/named?exact={card_id}"
-            ]
-            
-            for url in urls_to_try:
-                try:
-                    response = await client.get(url)
-                    if response.status_code == 200:
-                        card_data = response.json()
-                        return Card(**card_data)
-                except httpx.HTTPStatusError:
-                    continue
-            
-            # If neither URL worked, return 404
-            raise HTTPException(status_code=404, detail="Card not found")
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error(f"Error fetching card {card_id}: {exc}")
-        raise HTTPException(status_code=500, detail=f"Error fetching card: {exc}")
-
 
 @router.get("/gamechangers")
 async def get_gamechangers(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
@@ -304,3 +275,32 @@ async def get_mass_land_destruction(api_key: str = Depends(verify_api_key)) -> D
     except Exception as exc:
         logger.error(f"Error fetching Mass Land Destruction cards: {exc}")
         raise HTTPException(status_code=500, detail=f"Error fetching Mass Land Destruction cards: {str(exc)}")
+@router.get("/{card_id}", response_model=Card)
+async def get_card(card_id: str, api_key: str = Depends(verify_api_key)) -> Card:
+    """Return a specific card by ID from Scryfall API."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Scryfall supports both exact card IDs and "!" notation for exact card lookup
+            # Try exact ID first, then try named lookup
+            urls_to_try = [
+                f"https://api.scryfall.com/cards/{card_id}",
+                f"https://api.scryfall.com/cards/named?exact={card_id}"
+            ]
+            
+            for url in urls_to_try:
+                try:
+                    response = await client.get(url)
+                    if response.status_code == 200:
+                        card_data = response.json()
+                        return Card(**card_data)
+                except httpx.HTTPStatusError:
+                    continue
+            
+            # If neither URL worked, return 404
+            raise HTTPException(status_code=404, detail="Card not found")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Error fetching card {card_id}: {exc}")
+        raise HTTPException(status_code=500, detail=f"Error fetching card: {exc}")
+
