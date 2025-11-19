@@ -82,6 +82,10 @@ class SaltCacheService:
         if not self._is_loaded or not self.salt_data:
             logger.info("Salt cache not loaded - fetching from EDHRec...")
             await self.refresh_cache()
+        
+        # Log cache status for debugging
+        cache_count = len(self.salt_data)
+        logger.info(f"Salt cache status: {cache_count:,} cards loaded, cache ready: {self._is_loaded}")
     
     async def refresh_cache(self) -> Dict[str, Any]:
         """
@@ -162,28 +166,135 @@ class SaltCacheService:
         if not card_name:
             return
         
-        # Extract salt score from label
+        # Try multiple ways to extract salt score for robustness
+        salt_score = None
+        
+        # Method 1: Extract from label (original format)
         label = card.get('label', '')
         if 'Salt Score:' in label:
             try:
-                salt_text = label.split('\n')[0].replace('Salt Score: ', '')
+                # Handle variations like "Salt Score: 1.48\n#123 Most Salty Card"
+                salt_text = label.split('Salt Score:')[-1].split('\n')[0].strip()
                 salt_score = float(salt_text)
-                self.salt_data[card_name.lower()] = salt_score
             except (ValueError, IndexError):
                 pass
+        
+        # Method 2: Direct salt field (if EDHRec uses this format)
+        if salt_score is None and 'salt' in card:
+            try:
+                salt_score = float(card['salt'])
+            except (ValueError, TypeError):
+                pass
+        
+        # Method 3: Alternative field names
+        if salt_score is None:
+            for field in ['salt_score', 'score', 'rating']:
+                if field in card:
+                    try:
+                        salt_score = float(card[field])
+                        break
+                    except (ValueError, TypeError):
+                        continue
+        
+        # Store the salt score if we found one
+        if salt_score is not None and salt_score >= 0:
+            self.salt_data[card_name.lower()] = salt_score
+        else:
+            logger.debug(f"Failed to extract salt score for card: {card_name}")
     
     def get_card_salt(self, card_name: str) -> float:
         """
-        Get salt score for a single card.
+        Get salt score for a single card using centralized normalization.
         
         Args:
-            card_name: The card name (case-insensitive)
+            card_name: The card name to look up
         
         Returns:
             Salt score (0.0 if card not found)
         """
-        return self.salt_data.get(card_name.lower().strip(), 0.0)
+        normalized_name = self.normalize_card_name(card_name)
+        return self.salt_data.get(normalized_name, 0.0)
     
+    @staticmethod
+    def normalize_card_name(name: str) -> str:
+        """
+        Centralized card name normalization for consistent lookups.
+        
+        This method normalizes card names by:
+        - Converting to lowercase
+        - Stripping leading/trailing whitespace
+        - Handling common punctuation variations
+        
+        Args:
+            name: The card name to normalize
+        
+        Returns:
+            Normalized card name suitable for cache lookup
+        """
+        if not name:
+            return ""
+        
+        normalized = name.lower().strip()
+        # Handle common punctuation variations
+        normalized = normalized.replace("'", "'")  # Ensure consistent apostrophes
+        normalized = normalized.replace("—", "-")  # Normalize em/en dashes to hyphens
+        
+        return normalized
+
+    @staticmethod
+    def generate_name_variants(name: str) -> list[str]:
+        """
+        Generate multiple name variants for comprehensive fallback matching.
+        
+        This method creates various normalization forms to handle mismatches between
+        different data sources (EDHRec, Moxfield, Archidekt, etc.).
+        
+        Args:
+            name: The card name to generate variants for
+        
+        Returns:
+            List of normalized name variants
+        """
+        if not name:
+            return []
+        
+        normalized_base = SaltCacheService.normalize_card_name(name)
+        
+        variants = {
+            normalized_base,  # Original normalized
+            normalized_base.replace(" ", ""),  # No spaces
+            normalized_base.replace(" ", "-"),  # Spaces to hyphens
+            normalized_base.replace(",", ""),  # Remove commas
+            normalized_base.replace(",", "").replace(" ", ""),  # Remove commas and spaces
+            normalized_base.replace(" ", "-").replace(",", ""),  # Hyphens, no commas
+            normalized_base.replace(",", "").replace(" ", "-"),  # Commas to hyphens
+        }
+        
+        return list(variants)
+
+    def get_card_salt_with_variants(self, card_name: str) -> float:
+        """
+        Get salt score using comprehensive variant matching.
+        
+        This method tries multiple name normalization approaches to find the best match.
+        It's particularly useful for commander salt scoring where name format varies.
+        
+        Args:
+            card_name: The card name to look up
+        
+        Returns:
+            Salt score (0.0 if card not found in any variant)
+        """
+        variants = self.generate_name_variants(card_name)
+        
+        for variant in variants:
+            score = self.salt_data.get(variant, None)
+            if score is not None:
+                return score
+        
+        # If no variants matched, fall back to basic lookup
+        return self.salt_data.get(self.normalize_card_name(card_name), 0.0)
+
     def get_salt_tier(self, average_salt: float) -> str:
         """
         Get the salt tier for a given average salt score.
@@ -201,20 +312,22 @@ class SaltCacheService:
     
     def calculate_deck_salt(self, card_names: list) -> Dict[str, Any]:
         """
-        Calculate total salt score for a deck.
+        Calculate total salt score for a deck with comprehensive cache monitoring.
         
         Args:
             card_names: List of card names (strings)
         
         Returns:
-            Dictionary with salt analysis results
+            Dictionary with salt analysis results and cache performance metrics
         """
         total = 0.0
         card_scores = []
         unknown = []
+        cache_hits = 0
         
         for card_name in card_names:
-            normalized = card_name.lower().strip()
+            # Use centralized normalization
+            normalized = self.normalize_card_name(card_name)
             
             if normalized in self.salt_data:
                 salt = self.salt_data[normalized]
@@ -224,6 +337,7 @@ class SaltCacheService:
                         'salt': round(salt, 2)
                     })
                     total += salt
+                    cache_hits += 1
             else:
                 unknown.append(card_name)
         
@@ -233,6 +347,13 @@ class SaltCacheService:
         total_salt = round(total, 2)
         card_count = len(card_names)
         
+        # Calculate cache hit ratio for monitoring
+        hit_ratio = cache_hits / card_count if card_count > 0 else 0
+        
+        # Log cache performance metrics
+        logger.debug(f"Salt cache analysis: {cache_hits}/{card_count} hits ({hit_ratio:.1%}), "
+                    f"average_salt: {total_salt/card_count:.2f}, tier: {self.get_salt_tier(round(total / card_count, 2))}")
+        
         return {
             'total_salt': total_salt,  # Keep for backward compatibility
             'average_salt': round(total / card_count, 2) if card_count > 0 else 0,
@@ -241,7 +362,13 @@ class SaltCacheService:
             'salty_card_count': len(card_scores),
             'top_offenders': card_scores[:10],
             'all_salty_cards': card_scores,
-            'unknown_cards': unknown
+            'unknown_cards': unknown,
+            'cache_performance': {
+                'cache_hits': cache_hits,
+                'total_lookups': card_count,
+                'hit_ratio': round(hit_ratio, 3),
+                'misses': len(unknown)
+            }
         }
     
     def get_cache_info(self) -> Dict[str, Any]:
@@ -276,6 +403,23 @@ class SaltCacheService:
             Note: Keys are lowercase for case-insensitive lookup.
         """
         return self.salt_data.copy()
+    
+    def debug_cache_status(self) -> Dict[str, Any]:
+        """
+        Debug information about the cache status for troubleshooting.
+        
+        Returns:
+            Dictionary with cache debugging information.
+        """
+        return {
+            'is_loaded': self._is_loaded,
+            'cache_file_exists': os.path.exists(self.cache_file),
+            'cache_file_path': self.cache_file,
+            'card_count': len(self.salt_data),
+            'cache_size_bytes': os.path.getsize(self.cache_file) if os.path.exists(self.cache_file) else 0,
+            'sample_cards': list(self.salt_data.keys())[:10] if self.salt_data else [],
+            'top_salt_scores': sorted(self.salt_data.items(), key=lambda x: x[1], reverse=True)[:5] if self.salt_data else []
+        }
 
 
 # Global singleton instance
