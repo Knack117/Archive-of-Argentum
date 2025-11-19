@@ -39,72 +39,82 @@ COMMANDER_BRACKETS = {
             "focus": "Theme over power",
             "win_conditions": "Highly thematic or substandard",
             "gameplay": "At least 9 turns before win/loss",
-            "complexity": "Opportunity to show off creations"
+            "complexity": "Opportunity to show off creations",
+            "mindset": "Casual Mindset - Heavy Theme Focus"
         },
         "restrictions": {
-            "game_changers": "Allowed with Rule 0 discussion",
-            "combos": "Minimal/complex theme-based combos only",
-            "tutors": "Limited to thematic/roleplay tutors"
+            "game_changers": "NO Game Changers",
+            "mass_land_denial": "NO Mass Land Denial", 
+            "extra_turns": "NO Extra Turns",
+            "combos": "NO 2-Card Combos (exceptions for highly thematic cards)"
         }
     },
     "core": {
         "level": 2,
         "name": "Core",
         "expectations": {
-            "focus": "Unoptimized and straightforward",
-            "win_conditions": "Incremental, telegraphed, disruptable",
+            "focus": "Mechanically focused with creativity and entertainment",
+            "win_conditions": "Incremental, telegraphed, disruptible",
             "gameplay": "At least 8 turns before win/loss",
-            "complexity": "Low pressure, social interaction focus"
+            "complexity": "Low pressure, proactive, considerate",
+            "mindset": "Casual Mindset - Mechanical Focus"
         },
         "restrictions": {
-            "game_changers": "Very limited",
-            "combos": "Few early-game combos",
-            "tutors": "Limited to 1-2 tutors max"
+            "game_changers": "NO Game Changers",
+            "mass_land_denial": "NO Mass Land Denial",
+            "extra_turns": "NO Chaining Extra Turns", 
+            "combos": "NO 2-Card Combos"
         }
     },
     "upgraded": {
         "level": 3,
-        "name": "Upgraded",
+        "name": "Upgraded", 
         "expectations": {
-            "focus": "Powered up with strong synergy",
-            "win_conditions": "One big turn from hand",
+            "focus": "Powered up with strong synergy and high card quality",
+            "win_conditions": "Can be played from hand in one turn",
             "gameplay": "At least 6 turns before win/loss",
-            "complexity": "Proactive and reactive plays"
+            "complexity": "Many proactive and reactive plays",
+            "mindset": "Moving Towards Competitive - Synergy & Quality"
         },
         "restrictions": {
-            "game_changers": "Value engines and game-enders allowed",
-            "combos": "Standard game-ending combos allowed",
-            "tutors": "Moderate number of tutors acceptable"
+            "game_changers": "0-3 Game Changers",
+            "mass_land_denial": "NO Mass Land Denial",
+            "extra_turns": "NO Chaining Extra Turns",
+            "combos": "NO 2-Card Combos (before turn 6)"
         }
     },
     "optimized": {
         "level": 4,
         "name": "Optimized",
         "expectations": {
-            "focus": "Lethal, consistent, and fast",
-            "win_conditions": "Efficient and instantaneous",
+            "focus": "Lethal, consistent, fast - designed to take people down as fast as possible",
+            "win_conditions": "Vary from archetype to archetype, can end game quickly and suddenly",
             "gameplay": "At least 4 turns before win/loss",
-            "complexity": "Explosive and powerful"
+            "complexity": "Explosive and powerful, huge threats and efficient disruption",
+            "mindset": "Competitive Mindset - Speed & Lethality (not cEDH metagame)"
         },
         "restrictions": {
-            "game_changers": "Fast mana, tutors, free disruption allowed",
-            "combos": "Fast, efficient combos allowed",
-            "tutors": "Efficient tutors encouraged"
+            "game_changers": "NO DECK RESTRICTIONS",
+            "mass_land_denial": "NO DECK RESTRICTIONS",
+            "extra_turns": "NO DECK RESTRICTIONS",
+            "combos": "NO DECK RESTRICTIONS"
         }
     },
     "cedh": {
         "level": 5,
         "name": "cEDH",
         "expectations": {
-            "focus": "Competitive metagame optimized",
-            "win_conditions": "Optimized for efficiency",
-            "gameplay": "Can end on any turn",
-            "complexity": "Intricate and advanced"
+            "focus": "Meticulously designed to battle in the cEDH metagame",
+            "win_conditions": "Optimized for efficiency and consistency",
+            "gameplay": "Games could end on any turn",
+            "complexity": "Intricate and advanced, razor-thin margins for error",
+            "mindset": "Competitive Mindset - Metagame Mastery"
         },
         "restrictions": {
-            "game_changers": "All game changers allowed",
-            "combos": "All combos allowed",
-            "tutors": "All tutors allowed"
+            "game_changers": "NO DECK RESTRICTIONS",
+            "mass_land_denial": "NO DECK RESTRICTIONS",
+            "extra_turns": "NO DECK RESTRICTIONS", 
+            "combos": "NO DECK RESTRICTIONS"
         }
     }
 }
@@ -207,6 +217,24 @@ UNLIMITED_DUPLICATE_CARDS = {
 }
 
 
+# Extra Turn cards from Scryfall's oracle tag - fallback list if API is unavailable
+EXTRA_TURN_CARDS_FALLBACK = [
+    "A-Alrund's Epiphany", "Alchemist's Gambit", "Alrund's Epiphany", "Beacon of Tomorrows", 
+    "Capture of Jingzhou", "Chance for Glory", "Emrakul, the Aeons Torn", "Emrakul, the Promised End",
+    "Eon Frolicker", "Expropriate", "Final Fortune", "Gonti's Aether Heart", "Ichormoon Gauntlet",
+    "Karn's Temporal Sundering", "Last Chance", "Lighthouse Chronologist", "Lost Isle Calling",
+    "Magistrate's Scepter", "Magosi, the Waterveil", "Medomai the Ageless", "Mu Yanling",
+    "Nexus of Fate", "Notorious Throng", "Part the Waterveil", "Phone a Friend", "Piece It Together",
+    "Plea for Power", "Ral Zarek", "Regenerations Restored", "Rise of the Eldrazi", "Sage of Hours",
+    "Savor the Moment", "Search the City", "Second Chance", "Seedtime", "Stitch in Time",
+    "Teferi, Master of Time", "Teferi, Timebender", "Temporal Extortion", "Temporal Manipulation",
+    "Temporal Mastery", "Temporal Trespass", "The Legend of Kuruk // Avatar Kuruk", "Time Sieve",
+    "Timesifter", "Timestream Navigator", "Time Stretch", "Time Vault", "Time Walk", "Time Warp",
+    "Twice Upon a Time // Unlikely Meeting", "Ugin's Nexus", "Ultimecia, Time Sorceress // Ultimecia, Omnipotent",
+    "Walk the Aeons", "Wanderwine Prophets", "Warrior's Oath", "Wormfang Manta"
+]
+
+
 class DeckValidator:
     """Main deck validation class"""
     
@@ -230,6 +258,56 @@ class DeckValidator:
 
         signature_source = "||".join(parts)
         return str(hash(signature_source))
+
+    async def _get_extra_turn_cards(self) -> Dict[str, str]:
+        """
+        Fetch extra turn cards from Scryfall API using oracle tag.
+        Returns dict mapping card names to Scryfall URLs.
+        Falls back to hard-set list if API fails.
+        """
+        cache_key = "extra_turn_cards"
+        
+        # Check cache first
+        if cache_key in self.cache:
+            return self.cache[cache_key]
+        
+        try:
+            # Query Scryfall API for extra turn cards using oracle tag
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    "https://api.scryfall.com/cards/search",
+                    params={"q": "oracletag:extra-turn", "format": "json"}
+                )
+                response.raise_for_status()
+                data = response.json()
+                
+                extra_turn_cards = {}
+                if "data" in data:
+                    for card in data["data"]:
+                        card_name = card.get("name", "").strip()
+                        scryfall_url = card.get("scryfall_uri", "")
+                        if card_name and scryfall_url:
+                            extra_turn_cards[card_name] = scryfall_url
+                
+                # Cache the results
+                self.cache[cache_key] = extra_turn_cards
+                logger.info(f"Fetched {len(extra_turn_cards)} extra turn cards from Scryfall API")
+                return extra_turn_cards
+                
+        except Exception as e:
+            logger.warning(f"Failed to fetch extra turn cards from Scryfall API: {e}. Using fallback list.")
+            # Fall back to hard-set list
+            extra_turn_cards = {}
+            for card_name in EXTRA_TURN_CARDS_FALLBACK:
+                # Generate a Scryfall search URL for each card
+                search_query = card_name.replace(" ", "%20").replace("//", "%2F%2F")
+                scryfall_url = f"https://scryfall.com/search?q=name%3A%22{search_query}%22"
+                extra_turn_cards[card_name] = scryfall_url
+            
+            # Cache the fallback results too
+            self.cache[cache_key] = extra_turn_cards
+            logger.info(f"Using fallback list with {len(extra_turn_cards)} extra turn cards")
+            return extra_turn_cards
 
     async def validate_deck(self, request: DeckValidationRequest) -> DeckValidationResponse:
         """Main validation method"""
@@ -1207,33 +1285,57 @@ class DeckValidator:
         card_names = {card.name for card in cards}
         combo_count = sum(1 for card1, card2 in combo_pairs if card1 in card_names and card2 in card_names)
         mass_land_count = sum(1 for card in cards if "mass_land_denial" in card.bracket_categories)
+        tutor_count = sum(1 for card in cards if "tutor" in card.bracket_categories)
         
-        # Sophisticated cEDH detection based on deck characteristics
+        # Calculate cEDH score for advanced detection
         cedh_score = self._calculate_cedh_score(cards, combo_count, game_changer_count, mass_land_count)
         
-        # CRITICAL: Mass Land Denial immediately pushes to Bracket 4 (Optimized)
-        if mass_land_count > 0:
-            return "optimized"
+        # Strict hierarchy based on Commander Brackets definition
         
-        # cEDH: High cedh_score OR extreme combo/game changer density  
-        if cedh_score >= 25 or (combo_count >= 2 and game_changer_count >= 4):
+        # cEDH: Must have metagame characteristics and high power
+        if (combo_count >= 2 and game_changer_count >= 5) or cedh_score >= 30:
             return "cedh"
         
-        # Optimized: Combos OR many game changers (4+) [Mass land denial already handled above]
-        elif combo_count >= 1 or game_changer_count >= 4:
+        # Optimized: High power but not necessarily meta-tuned
+        # Key: Fast, consistent, efficient but not cEDH-level
+        elif (game_changer_count >= 4 or 
+              (combo_count >= 1 and game_changer_count >= 2) or
+              cedh_score >= 20):
             return "optimized"
         
-        # Upgraded: Moderate game changers (1-3)
-        elif 1 <= game_changer_count <= 3:
+        # Upgraded: Moderate power with synergy
+        # Key: Some game changers, good tutors, but still moderate
+        elif (game_changer_count >= 1 or 
+              tutor_count >= 4 or 
+              cedh_score >= 10):
             return "upgraded"
         
-        # Core: No game changers, no mass land denial
-        elif game_changer_count == 0:
+        # Core: Mechanically focused but not optimized
+        # Key: Few/no game changers, minimal tutors, structured gameplay
+        elif (game_changer_count == 0 and 
+              mass_land_count == 0 and 
+              combo_count == 0 and
+              tutor_count <= 3):
             return "core"
         
-        # Default to exhibition if unsure
-        else:
+        # Exhibition: Theme-focused, very restrictive
+        # Key: Heavily theme-based, minimal power cards
+        elif (game_changer_count == 0 and
+              mass_land_count == 0 and
+              combo_count == 0 and
+              tutor_count <= 2):
             return "exhibition"
+        
+        # Fallback based on available indicators
+        else:
+            if game_changer_count > 0:
+                return "upgraded"
+            elif tutor_count > 3:
+                return "core"
+            elif mass_land_count > 0:
+                return "optimized"
+            else:
+                return "exhibition"
 
     def _calculate_cedh_score(self, cards: List[DeckCard], combo_count: int, game_changer_count: int, mass_land_count: int) -> int:
         """
@@ -1388,35 +1490,122 @@ class DeckValidator:
         recommendations = []
         score_factors = []
         
-        # Check game changers
+        # Count deck characteristics
         game_changer_count = sum(1 for card in cards if card.is_game_changer)
-        if target_bracket in ["exhibition", "core"] and game_changer_count > 0:
-            violations.append(f"Game changers found in {target_bracket} bracket")
-            recommendations.append("Consider moving to higher bracket or removing game changers")
-        elif target_bracket == "cedh" and game_changer_count == 0:
-            recommendations.append("Consider adding game changers for cEDH")
-        
-        # Check for mass land denial
         mass_land_count = sum(1 for card in cards if "mass_land_denial" in card.bracket_categories)
-        if target_bracket == "exhibition" and mass_land_count > 2:
-            violations.append("Too many mass land denial effects for Exhibition")
+        tutor_count = sum(1 for card in cards if "tutor" in card.bracket_categories)
+        
+        # Check for extra turn cards
+        extra_turn_cards = await self._get_extra_turn_cards()
+        extra_turn_names = set(extra_turn_cards.keys())
+        deck_extra_turn_cards = [
+            card.name for card in cards 
+            if card.name in extra_turn_names
+        ]
+        extra_turn_count = len(deck_extra_turn_cards)
+        
+        # Check for chaining extra turns (multiple extra turn cards)
+        has_chaining_potential = extra_turn_count > 1
         
         # Check for 2-card combos
         detected_combos = self._detect_combos(cards, combo_pairs)
         combo_count = len(detected_combos)
         
-        # Brackets 1, 2, 3 (exhibition, core, upgraded) should have ZERO combos
-        if target_bracket in ["exhibition", "core", "upgraded"] and combo_count > 0:
-            combo_list = ", ".join([f"{c1} + {c2}" for c1, c2 in detected_combos])
-            violations.append(f"Early-game 2-card combos detected in {target_bracket} bracket: {combo_list}")
-            recommendations.append(f"Deck contains {combo_count} 2-card combo(s) - should be upgraded to at least Bracket 4 (Optimized)")
-        elif target_bracket in ["optimized", "cedh"] and combo_count > 0:
-            # Combos are expected/allowed in these brackets
-            recommendations.append(f"Deck contains {combo_count} 2-card combo(s) - appropriate for {target_bracket}")
+        # Validate based on bracket restrictions from Commander Brackets system
         
-        # Check for tutors (no restrictions on tutor count per user request)
-        tutor_count = sum(1 for card in cards if "tutor" in card.bracket_categories)
-        # Removed tutor count restrictions - user indicated they don't care about "overpowered tutors"
+        # Exhibition (Bracket 1): Theme-focused, very restrictive
+        if target_bracket == "exhibition":
+            if game_changer_count > 0:
+                violations.append(f"Game changers found in Exhibition bracket ({game_changer_count} found)")
+                recommendations.append("Consider moving to Core bracket or removing game changers")
+            if mass_land_count > 0:
+                violations.append(f"Mass land denial found in Exhibition bracket ({mass_land_count} found)")
+                recommendations.append("Consider moving to Core bracket or removing mass land denial")
+            if extra_turn_count > 0:
+                extra_turn_list = ", ".join(deck_extra_turn_cards)
+                violations.append(f"Extra turn cards found in Exhibition bracket: {extra_turn_list}")
+                recommendations.append("Exhibition bracket prohibits extra turn cards - consider Core bracket")
+            if combo_count > 0:
+                combo_list = ", ".join([f"{c1} + {c2}" for c1, c2 in detected_combos])
+                violations.append(f"2-card combos found in Exhibition bracket: {combo_list}")
+                recommendations.append("Exhibition allows combos only if highly thematic - consider Core bracket")
+            if tutor_count > 3:
+                recommendations.append(f"High tutor count ({tutor_count}) may conflict with theme focus in Exhibition")
+        
+        # Core (Bracket 2): Mechanically focused, still restrictive  
+        elif target_bracket == "core":
+            if game_changer_count > 0:
+                violations.append(f"Game changers found in Core bracket ({game_changer_count} found)")
+                recommendations.append("Consider moving to Upgraded bracket or removing game changers")
+            if mass_land_count > 0:
+                violations.append(f"Mass land denial found in Core bracket ({mass_land_count} found)")
+                recommendations.append("Consider moving to Upgraded bracket or removing mass land denial")
+            if has_chaining_potential:
+                extra_turn_list = ", ".join(deck_extra_turn_cards)
+                violations.append(f"Chaining extra turns potential in Core bracket: {extra_turn_list}")
+                recommendations.append("Core bracket prohibits chaining extra turns - consider Upgraded bracket")
+            if combo_count > 0:
+                combo_list = ", ".join([f"{c1} + {c2}" for c1, c2 in detected_combos])
+                violations.append(f"2-card combos found in Core bracket: {combo_list}")
+                recommendations.append("Consider moving to Upgraded bracket or removing combos")
+            if tutor_count > 5:
+                recommendations.append(f"High tutor count ({tutor_count}) may be too strong for Core bracket")
+        
+        # Upgraded (Bracket 3): Powered up with synergy
+        elif target_bracket == "upgraded":
+            if game_changer_count > 3:
+                violations.append(f"Too many game changers for Upgraded bracket ({game_changer_count} found, max 3)")
+                recommendations.append("Consider moving to Optimized bracket or reducing game changers")
+            if mass_land_count > 0:
+                violations.append(f"Mass land denial found in Upgraded bracket ({mass_land_count} found)")
+                recommendations.append("Consider moving to Optimized bracket or removing mass land denial")
+            if has_chaining_potential:
+                extra_turn_list = ", ".join(deck_extra_turn_cards)
+                violations.append(f"Chaining extra turns potential in Upgraded bracket: {extra_turn_list}")
+                recommendations.append("Upgraded bracket prohibits chaining extra turns - consider Optimized bracket")
+            if combo_count > 0:
+                combo_list = ", ".join([f"{c1} + {c2}" for c1, c2 in detected_combos])
+                violations.append(f"2-card combos found in Upgraded bracket: {combo_list}")
+                recommendations.append("Consider moving to Optimized bracket or removing early-game combos")
+            
+        # Optimized (Bracket 4): Fast, lethal, no restrictions
+        elif target_bracket == "optimized":
+            # No restrictions - this bracket allows everything
+            if game_changer_count < 2:
+                recommendations.append(f"Consider adding more powerful cards ({game_changer_count} game changers)")
+            if tutor_count < 3:
+                recommendations.append(f"Consider adding more tutors for consistency ({tutor_count} tutors)")
+            if combo_count == 0:
+                recommendations.append("Consider adding combos for faster wins")
+        
+        # cEDH (Bracket 5): Competitive metagame, no restrictions
+        elif target_bracket == "cedh":
+            # No restrictions - this is the highest tier
+            recommendations.append("cEDH allows all cards - deck should be optimized for competitive play")
+            if game_changer_count < 5:
+                recommendations.append(f"Consider adding more game changers ({game_changer_count} found)")
+        
+        # Calculate overall compliance score (1-5 scale)
+        if len(violations) == 0:
+            compliance_score = 5
+        elif len(violations) == 1:
+            compliance_score = 4
+        elif len(violations) == 2:
+            compliance_score = 3
+        elif len(violations) == 3:
+            compliance_score = 2
+        else:
+            compliance_score = 1
+            
+        overall_compliance = len(violations) == 0
+        
+        return BracketValidation(
+            target_bracket=target_bracket,
+            overall_compliance=overall_compliance,
+            bracket_score=compliance_score,
+            violations=violations,
+            recommendations=recommendations
+        )
         
         # Calculate bracket score (1-5)
         compliance_score = 5
@@ -1437,6 +1626,9 @@ class DeckValidator:
             compliance_details={
                 "game_changers": game_changer_count,
                 "mass_land_denial": mass_land_count,
+                "extra_turn_cards": extra_turn_count,
+                "extra_turn_card_names": deck_extra_turn_cards,
+                "has_chaining_potential": has_chaining_potential,
                 "early_game_combos": combo_count,
                 "detected_combos": [f"{c1} + {c2}" for c1, c2 in detected_combos],
                 "tutors": tutor_count,
