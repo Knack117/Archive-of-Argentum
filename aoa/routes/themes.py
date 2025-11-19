@@ -97,16 +97,16 @@ def _build_theme_route_candidates_with_cache(
             "json_path": f"{normalized}.json",
         })
 
-    # Priority 1: Correct theme-color pattern (e.g., goblins-izzet)
+    # Priority 1: Correct theme-color pattern (e.g., goblins/gruul)
     if color_value and base_theme:
         for color_variant in color_variants:
-            # Try theme-color first (correct pattern)
-            add_candidate(f"tags/{base_theme}-{color_variant}")
+            # Try theme/color first (correct EDHRec pattern with slash)
+            add_candidate(f"tags/{base_theme}/{color_variant}")
             
-            # Check if this exists in cache before trying color-theme
-            composite_slug = f"{base_theme}-{color_variant}"
-            # Fallback to color-theme only if not found as theme-color
-            # add_candidate(f"tags/{color_variant}/{base_theme}")
+            # Check if this exists in cache before trying color/theme
+            composite_slug = f"{base_theme}/{color_variant}"
+            # Fallback to color/theme only if not found as theme/color
+            add_candidate(f"tags/{color_variant}/{base_theme}")
 
     # Priority 2: Base theme only
     add_candidate(f"tags/{base_theme}")
@@ -628,14 +628,15 @@ async def get_tags_catalog(cache = Depends(get_tag_cache)) -> Dict[str, Any]:
             "endpoint": "/api/v1/themes/goblins",
         },
         {
-            "description": "Color-specific theme (Goblin Izzet)",
-            "slug": "goblins-izzet", 
-            "endpoint": "/api/v1/themes/goblins-izzet",
+            "description": "Color-specific theme (Goblins in Izzet colors)",
+            "slug": "izzet-goblins", 
+            "endpoint": "/api/v1/themes/izzet-goblins",
+            "note": "Use color-theme format for colored themes"
         },
         {
-            "description": "Another example (Aristocrats Orzhov)",
-            "slug": "aristocrats-orzhov",
-            "endpoint": "/api/v1/themes/aristocrats-orzhov",
+            "description": "Another example (Aristocrats in Orzhov colors)",
+            "slug": "orzhov-aristocrats",
+            "endpoint": "/api/v1/themes/orzhov-aristocrats",
         },
     ]
     
@@ -647,8 +648,9 @@ async def get_tags_catalog(cache = Depends(get_tag_cache)) -> Dict[str, Any]:
         "examples": examples,
         "usage": {
             "base_theme": "Use theme slug directly (e.g., 'goblins', 'aristocrats', 'tokens')",
-            "color_specific": "Use theme-color pattern (e.g., 'goblins-izzet', 'aristocrats-orzhov')",
+            "color_specific": "Use color-theme or theme-color pattern (e.g., 'izzet-goblins', 'goblins-izzet', 'orzhov-aristocrats')",
             "available_colors": list(COLOR_SLUG_MAP.keys()),
+            "note": "API accepts hyphenated slugs and automatically converts to correct EDHRec URL format"
         },
         "timestamp": datetime.utcnow().isoformat(),
     }
