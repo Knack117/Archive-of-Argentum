@@ -1267,14 +1267,16 @@ class DeckValidator:
     
     def _detect_combos(self, cards: List[DeckCard], combo_pairs: List[tuple]) -> List[tuple]:
         """
-        Detect complete 2-card combos in the deck.
+        Detect complete 2-card combos in the deck (case-insensitive).
         Returns list of combo pairs found where BOTH pieces are present.
         """
-        card_names = {card.name for card in cards}
+        # Create normalized card name lookup
+        normalized_cards = {card.name.lower().strip() for card in cards}
         detected_combos = []
         
         for card1, card2 in combo_pairs:
-            if card1 in card_names and card2 in card_names:
+            # Normalize combo card names for comparison
+            if card1.lower().strip() in normalized_cards and card2.lower().strip() in normalized_cards:
                 detected_combos.append((card1, card2))
         
         return detected_combos
