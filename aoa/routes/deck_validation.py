@@ -1741,35 +1741,25 @@ class DeckValidator:
         return candidates
 
     async def _get_commander_salt_score(self, commander_name: str) -> float:
-        """Get salt score for a commander from EDHRec or cache (with fuzzy lookup)."""
+        """Get salt score for a commander from EDHRec or cache (with enhanced fuzzy lookup)."""
         if not commander_name:
             return 0.0
 
         salt_cache = get_salt_cache()
         await salt_cache.ensure_loaded()
 
-        # Generate name variants
-        candidates = self._generate_commander_lookup_names(commander_name)
-        normalized_candidates = [c.lower().replace(",", "").replace("’", "'") for c in candidates]
+        # 1️⃣ Try enhanced cache match with comprehensive variants
+        cache_score = salt_cache.get_card_salt_with_variants(commander_name)
+        if cache_score and cache_score > 0:
+            logger.debug(f"Found commander '{commander_name}' salt score via enhanced lookup: {cache_score}")
+            return round(cache_score, 2)
 
-        # 1️⃣ Try exact cache match
-        for candidate in candidates:
-            cache_score = salt_cache.get_card_salt(candidate)
-            if cache_score and cache_score > 0:
-                return round(cache_score, 2)
-
-        # 2️⃣ Try lowercase or comma-stripped variants
-        for name in normalized_candidates:
-            for cached_name, salt in salt_cache.get_all_salt_scores().items():
-                normalized_cached = cached_name.lower().replace(",", "").replace("’", "'")
-                if normalized_cached == name:
-                    return round(salt, 2)
-
-        # 3️⃣ Try fuzzy partial match (e.g., "Aesi" inside "Aesi Tyrant of Gyre Strait")
-        for name in normalized_candidates:
-            for cached_name, salt in salt_cache.get_all_salt_scores().items():
-                if name in cached_name.lower() and salt > 0:
-                    return round(salt, 2)
+        # 2️⃣ Fallback to exact match with centralized normalization
+        normalized_commander = SaltCacheService.normalize_card_name(commander_name)
+        cache_score = salt_cache.get_card_salt(normalized_commander)
+        if cache_score and cache_score > 0:
+            logger.debug(f"Found commander '{commander_name}' salt score via basic lookup: {cache_score}")
+            return round(cache_score, 2)
 
         # 4️⃣ Final fallback - use EDHRec direct lookup
         try:
