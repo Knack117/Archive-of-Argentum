@@ -277,11 +277,13 @@ async def get_banned_cards(api_key: str = Depends(verify_api_key)) -> Dict[str, 
 
 @router.get("/mass-land-destruction")
 async def get_mass_land_destruction(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
-    """Get list of Mass Land Destruction cards from Moxfield.
+    """Get list of Mass Land Destruction cards from Scryfall.
     
-    Returns cards identified as 'Mass Land Denial' by Wizards of the Coast.
+    Returns cards that match the Mass Land Denial criteria as defined by Wizards of the Coast.
     These cards regularly destroy, exile, and bounce other lands, keep lands tapped,
     or change what mana is produced by four or more lands per player without replacing them.
+    
+    Note: Uses Scryfall search queries to identify MLD cards based on card text patterns.
     """
     try:
         cards = await fetch_mass_land_destruction()
@@ -290,10 +292,10 @@ async def get_mass_land_destruction(api_key: str = Depends(verify_api_key)) -> D
             "success": True,
             "data": cards,
             "count": len(cards),
-            "source": "moxfield",
-            "url": "https://moxfield.com/commanderbrackets/masslanddenial",
+            "source": "scryfall",
             "description": "Mass Land Denial cards as defined by Wizards of the Coast",
             "definition": "Cards that regularly destroy, exile, and bounce other lands, keep lands tapped, or change what mana is produced by four or more lands per player without replacing them.",
+            "note": "Data sourced from Scryfall using multiple search queries to match MLD criteria",
             "timestamp": datetime.utcnow().isoformat(),
         }
         
