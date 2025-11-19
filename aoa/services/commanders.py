@@ -261,7 +261,7 @@ def extract_commander_json_data(payload: Dict[str, Any]) -> Dict[str, Any]:
         panels.get("jsonCardLists"),
     ]
 
-    categories: Dict[str, Dict[str, Any]] = {}
+    categories: Dict[str, List[Dict[str, Any]]] = {}
     for candidate in cardlists_sources:
         if not candidate:
             continue
@@ -277,22 +277,42 @@ def extract_commander_json_data(payload: Dict[str, Any]) -> Dict[str, Any]:
                 card_name = card.get("name") or card.get("cardname")
                 if not card_name:
                     continue
+                
+                # Extract raw values
+                num_decks = card.get("num_decks") or card.get("decks_in") or 0
+                potential_decks = card.get("potential_decks") or card.get("potential") or 1
+                synergy_raw = card.get("synergy_percentage") or card.get("synergy") or 0
+                inclusion_raw = card.get("inclusion_percentage") or card.get("inclusion")
+                
+                # Calculate percentages
+                # Synergy is typically 0-1 decimal, convert to percentage
+                synergy_percentage = synergy_raw * 100 if synergy_raw and synergy_raw <= 1 else synergy_raw
+                
+                # Inclusion percentage: calculate from num_decks/potential_decks if not already a percentage
+                if inclusion_raw and inclusion_raw > 1:
+                    # Already a percentage
+                    inclusion_percentage = inclusion_raw
+                else:
+                    # Calculate from counts
+                    inclusion_percentage = (num_decks / potential_decks * 100) if potential_decks > 0 else 0
+                
+                card_url = card.get("card_url") or card.get("url") or ""
+                if card_url and not card_url.startswith("http"):
+                    card_url = f"{EDHREC_BASE_URL}{card_url}"
+                
                 normalized_cards.append(
                     {
                         "name": card_name,
-                        "num_decks": card.get("num_decks") or card.get("decks_in"),
-                        "potential_decks": card.get("potential_decks") or card.get("potential"),
-                        "inclusion_percentage": card.get("inclusion_percentage")
-                        or card.get("inclusion")
-                        or card.get("popularity"),
-                        "synergy_percentage": card.get("synergy_percentage")
-                        or card.get("synergy"),
+                        "num_decks": num_decks,
+                        "potential_decks": potential_decks,
+                        "inclusion_percentage": round(inclusion_percentage, 1),
+                        "synergy_percentage": round(synergy_percentage, 1),
                         "sanitized_name": card.get("sanitized_name") or card.get("sanitized"),
-                        "card_url": card.get("card_url") or card.get("url"),
+                        "card_url": card_url,
                     }
                 )
             if normalized_cards:
-                categories[header] = {"cards": normalized_cards}
+                categories[header] = normalized_cards
         if categories:
             break
 
