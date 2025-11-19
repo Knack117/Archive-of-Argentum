@@ -20,6 +20,114 @@ router = APIRouter(prefix="/api/v1", tags=["combos"])
 logger = logging.getLogger(__name__)
 
 
+# Late game 2-card combos from EDHRec - acceptable for play in Brackets 3, 4, and 5
+# Source: https://edhrec.com/combos/late-game-2-card-combos
+LATE_GAME_COMBOS = [
+    {"cards": ["Aetherflux Reservoir", "Exquisite Blood"], "effects": ["Infinite lifegain", "Infinite damage"]},
+    {"cards": ["Sheoldred, the Apocalypse", "Peer into the Abyss"], "effects": ["Draw half deck", "Massive damage"]},
+    {"cards": ["Orcish Bowmasters", "Peer into the Abyss"], "effects": ["Draw half deck", "Massive damage and tokens"]},
+    {"cards": ["Peer into the Abyss", "Underworld Dreams"], "effects": ["Draw half deck", "Massive damage"]},
+    {"cards": ["Niv-Mizzet, Visionary", "Niv-Mizzet, Parun"], "effects": ["Infinite draw", "Infinite damage"]},
+    {"cards": ["Aurelia, the Warleader", "Helm of the Host"], "effects": ["Infinite combat phases"]},
+    {"cards": ["Vraska, Betrayal's Sting", "Vorinclex, Monstrous Raider"], "effects": ["Instant ultimate", "Win the game"]},
+    {"cards": ["Psychosis Crawler", "Peer into the Abyss"], "effects": ["Draw half deck", "Massive damage"]},
+    {"cards": ["Jeska's Will", "Reiterate"], "effects": ["Infinite mana", "Infinite storm count"]},
+    {"cards": ["Dragon Tempest", "Ancient Gold Dragon"], "effects": ["Massive damage on ETB"]},
+    {"cards": ["Polyraptor", "Marauding Raptor"], "effects": ["Infinite tokens", "Infinite damage"]},
+    {"cards": ["Mana Geyser", "Reiterate"], "effects": ["Infinite mana", "Infinite storm count"]},
+    {"cards": ["Approach of the Second Sun", "Mystical Tutor"], "effects": ["Quick second cast", "Win the game"]},
+    {"cards": ["Teferi, Temporal Archmage", "The Chain Veil"], "effects": ["Infinite planeswalker activations", "Infinite mana"]},
+    {"cards": ["Approach of the Second Sun", "Windfall"], "effects": ["Quick redraw", "Win the game"]},
+    {"cards": ["Old Gnawbone", "Hellkite Charger"], "effects": ["Infinite combat phases", "Infinite treasure"]},
+    {"cards": ["The World Tree", "Maskwood Nexus"], "effects": ["Put all gods onto battlefield"]},
+    {"cards": ["Aggravated Assault", "Old Gnawbone"], "effects": ["Infinite combat phases", "Infinite treasure"]},
+    {"cards": ["Beacon of Immortality", "Sanguine Bond"], "effects": ["Double life", "Massive damage"]},
+    {"cards": ["Ob Nixilis, the Hate-Twisted", "Peer into the Abyss"], "effects": ["Draw half deck", "Massive damage"]},
+    {"cards": ["Cultivator Colossus", "Abundance"], "effects": ["Put all lands onto battlefield", "Draw remaining deck"]},
+    {"cards": ["Niv-Mizzet, Visionary", "Niv-Mizzet, the Firemind"], "effects": ["Infinite draw", "Infinite damage"]},
+    {"cards": ["Duskmantle Guildmage", "Maddening Cacophony"], "effects": ["Mill half deck", "Massive damage"]},
+    {"cards": ["Brass's Bounty", "Revel in Riches"], "effects": ["Massive treasure", "Potential win"]},
+    {"cards": ["Fleet Swallower", "Bruvac the Grandiloquent"], "effects": ["Mill entire library"]},
+    {"cards": ["Peer into the Abyss", "Bloodletter of Aclazotz"], "effects": ["Draw half deck", "Doubled damage"]},
+    {"cards": ["Orthion, Hero of Lavabrink", "Terror of the Peaks"], "effects": ["Token copies", "Massive damage"]},
+    {"cards": ["Maze's End", "Reshape the Earth"], "effects": ["Get all gates", "Win the game"]},
+    {"cards": ["Approach of the Second Sun", "Reprieve"], "effects": ["Bounce and recast", "Win the game"]},
+    {"cards": ["Riverchurn Monument", "Maddening Cacophony"], "effects": ["Mill combo", "Massive damage"]},
+    {"cards": ["Aurelia, the Warleader", "Sword of Hearth and Home"], "effects": ["Infinite combat phases"]},
+    {"cards": ["Exquisite Blood", "Defiant Bloodlord"], "effects": ["Infinite lifegain", "Infinite damage"]},
+    {"cards": ["Razorkin Needlehead", "Peer into the Abyss"], "effects": ["Draw half deck", "Massive damage"]},
+    {"cards": ["Enter the Infinite", "Thassa's Oracle"], "effects": ["Draw entire deck", "Win the game"]},
+    {"cards": ["Peer into the Abyss", "Alhammarret's Archive"], "effects": ["Draw most of deck", "Doubled draw"]},
+    {"cards": ["Jace, Wielder of Mysteries", "Enter the Infinite"], "effects": ["Draw entire deck", "Win the game"]},
+    {"cards": ["Drogskol Reaver", "Queza, Augur of Agonies"], "effects": ["Infinite draw", "Infinite damage"]},
+    {"cards": ["Bootleggers' Stash", "Revel in Riches"], "effects": ["Massive treasure", "Potential win"]},
+    {"cards": ["Astral Dragon", "Cursed Mirror"], "effects": ["Infinite token copies"]},
+    {"cards": ["Kudo, King Among Bears", "Elesh Norn, Grand Cenobite"], "effects": ["One-sided board wipe"]},
+    {"cards": ["Old Gnawbone", "Revel in Riches"], "effects": ["Massive treasure", "Potential win"]},
+    {"cards": ["Thousand-Year Storm", "Reiterate"], "effects": ["Infinite storm copies"]},
+    {"cards": ["Brine Elemental", "Vesuvan Shapeshifter"], "effects": ["Opponents skip untap steps"]},
+    {"cards": ["Biovisionary", "Rite of Replication"], "effects": ["Win the game with copies"]},
+    {"cards": ["Approach of the Second Sun", "Narset's Reversal"], "effects": ["Bounce and recast", "Win the game"]},
+    {"cards": ["Maze's End", "Scapeshift"], "effects": ["Get all gates", "Win the game"]},
+    {"cards": ["Mikaeus, the Unhallowed", "Triskelion"], "effects": ["Infinite damage"]},
+    {"cards": ["Vito, Thorn of the Dusk Rose", "Shard of the Nightbringer"], "effects": ["Halve life", "Massive damage"]},
+    {"cards": ["Shard of the Nightbringer", "Sanguine Bond"], "effects": ["Halve life", "Massive damage"]},
+    {"cards": ["Approach of the Second Sun", "Demonic Tutor"], "effects": ["Quick second cast", "Win the game"]},
+    {"cards": ["Toxrill, the Corrosive", "Maha, Its Feathers Night"], "effects": ["Instant board wipe", "Token generation"]},
+    {"cards": ["Wanderwine Prophets", "Deeproot Pilgrimage"], "effects": ["Infinite extra turns"]},
+    {"cards": ["Peer into the Abyss", "Teferi's Ageless Insight"], "effects": ["Draw most of deck", "Doubled draw"]},
+    {"cards": ["Vizkopa Guildmage", "Revival // Revenge"], "effects": ["Double life", "Massive damage"]},
+    {"cards": ["Be'lakor, the Dark Master", "Rite of Replication"], "effects": ["Massive damage from ETB"]},
+    {"cards": ["Brass's Bounty", "Reiterate"], "effects": ["Infinite treasure", "Infinite mana"]},
+    {"cards": ["The World Tree", "Purphoros, God of the Forge"], "effects": ["Put all gods onto battlefield", "Massive damage"]},
+    {"cards": ["Mindslaver", "Academy Ruins"], "effects": ["Lock opponent out of game"]},
+    {"cards": ["Astarion, the Decadent", "Blood Tribute"], "effects": ["Halve life", "Massive lifegain"]},
+    {"cards": ["Scourge of the Throne", "Helm of the Host"], "effects": ["Infinite combat phases"]},
+    {"cards": ["Emry, Lurker of the Loch", "Mindslaver"], "effects": ["Lock opponent out of game"]},
+    {"cards": ["Vizkopa Guildmage", "Beacon of Immortality"], "effects": ["Double life", "Massive damage"]},
+    {"cards": ["Toralf, God of Fury", "Star of Extinction"], "effects": ["Chain massive damage"]},
+    {"cards": ["Palinchron", "Deadeye Navigator"], "effects": ["Infinite mana"]},
+    {"cards": ["Ad Nauseam", "Teferi's Protection"], "effects": ["Draw entire deck safely"]},
+    {"cards": ["Bloodletter of Aclazotz", "Shard of the Nightbringer"], "effects": ["Halve life twice", "Massive damage"]},
+    {"cards": ["Drogskol Reaver", "Shabraz, the Skyshark"], "effects": ["Infinite draw", "Infinite counters"]},
+    {"cards": ["Riverchurn Monument", "Cut Your Losses"], "effects": ["Mill combo"]},
+    {"cards": ["Approach of the Second Sun", "Vampiric Tutor"], "effects": ["Quick second cast", "Win the game"]},
+    {"cards": ["Akki Battle Squad", "Helm of the Host"], "effects": ["Infinite combat phases"]},
+    {"cards": ["Grievous Wound", "Wound Reflection"], "effects": ["Halve life", "Doubled damage"]},
+    {"cards": ["Havoc Festival", "Wound Reflection"], "effects": ["Halve life", "Doubled damage"]},
+    {"cards": ["Realmbreaker, the Invasion Tree", "Maskwood Nexus"], "effects": ["Put all creatures onto battlefield"]},
+    {"cards": ["Body of Knowledge", "Niv-Mizzet, the Firemind"], "effects": ["Infinite draw", "Infinite damage"]},
+    {"cards": ["Bloodthirsty Conqueror", "Defiant Bloodlord"], "effects": ["Infinite damage"]},
+    {"cards": ["Drogskol Reaver", "Sheoldred, the Apocalypse"], "effects": ["Infinite draw", "Infinite lifegain"]},
+    {"cards": ["Orthion, Hero of Lavabrink", "Fanatic of Mogis"], "effects": ["Token copies", "Massive damage"]},
+    {"cards": ["The World Tree", "Arcane Adaptation"], "effects": ["Put all gods onto battlefield"]},
+    {"cards": ["The World Tree", "Rukarumel, Biologist"], "effects": ["Put all gods onto battlefield"]},
+    {"cards": ["Brass's Bounty", "Mechanized Production"], "effects": ["Massive treasure", "Potential win"]},
+    {"cards": ["Approach of the Second Sun", "Personal Tutor"], "effects": ["Quick second cast", "Win the game"]},
+    {"cards": ["Mirkwood Bats", "Plague of Vermin"], "effects": ["Pay life for damage"]},
+    {"cards": ["Heartless Hidetsugu", "Angrath's Marauders"], "effects": ["Doubled damage", "Massive damage"]},
+    {"cards": ["Solemnity", "Decree of Silence"], "effects": ["Lock opponents out of spells"]},
+    {"cards": ["Shard of the Nightbringer", "Enduring Tenacity"], "effects": ["Halve life", "Drain trigger"]},
+    {"cards": ["Gisela, Blade of Goldnight", "Heartless Hidetsugu"], "effects": ["Doubled damage", "Kill opponents"]},
+    {"cards": ["Avacyn, Angel of Hope", "Worldslayer"], "effects": ["One-sided board wipe", "Keep your board"]},
+    {"cards": ["Avacyn, Angel of Hope", "Nevinyrral's Disk"], "effects": ["One-sided board wipe", "Keep your board"]},
+    {"cards": ["Approach of the Second Sun", "Scroll Rack"], "effects": ["Quick redraw", "Win the game"]},
+    {"cards": ["Blightsteel Colossus", "Chandra's Ignition"], "effects": ["Infect damage to all opponents"]},
+    {"cards": ["Zedruu the Greathearted", "Transcendence"], "effects": ["Donate Transcendence", "Kill opponent"]},
+    {"cards": ["Terror of the Peaks", "Rite of Replication"], "effects": ["Token copies", "Massive damage"]},
+    {"cards": ["Twinning Staff", "Dramatic Reversal"], "effects": ["Infinite mana", "Infinite untaps"]},
+    {"cards": ["Hellkite Charger", "Bear Umbra"], "effects": ["Infinite combat phases"]},
+    {"cards": ["Tivit, Seller of Secrets", "Deadeye Navigator"], "effects": ["Infinite votes", "Infinite value"]},
+    {"cards": ["Fraying Omnipotence", "Wound Reflection"], "effects": ["Halve life", "Doubled damage"]},
+    {"cards": ["Doppelgang", "Biovisionary"], "effects": ["Win the game with copies"]},
+    {"cards": ["Approach of the Second Sun", "Diabolic Tutor"], "effects": ["Quick second cast", "Win the game"]},
+    {"cards": ["Venser, Shaper Savant", "Approach of the Second Sun"], "effects": ["Bounce and recast", "Win the game"]},
+]
+
+# Allowed brackets for late-game combos
+LATE_GAME_COMBO_BRACKETS = ["3", "4", "5"]
+
+
 async def fetch_combo_details_from_page(combo_id: str) -> Dict[str, Any]:
     """Fetch a combo page and extract card names, results, and other metadata."""
     if not combo_id:
@@ -445,5 +553,212 @@ async def debug_combo_search(
             "api_endpoint_working": True,
         },
         "sample_result": first_result,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+
+def check_late_game_combos_in_cards(card_names: List[str]) -> List[Dict[str, Any]]:
+    """
+    Check if any late-game 2-card combos are present in the given card list.
+    
+    Args:
+        card_names: List of card names to check
+        
+    Returns:
+        List of combos found in the card list
+    """
+    found_combos = []
+    # Normalize card names for comparison
+    normalized_cards = {name.lower().strip() for name in card_names}
+    
+    for combo in LATE_GAME_COMBOS:
+        combo_cards = [card.lower().strip() for card in combo["cards"]]
+        # Check if both cards of the combo are in the deck
+        if all(card in normalized_cards for card in combo_cards):
+            found_combos.append({
+                "cards": combo["cards"],
+                "effects": combo["effects"],
+                "acceptable_brackets": LATE_GAME_COMBO_BRACKETS,
+                "bracket_recommendation": "Acceptable for brackets 3, 4, and 5"
+            })
+    
+    return found_combos
+
+
+@router.get("/combos/late-game", response_model=Dict[str, Any])
+async def get_late_game_combos(
+    api_key: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """
+    Get the complete list of late-game 2-card combos.
+    
+    These combos are considered acceptable for play in brackets 3, 4, and 5
+    according to community voting on EDHRec.
+    """
+    return {
+        "success": True,
+        "total_combos": len(LATE_GAME_COMBOS),
+        "acceptable_brackets": LATE_GAME_COMBO_BRACKETS,
+        "bracket_description": "Acceptable for brackets 3 (Upgraded), 4 (Optimized), and 5 (cEDH)",
+        "combos": [
+            {
+                "cards": combo["cards"],
+                "effects": combo["effects"],
+                "card_1": combo["cards"][0],
+                "card_2": combo["cards"][1]
+            }
+            for combo in LATE_GAME_COMBOS
+        ],
+        "source": "https://edhrec.com/combos/late-game-2-card-combos",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.post("/combos/check-late-game", response_model=Dict[str, Any])
+async def check_deck_for_late_game_combos(
+    card_names: List[str],
+    api_key: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """
+    Check if a card list contains any late-game 2-card combos.
+    
+    Send a list of card names in the request body.
+    Returns any late-game combos found and their acceptability in different brackets.
+    
+    Example request body:
+    ```json
+    ["Mikaeus, the Unhallowed", "Triskelion", "Sol Ring", "Command Tower"]
+    ```
+    """
+    if not card_names:
+        raise HTTPException(
+            status_code=400,
+            detail="Card names list is required and cannot be empty",
+        )
+    
+    found_combos = check_late_game_combos_in_cards(card_names)
+    
+    return {
+        "success": True,
+        "cards_checked": len(card_names),
+        "combos_found": len(found_combos),
+        "combos": found_combos,
+        "recommendation": (
+            f"Found {len(found_combos)} late-game combo(s). "
+            "These combos are acceptable for brackets 3, 4, and 5."
+        ) if found_combos else "No late-game combos detected in this card list.",
+        "acceptable_brackets": LATE_GAME_COMBO_BRACKETS,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/combos/search-late-game", response_model=Dict[str, Any])
+async def search_late_game_combos_by_card(
+    card_name: str = Query(..., description="Card name to search for in late-game combos"),
+    api_key: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """
+    Search for late-game combos containing a specific card.
+    
+    Returns all late-game 2-card combos that include the specified card.
+    """
+    if not card_name or not card_name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Card name is required and cannot be empty",
+        )
+    
+    normalized_search = card_name.lower().strip()
+    matching_combos = []
+    
+    for combo in LATE_GAME_COMBOS:
+        if any(normalized_search in card.lower() for card in combo["cards"]):
+            matching_combos.append({
+                "cards": combo["cards"],
+                "effects": combo["effects"],
+                "partner_card": [card for card in combo["cards"] if normalized_search not in card.lower()][0] if len(combo["cards"]) == 2 else None,
+                "acceptable_brackets": LATE_GAME_COMBO_BRACKETS,
+            })
+    
+    return {
+        "success": True,
+        "search_query": card_name,
+        "combos_found": len(matching_combos),
+        "combos": matching_combos,
+        "acceptable_brackets": LATE_GAME_COMBO_BRACKETS,
+        "bracket_recommendation": "These combos are acceptable for brackets 3, 4, and 5",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/combos/info", response_model=Dict[str, Any])
+async def get_combo_api_info(
+    api_key: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """
+    Get information about the combo API endpoints.
+    
+    Provides an overview of available endpoints, combo categories, and usage examples.
+    """
+    return {
+        "success": True,
+        "name": "Commander Combo API",
+        "version": "1.0.0",
+        "description": "Search Commander combos and check for bracket-appropriate 2-card combinations",
+        "endpoints": {
+            "/api/v1/combos/commander/{commander_name}": {
+                "method": "GET",
+                "description": "Fetch all combos for a specific commander from Commander Spellbook",
+                "example": "/api/v1/combos/commander/Kinnan,%20Bonder%20Prodigy"
+            },
+            "/api/v1/combos/search": {
+                "method": "GET",
+                "description": "Search for combos containing a specific card",
+                "parameters": {"card_name": "Card name to search for"},
+                "example": "/api/v1/combos/search?card_name=Thassa's%20Oracle"
+            },
+            "/api/v1/combos/late-game": {
+                "method": "GET",
+                "description": "Get the complete list of late-game 2-card combos (97 combos)",
+                "bracket_info": "Acceptable for brackets 3, 4, and 5"
+            },
+            "/api/v1/combos/check-late-game": {
+                "method": "POST",
+                "description": "Check if a card list contains any late-game 2-card combos",
+                "body": "Array of card names",
+                "example_body": '["Mikaeus, the Unhallowed", "Triskelion"]'
+            },
+            "/api/v1/combos/search-late-game": {
+                "method": "GET",
+                "description": "Search for late-game combos containing a specific card",
+                "parameters": {"card_name": "Card name to search for"},
+                "example": "/api/v1/combos/search-late-game?card_name=Approach%20of%20the%20Second%20Sun"
+            },
+            "/api/v1/debug/combos/test": {
+                "method": "GET",
+                "description": "Debug endpoint to test combo search",
+                "parameters": {"query": "Test search query"}
+            }
+        },
+        "combo_categories": {
+            "commander_spellbook": {
+                "description": "Full combo database from Commander Spellbook",
+                "includes": "All card combos with effects and results"
+            },
+            "late_game_combos": {
+                "description": "Community-voted late-game 2-card combos",
+                "total": len(LATE_GAME_COMBOS),
+                "acceptable_brackets": LATE_GAME_COMBO_BRACKETS,
+                "source": "https://edhrec.com/combos/late-game-2-card-combos"
+            }
+        },
+        "bracket_system": {
+            "1_exhibition": "No 2-card combos",
+            "2_core": "No 2-card combos",
+            "3_upgraded": "Late-game combos acceptable (after turn 6)",
+            "4_optimized": "All combos acceptable",
+            "5_cedh": "All combos acceptable"
+        },
         "timestamp": datetime.utcnow().isoformat(),
     }
