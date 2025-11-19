@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -312,7 +312,7 @@ class DeckValidator:
     async def validate_deck(self, request: DeckValidationRequest) -> DeckValidationResponse:
         """Main validation method"""
         try:
-            deck_entries = self._resolve_decklist_entries(request)
+            deck_entries, detected_commander = self._resolve_decklist_entries(request)
             # Parse and normalize decklist
             cards = await self._build_deck_cards(deck_entries)
 
@@ -320,7 +320,9 @@ class DeckValidator:
 
             # Load data for salt scoring
             data = await self._load_authoritative_data()
-            
+
+            commander_name = request.commander or detected_commander
+
             # Calculate deck salt score using cache service
             salt_cache = get_salt_cache()
             await salt_cache.ensure_loaded()
@@ -333,12 +335,12 @@ class DeckValidator:
 
             # Get commander salt score (with deck average fallback if needed)
             commander_salt_score = 0.0
-            if request.commander:
+            if commander_name:
                 commander_salt_score = await self._get_commander_salt_score(
-                    request.commander,
+                    commander_name,
                     fallback_average=deck_salt_score,
                 )
-            
+
             # Calculate combined salt score (weighted average)
             combined_salt_score = round((commander_salt_score + deck_salt_score) / 2, 2)
             
@@ -361,7 +363,7 @@ class DeckValidator:
             legality_results = {}
             if request.validate_legality:
                 legality_results = await self._validate_legality(
-                    cards, request.commander, duplicate_cards=illegal_duplicates
+                    cards, commander_name, duplicate_cards=illegal_duplicates
                 )
             
             # Validate bracket
@@ -381,7 +383,7 @@ class DeckValidator:
                 success=True,
                 deck_summary={
                     "total_cards": self._calculate_total_card_count(cards),
-                    "commander": request.commander,
+                    "commander": commander_name,
                     "target_bracket": request.target_bracket,
                     "has_duplicates": bool(illegal_duplicates),
                     "illegal_duplicates": illegal_duplicates,
@@ -409,9 +411,10 @@ class DeckValidator:
                 salt_scores={}
             )
     
-    def _resolve_decklist_entries(self, request: DeckValidationRequest) -> List[str]:
+    def _resolve_decklist_entries(self, request: DeckValidationRequest) -> Tuple[List[str], Optional[str]]:
         """Combine decklist inputs (list, text blob, chunks, URL) into a normalized list."""
         entries: List[str] = []
+        detected_commander: Optional[str] = None
 
         if request.decklist:
             entries.extend([line.strip() for line in request.decklist if line and line.strip()])
@@ -424,17 +427,19 @@ class DeckValidator:
                 entries.extend(self._parse_decklist_block(chunk))
 
         if request.decklist_url:
-            url_entries = self._extract_decklist_from_url(request.decklist_url)
+            url_entries, commander = self._extract_decklist_from_url(request.decklist_url)
             entries.extend(url_entries)
+            if commander and not detected_commander:
+                detected_commander = commander
 
         entries = [line for line in entries if line]
 
         if not entries:
             raise ValueError("Decklist cannot be empty after processing input.")
 
-        return entries
+        return entries, detected_commander
 
-    def _extract_decklist_from_url(self, deck_url: str) -> List[str]:
+    def _extract_decklist_from_url(self, deck_url: str) -> Tuple[List[str], Optional[str]]:
         """
         Extract decklist from supported platform URLs (Moxfield, Archidekt).
         
@@ -442,7 +447,7 @@ class DeckValidator:
             deck_url: URL to a deck on a supported platform
             
         Returns:
-            List of decklist entries
+            Tuple containing a list of decklist entries and an optional detected commander name
             
         Raises:
             ValueError: If URL is not supported or extraction fails
@@ -464,7 +469,7 @@ class DeckValidator:
             supported_platforms = ["moxfield.com", "archidekt.com"]
             raise ValueError(f"URL must be from a supported platform: {', '.join(supported_platforms)}")
 
-    def _extract_from_moxfield(self, deck_url: str) -> List[str]:
+    def _extract_from_moxfield(self, deck_url: str) -> Tuple[List[str], Optional[str]]:
         """Extract decklist from Moxfield URL."""
         import httpx
         import mtg_parser
@@ -484,24 +489,22 @@ class DeckValidator:
                 
             if not cards:
                 raise ValueError("No cards found in the Moxfield deck")
-                
-            # Convert Card objects to list format
-            decklist_entries = []
-            for card in cards:
-                if card.quantity and card.quantity > 0:
-                    if card.quantity == 1:
-                        decklist_entries.append(card.name)
-                    else:
-                        decklist_entries.append(f"{card.quantity} {card.name}")
-            
-            logger.info(f"Successfully extracted {len(decklist_entries)} cards from Moxfield deck: {deck_url}")
-            return decklist_entries
+
+            decklist_entries, commander = self._convert_parser_cards(cards)
+
+            logger.info(
+                "Successfully extracted %s cards from Moxfield deck: %s (commander detected: %s)",
+                len(decklist_entries),
+                deck_url,
+                commander or "unknown",
+            )
+            return decklist_entries, commander
             
         except Exception as exc:
             logger.error(f"Failed to extract deck from Moxfield {deck_url}: {exc}")
             raise ValueError(f"Failed to extract decklist from Moxfield URL: {str(exc)}")
 
-    def _extract_from_archidekt(self, deck_url: str) -> List[str]:
+    def _extract_from_archidekt(self, deck_url: str) -> Tuple[List[str], Optional[str]]:
         """Extract decklist from Archidekt URL."""
         import mtg_parser
         
@@ -518,18 +521,16 @@ class DeckValidator:
             
             if not cards:
                 raise ValueError("No cards found in the Archidekt deck")
-                
-            # Convert Card objects to list format
-            decklist_entries = []
-            for card in cards:
-                if card.quantity and card.quantity > 0:
-                    if card.quantity == 1:
-                        decklist_entries.append(card.name)
-                    else:
-                        decklist_entries.append(f"{card.quantity} {card.name}")
-            
-            logger.info(f"Successfully extracted {len(decklist_entries)} cards from Archidekt deck: {deck_url}")
-            return decklist_entries
+
+            decklist_entries, commander = self._convert_parser_cards(cards)
+
+            logger.info(
+                "Successfully extracted %s cards from Archidekt deck: %s (commander detected: %s)",
+                len(decklist_entries),
+                deck_url,
+                commander or "unknown",
+            )
+            return decklist_entries, commander
             
         except Exception as exc:
             logger.error(f"Failed to extract deck from Archidekt {deck_url}: {exc}")
@@ -623,6 +624,64 @@ class DeckValidator:
                 cards.append(f"{quantity} {card_name}")
         
         return cards if len(cards) >= 2 else [text]
+
+    def _convert_parser_cards(self, cards: Iterable[Any]) -> Tuple[List[str], Optional[str]]:
+        """Convert parser Card objects to decklist entries while detecting commanders."""
+        decklist_entries: List[str] = []
+        commander_candidates: List[str] = []
+
+        for card in cards:
+            name = getattr(card, "name", "").strip()
+            if not name:
+                continue
+
+            quantity = getattr(card, "quantity", 1) or 1
+            try:
+                quantity = int(quantity)
+            except (TypeError, ValueError):
+                quantity = 1
+
+            quantity = max(quantity, 1)
+
+            if quantity == 1:
+                decklist_entries.append(name)
+            else:
+                decklist_entries.append(f"{quantity} {name}")
+
+            tags = getattr(card, "tags", None) or []
+            normalized_tags = {str(tag).lower() for tag in tags if isinstance(tag, str)}
+            if "commander" in normalized_tags:
+                commander_candidates.append(name)
+
+        return decklist_entries, self._format_detected_commander(commander_candidates)
+
+    def _format_detected_commander(self, commander_candidates: List[str]) -> Optional[str]:
+        """Normalize and deduplicate detected commander names from deck sources."""
+        if not commander_candidates:
+            return None
+
+        unique: List[str] = []
+        seen = set()
+
+        for name in commander_candidates:
+            cleaned = name.strip()
+            if not cleaned:
+                continue
+
+            key = cleaned.lower()
+            if key in seen:
+                continue
+
+            seen.add(key)
+            unique.append(cleaned)
+
+        if not unique:
+            return None
+
+        if len(unique) == 1:
+            return unique[0]
+
+        return " + ".join(unique)
 
     async def _build_deck_cards(self, decklist: List[str]) -> List[DeckCard]:
         """Parse decklist and classify each card using authoritative scraped data."""
