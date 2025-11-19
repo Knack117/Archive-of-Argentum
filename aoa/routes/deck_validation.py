@@ -1741,24 +1741,36 @@ class DeckValidator:
         return candidates
 
     async def _get_commander_salt_score(self, commander_name: str) -> float:
-        """Get salt score for a commander from EDHRec or cache (with enhanced fuzzy lookup)."""
+        """
+        Get salt score for a commander using enhanced normalization and comprehensive lookup.
+        
+        This method ensures commander salt scores are found even when there are
+        name format mismatches between deck sources and EDHRec cache.
+        """
         if not commander_name:
+            logger.debug("Commander salt lookup: empty commander name, returning 0.0")
             return 0.0
 
         salt_cache = get_salt_cache()
         await salt_cache.ensure_loaded()
 
+        logger.debug(f"Commander salt lookup starting for: '{commander_name}'")
+
         # 1️⃣ Try enhanced cache match with comprehensive variants
         cache_score = salt_cache.get_card_salt_with_variants(commander_name)
+        logger.debug(f"Enhanced lookup for '{commander_name}': {cache_score}")
+        
         if cache_score and cache_score > 0:
-            logger.debug(f"Found commander '{commander_name}' salt score via enhanced lookup: {cache_score}")
+            logger.info(f"✅ FOUND commander '{commander_name}' salt score via enhanced lookup: {cache_score}")
             return round(cache_score, 2)
 
         # 2️⃣ Fallback to exact match with centralized normalization
         normalized_commander = SaltCacheService.normalize_card_name(commander_name)
         cache_score = salt_cache.get_card_salt(normalized_commander)
+        logger.debug(f"Basic normalized lookup for '{commander_name}' -> '{normalized_commander}': {cache_score}")
+        
         if cache_score and cache_score > 0:
-            logger.debug(f"Found commander '{commander_name}' salt score via basic lookup: {cache_score}")
+            logger.info(f"✅ FOUND commander '{commander_name}' salt score via normalized lookup: {cache_score}")
             return round(cache_score, 2)
 
         # 4️⃣ Final fallback - use EDHRec direct lookup
@@ -1915,6 +1927,47 @@ deck_validator = DeckValidator()
 # --------------------------------------------------------------------
 # Deck Validation API Endpoints
 # --------------------------------------------------------------------
+
+@router.get("/api/v1/deck/commander-salt/{commander_name}")
+async def get_commander_salt(
+    commander_name: str,
+    api_key: str = Depends(verify_api_key)
+) -> Dict[str, Any]:
+    """
+    Get the salt score for a specific commander with enhanced normalization.
+    
+    Args:
+        commander_name: The name of the commander
+        
+    Returns:
+        Commander name and salt score with debug information
+    """
+    from aoa.services.salt_cache import SaltCacheService
+    
+    salt_cache = get_salt_cache()
+    await salt_cache.ensure_loaded()
+    
+    # Use our enhanced lookup method
+    enhanced_score = salt_cache.get_card_salt_with_variants(commander_name)
+    basic_score = salt_cache.get_card_salt(commander_name)
+    normalized_score = salt_cache.get_card_salt(SaltCacheService.normalize_card_name(commander_name))
+    
+    # Generate debug information
+    variants = SaltCacheService.generate_name_variants(commander_name)
+    
+    logger.info(f"Commander salt query for '{commander_name}': enhanced={enhanced_score}, basic={basic_score}, normalized={normalized_score}")
+    
+    return {
+        "commander_name": commander_name,
+        "enhanced_lookup": enhanced_score,
+        "basic_lookup": basic_score,
+        "normalized_lookup": normalized_score,
+        "found": enhanced_score > 0,
+        "variants_count": len(variants),
+        "variants": variants[:5],  # Show first 5 variants for debugging
+        "cache_size": len(salt_cache.salt_data)
+    }
+
 
 @router.post("/api/v1/deck/validate", response_model=DeckValidationResponse)
 async def validate_deck(
@@ -2086,23 +2139,28 @@ async def get_card_salt_score(
     api_key: str = Depends(verify_api_key)
 ) -> Dict[str, Any]:
     """
-    Get the salt score for a specific card.
+    Get the salt score for a specific card using enhanced normalization.
     
     Args:
         card_name: The name of the card (case-insensitive)
     
     Returns:
-        Card name and salt score
+        Card name and salt score with enhanced lookup
     """
     salt_cache = get_salt_cache()
     await salt_cache.ensure_loaded()
     
-    salt_score = salt_cache.get_card_salt(card_name)
+    # Use enhanced lookup with comprehensive variant matching
+    salt_score = salt_cache.get_card_salt_with_variants(card_name)
+    
+    # Log for debugging
+    logger.debug(f"Enhanced salt lookup for '{card_name}': {salt_score}")
     
     return {
         "card_name": card_name,
         "salt_score": salt_score,
-        "found": salt_score > 0
+        "found": salt_score > 0,
+        "lookup_method": "enhanced_variants"
     }
 
 
