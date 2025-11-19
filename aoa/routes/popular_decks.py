@@ -26,7 +26,8 @@ ARCHIDEKT_BRACKET_MAP = {
 
 async def scrape_moxfield_popular_decks(
     bracket: Optional[str] = None,
-    limit: int = 5
+    limit: int = 5,
+    commander: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Fetch top decks from Moxfield using their API.
@@ -34,6 +35,7 @@ async def scrape_moxfield_popular_decks(
     Args:
         bracket: Commander bracket (optional, for filtering - note: Moxfield doesn't have bracket filtering)
         limit: Number of decks to return (default 5)
+        commander: Commander name to filter by (optional)
         
     Returns:
         List of deck dictionaries with URL, views, has_primer, and other metadata
@@ -41,15 +43,27 @@ async def scrape_moxfield_popular_decks(
     decks = []
     
     try:
-        # Use Moxfield's public API to get decks
-        url = "https://api2.moxfield.com/v2/decks/all"
-        params = {
-            'pageNumber': 1,
-            'pageSize': limit * 2,  # Get extra in case we need to filter
-            'sortType': 'views',
-            'sortDirection': 'Descending',
-            'fmt': 'commander'
-        }
+        # Use search endpoint if commander is specified, otherwise use /all endpoint
+        if commander:
+            url = "https://api2.moxfield.com/v2/decks/search"
+            params = {
+                'pageNumber': 1,
+                'pageSize': limit,
+                'sortType': 'views',
+                'sortDirection': 'Descending',
+                'fmt': 'commander',
+                'filter': f'mainCard={commander}'
+            }
+        else:
+            url = "https://api2.moxfield.com/v2/decks/all"
+            params = {
+                'pageNumber': 1,
+                'pageSize': limit * 2,  # Get extra in case we need to filter
+                'sortType': 'views',
+                'sortDirection': 'Descending',
+                'fmt': 'commander'
+            }
+        
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
@@ -90,7 +104,7 @@ async def scrape_moxfield_popular_decks(
                     'last_updated': deck_info.get('lastUpdatedAtUtc', '')
                 })
         
-        logger.info(f"Fetched {len(decks)} decks from Moxfield API")
+        logger.info(f"Fetched {len(decks)} decks from Moxfield API" + (f" for commander '{commander}'" if commander else ""))
         return decks[:limit]
         
     except Exception as exc:
@@ -218,37 +232,55 @@ async def get_all_popular_decks(
         ge=1,
         le=20
     ),
+    commander: Optional[str] = Query(
+        None,
+        description="Filter by commander name (e.g., 'Brudiclad' or 'Brudiclad, Telchor Engineer')"
+    ),
     api_key: str = Depends(verify_api_key)
 ) -> Dict[str, Any]:
     """
     Get the top most viewed decks from both Moxfield and Archidekt without bracket filtering.
     
-    Returns 10 deck URLs total (5 from Moxfield, 5 from Archidekt) with metadata including:
+    When a commander is specified, only Moxfield results are returned (10 decks total).
+    Without a commander, returns decks from both sources (5 from each by default).
+    
+    Returns deck URLs with metadata including:
     - Deck URL
     - View count
     - Whether it includes a primer
     - Deck title
     - Source (moxfield or archidekt)
     - Bracket information (when available)
+    - Commander name (for search context)
     
     Args:
         limit_per_source: Number of decks to fetch from each source (default 5, max 20)
+        commander: Optional commander name to filter results
         
     Returns:
-        Dictionary containing decks from both sources with metadata including bracket info
+        Dictionary containing decks with metadata including bracket info
     """
-    logger.info(f"Fetching popular decks without bracket filter")
+    logger.info(f"Fetching popular decks" + (f" for commander '{commander}'" if commander else " without bracket filter"))
     
-    # Fetch decks from both sources without bracket filtering
-    moxfield_decks = await scrape_moxfield_popular_decks(
-        bracket=None,
-        limit=limit_per_source
-    )
-    
-    archidekt_decks = await scrape_archidekt_popular_decks(
-        bracket=None,
-        limit=limit_per_source
-    )
+    # If commander is specified, only use Moxfield (Archidekt doesn't support commander filtering)
+    if commander:
+        moxfield_decks = await scrape_moxfield_popular_decks(
+            bracket=None,
+            limit=10,
+            commander=commander
+        )
+        archidekt_decks = []
+    else:
+        # Fetch decks from both sources without filtering
+        moxfield_decks = await scrape_moxfield_popular_decks(
+            bracket=None,
+            limit=limit_per_source
+        )
+        
+        archidekt_decks = await scrape_archidekt_popular_decks(
+            bracket=None,
+            limit=limit_per_source
+        )
     
     # Combine results
     all_decks = moxfield_decks + archidekt_decks
@@ -267,6 +299,7 @@ async def get_all_popular_decks(
     
     return {
         "bracket_filter": None,
+        "commander_filter": commander,
         "total_decks": len(all_decks),
         "moxfield": {
             "count": len(moxfield_decks),
@@ -315,9 +348,19 @@ async def get_popular_decks_info(
             "optimized",
             "cedh"
         ],
+        "commander_filtering": {
+            "description": "Filter decks by commander name using the 'commander' query parameter",
+            "source": "Moxfield only (Archidekt commander filtering not available without headless browser)",
+            "decks_returned_with_commander": "10 decks from Moxfield",
+            "examples": [
+                "commander=Brudiclad",
+                "commander=Brudiclad, Telchor Engineer",
+                "commander=Yuriko"
+            ]
+        },
         "default_limit_per_source": 5,
         "max_limit_per_source": 20,
-        "total_decks_returned": "10 (5 from each source by default)",
+        "total_decks_returned": "10 (5 from each source by default, or 10 from Moxfield when commander is specified)",
         "example_usage": [
             {
                 "url": "/api/v1/popular-decks",
@@ -330,6 +373,14 @@ async def get_popular_decks_info(
             {
                 "url": "/api/v1/popular-decks?limit_per_source=10",
                 "description": "Get top 10 decks from each source (no bracket filter)"
+            },
+            {
+                "url": "/api/v1/popular-decks?commander=Brudiclad",
+                "description": "Get top 10 Brudiclad decks from Moxfield (any bracket)"
+            },
+            {
+                "url": "/api/v1/popular-decks/upgraded?commander=Brudiclad",
+                "description": "Get top 10 Brudiclad decks from Moxfield in Upgraded bracket"
             }
         ],
         "deck_metadata_included": [
@@ -358,24 +409,34 @@ async def get_popular_decks(
         ge=1,
         le=20
     ),
+    commander: Optional[str] = Query(
+        None,
+        description="Filter by commander name (e.g., 'Brudiclad' or 'Brudiclad, Telchor Engineer')"
+    ),
     api_key: str = Depends(verify_api_key)
 ) -> Dict[str, Any]:
     """
     Get the top most viewed decks for a given commander bracket from both Moxfield and Archidekt.
     
-    Returns 10 deck URLs total (5 from Moxfield, 5 from Archidekt) with metadata including:
+    When a commander is specified, only Moxfield results are returned (10 decks total).
+    Without a commander, returns decks from both sources (5 from each by default).
+    
+    Returns deck URLs with metadata including:
     - Deck URL
     - View count
     - Whether it includes a primer
     - Deck title
     - Source (moxfield or archidekt)
+    - Bracket information
+    - Commander name (for search context)
     
     Args:
         bracket: Commander bracket (exhibition, core, upgraded, optimized, cedh)
         limit_per_source: Number of decks to fetch from each source (default 5, max 20)
+        commander: Optional commander name to filter results
         
     Returns:
-        Dictionary containing decks from both sources with metadata
+        Dictionary containing decks with metadata
     """
     # Validate bracket
     valid_brackets = ["exhibition", "core", "upgraded", "optimized", "cedh"]
@@ -385,18 +446,27 @@ async def get_popular_decks(
             detail=f"Invalid bracket '{bracket}'. Must be one of: {', '.join(valid_brackets)}"
         )
     
-    logger.info(f"Fetching popular decks for bracket: {bracket}")
+    logger.info(f"Fetching popular decks for bracket: {bracket}" + (f" and commander '{commander}'" if commander else ""))
     
-    # Fetch decks from both sources concurrently
-    moxfield_decks = await scrape_moxfield_popular_decks(
-        bracket=bracket.lower(),
-        limit=limit_per_source
-    )
-    
-    archidekt_decks = await scrape_archidekt_popular_decks(
-        bracket=bracket.lower(),
-        limit=limit_per_source
-    )
+    # If commander is specified, only use Moxfield
+    if commander:
+        moxfield_decks = await scrape_moxfield_popular_decks(
+            bracket=bracket.lower(),
+            limit=10,
+            commander=commander
+        )
+        archidekt_decks = []
+    else:
+        # Fetch decks from both sources
+        moxfield_decks = await scrape_moxfield_popular_decks(
+            bracket=bracket.lower(),
+            limit=limit_per_source
+        )
+        
+        archidekt_decks = await scrape_archidekt_popular_decks(
+            bracket=bracket.lower(),
+            limit=limit_per_source
+        )
     
     # Combine results
     all_decks = moxfield_decks + archidekt_decks
@@ -415,6 +485,7 @@ async def get_popular_decks(
     
     return {
         "bracket_filter": bracket.lower(),
+        "commander_filter": commander,
         "total_decks": len(all_decks),
         "moxfield": {
             "count": len(moxfield_decks),
