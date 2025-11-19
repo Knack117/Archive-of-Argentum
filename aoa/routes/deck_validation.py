@@ -25,7 +25,7 @@ from aoa.models import (
     DeckValidationResponse,
 )
 from aoa.security import verify_api_key
-from aoa.services.salt_cache import get_salt_cache, refresh_salt_cache
+from aoa.services.salt_cache import SaltCacheService, get_salt_cache, refresh_salt_cache
 
 logger = logging.getLogger(__name__)
 
@@ -321,18 +321,23 @@ class DeckValidator:
             # Load data for salt scoring
             data = await self._load_authoritative_data()
             
-            # Get commander salt score
-            commander_salt_score = await self._get_commander_salt_score(request.commander) if request.commander else 0.0
-            
             # Calculate deck salt score using cache service
             salt_cache = get_salt_cache()
             await salt_cache.ensure_loaded()
-            
+
             card_names = [card.name for card in cards for _ in range(card.quantity)]
             salt_result = salt_cache.calculate_deck_salt(card_names)
-            
+
             # Use average salt score (per card) instead of total for proper scaling
             deck_salt_score = salt_result['average_salt']
+
+            # Get commander salt score (with deck average fallback if needed)
+            commander_salt_score = 0.0
+            if request.commander:
+                commander_salt_score = await self._get_commander_salt_score(
+                    request.commander,
+                    fallback_average=deck_salt_score,
+                )
             
             # Calculate combined salt score (weighted average)
             combined_salt_score = round((commander_salt_score + deck_salt_score) / 2, 2)
@@ -1688,7 +1693,6 @@ class DeckValidator:
         
         for card in cards:
             # Use centralized normalization from SaltCacheService
-            from aoa.services.salt_cache import SaltCacheService
             normalized_name = SaltCacheService.normalize_card_name(card.name)
             salt_score = salt_cards.get(normalized_name, 0.0)
 
@@ -1740,10 +1744,14 @@ class DeckValidator:
 
         return candidates
 
-    async def _get_commander_salt_score(self, commander_name: str) -> float:
+    async def _get_commander_salt_score(
+        self,
+        commander_name: str,
+        fallback_average: Optional[float] = None,
+    ) -> float:
         """
         Get salt score for a commander using enhanced normalization and comprehensive lookup.
-        
+
         This method ensures commander salt scores are found even when there are
         name format mismatches between deck sources and EDHRec cache.
         """
@@ -1754,26 +1762,47 @@ class DeckValidator:
         salt_cache = get_salt_cache()
         await salt_cache.ensure_loaded()
 
-        logger.debug(f"Commander salt lookup starting for: '{commander_name}'")
+        normalized_commander = SaltCacheService.normalize_card_name(commander_name)
+        logger.debug(
+            "Looking up commander salt: '%s' (normalized: '%s', fallback_average: %s)",
+            commander_name,
+            normalized_commander,
+            f"{fallback_average:.2f}" if isinstance(fallback_average, (int, float)) else "n/a",
+        )
 
         # 1️⃣ Try enhanced cache match with comprehensive variants
         cache_score = salt_cache.get_card_salt_with_variants(commander_name)
-        logger.debug(f"Enhanced lookup for '{commander_name}': {cache_score}")
-        
+        logger.debug("Enhanced lookup for '%s': %s", commander_name, cache_score)
+
         if cache_score and cache_score > 0:
-            logger.info(f"✅ FOUND commander '{commander_name}' salt score via enhanced lookup: {cache_score}")
+            logger.info("✅ FOUND commander '%s' salt score via enhanced lookup: %s", commander_name, cache_score)
             return round(cache_score, 2)
 
         # 2️⃣ Fallback to exact match with centralized normalization
-        normalized_commander = SaltCacheService.normalize_card_name(commander_name)
         cache_score = salt_cache.get_card_salt(normalized_commander)
-        logger.debug(f"Basic normalized lookup for '{commander_name}' -> '{normalized_commander}': {cache_score}")
-        
+        logger.debug(
+            "Basic normalized lookup for '%s' -> '%s': %s",
+            commander_name,
+            normalized_commander,
+            cache_score,
+        )
+
         if cache_score and cache_score > 0:
-            logger.info(f"✅ FOUND commander '{commander_name}' salt score via normalized lookup: {cache_score}")
+            logger.info("✅ FOUND commander '%s' salt score via normalized lookup: %s", commander_name, cache_score)
             return round(cache_score, 2)
 
-        # 4️⃣ Final fallback - use EDHRec direct lookup
+        # 3️⃣ Known fallback entries for infamous commanders
+        fallback_score = self._get_fallback_commander_salt(normalized_commander)
+        if fallback_score is not None:
+            logger.info(
+                "Using fallback salt score %.2f for commander '%s' (normalized '%s')",
+                fallback_score,
+                commander_name,
+                normalized_commander,
+            )
+            return round(fallback_score, 2)
+
+        # 4️⃣ Live EDHRec lookup as a last resort for new commanders
         try:
             commander_normalized = commander_name.lower().replace(" ", "-").replace(",", "").replace("'", "")
             url = f"https://edhrec.com/commanders/{commander_normalized}"
@@ -1788,35 +1817,23 @@ class DeckValidator:
         except Exception as e:
             logger.warning(f"Failed live fetch for commander salt ({commander_name}): {e}")
 
-        # 5️⃣ Last fallback - use centralized normalization with comprehensive variants
-        from aoa.services.salt_cache import SaltCacheService
-        
-        variants = SaltCacheService.generate_name_variants(commander_name)
-        
-        for variant in variants:
-            score = self._get_fallback_commander_salt(variant)
-            if score != 1.0:  # 1.0 is the default "not found" value
-                return score
-        
-        # If no variants work, return the default
-        return self._get_fallback_commander_salt(variants[0] if variants else commander_name)
+        if fallback_average is not None and fallback_average > 0:
+            logger.warning(
+                "No salt score found for commander '%s'. Using deck average %.2f as fallback.",
+                commander_name,
+                fallback_average,
+            )
+            return round(fallback_average, 2)
 
-    def _get_fallback_commander_salt(self, commander_normalized: str) -> float:
+        logger.warning(
+            "No salt score found for commander '%s'. Returning default value 0.0.",
+            commander_name,
+        )
+        return 0.0
+
+    def _get_fallback_commander_salt(self, commander_normalized: str) -> Optional[float]:
         """Fallback salt scores for known high-salt commanders."""
-        fallback_scores = {
-            "tergrid-god-of-fright": 2.8,
-            "yuriko-the-tigers-shadow": 2.15,
-            "vorinclex-voice-of-hunger": 2.61,
-            "kinnan-bonder-prodigy": 2.15,
-            "jin-gitaxias-core-augur": 2.57,
-            "edgar-markov": 2.05,
-            "sheoldred-the-apocalypse": 2.03,
-            "atraxa-praetors-voice": 1.72,
-            "urza-lord-high-artificer": 2.31,
-            "winota-joiner-of-forces": 1.95,
-            "slicer-hired-muscle": 0.96  # Add the specific case from user's example
-        }
-        return fallback_scores.get(commander_normalized, 1.0)
+        return SaltCacheService.get_commander_fallback_score(commander_normalized)
 
     def _extract_salt_score_from_html_commander(self, soup: BeautifulSoup, commander_name: str) -> float:
         """Extract salt score from commander page HTML."""
@@ -1942,8 +1959,6 @@ async def get_commander_salt(
     Returns:
         Commander name and salt score with debug information
     """
-    from aoa.services.salt_cache import SaltCacheService
-    
     salt_cache = get_salt_cache()
     await salt_cache.ensure_loaded()
     
