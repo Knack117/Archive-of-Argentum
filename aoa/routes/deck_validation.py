@@ -746,10 +746,14 @@ class DeckValidator:
             logger.warning("Salt cache empty, using fallback scores")
             salt_cards = self._get_fallback_salt_scores()
 
+        # Load tutor cards from Scryfall API
+        tutor_cards = await self._load_tutor_cards()
+
         data = {
             "mass_land_denial": mass_land_denial,
             "early_game_combo_pairs": early_game_combo_pairs,
             "game_changers": game_changers,
+            "tutors": tutor_cards,
             "salt_cards": salt_cards,
         }
 
@@ -1106,6 +1110,8 @@ class DeckValidator:
         if card_name in data["game_changers"]:
             categories.append("game_changer")
             is_game_changer = True
+        if card_name in data["tutors"]:
+            categories.append("tutor")
 
         return DeckCard(
             name=card_name,
@@ -1296,6 +1302,71 @@ class DeckValidator:
             score = min(score, 15)  # Cap score if missing critical elements
         
         return score
+
+    async def _load_tutor_cards(self) -> Set[str]:
+        """Load all tutor cards from Scryfall API using otag:tutor query.
+        
+        Returns a set of tutor card names for classification.
+        """
+        if "tutor_cards" in self.cache:
+            return self.cache["tutor_cards"]
+        
+        logger.info("Loading tutor cards from Scryfall API...")
+        tutor_cards = set()
+        page = 1
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                while True:
+                    # Fetch one page of tutor cards from Scryfall
+                    url = f"https://api.scryfall.com/cards/search"
+                    params = {
+                        "q": "otag:tutor",
+                        "unique": "cards",  # Remove duplicate gameplay objects
+                        "order": "name",
+                        "page": page,
+                        "format": "json"
+                    }
+                    
+                    response = await client.get(url, params=params)
+                    response.raise_for_status()
+                    
+                    data = response.json()
+                    
+                    # Extract card names from this page
+                    for card in data.get("data", []):
+                        card_name = card.get("name", "").strip()
+                        if card_name:
+                            tutor_cards.add(card_name)
+                    
+                    # Check if there are more pages
+                    if not data.get("has_more", False):
+                        break
+                    
+                    page += 1
+                    
+                    # Safety limit to prevent infinite loops
+                    if page > 20:  # Scryfall returns ~175 cards per page, 1166 total = ~7 pages
+                        logger.warning("Reached page limit while fetching tutor cards")
+                        break
+                        
+        except Exception as exc:
+            logger.error(f"Error loading tutor cards from Scryfall: {exc}")
+            # Fallback to common tutors if API fails
+            tutor_cards = {
+                "Demonic Tutor", "Vampiric Tutor", "Imperial Seal", "Grim Tutor",
+                "Mystical Tutor", "Worldly Tutor", "Enlightened Tutor", "Beseech the Mirror",
+                "Diabolic Intent", "Song of the Dryads", "Natural Order", "Chord of Calling",
+                "Finale of Devastation", "Finale of Promise", "Rite of the Raging Storm",
+                "Academy Rector", "Arena Rector", "Spellseeker", "Weathered Wayfarer",
+                "Gamble", "Merchant Scroll", "Muddle the Mixture", "Transmute Artifact",
+                "Tinker", "Demonic Consultation", "Tainted Pact"
+            }
+            logger.info(f"Using fallback tutor list with {len(tutor_cards)} cards")
+        
+        logger.info(f"Loaded {len(tutor_cards)} tutor cards from Scryfall")
+        self.cache["tutor_cards"] = tutor_cards
+        return tutor_cards
 
     async def _validate_bracket(self, cards: List[DeckCard], target_bracket: str, bracket_inferred: bool = False) -> BracketValidation:
         """Validate deck against bracket requirements"""
