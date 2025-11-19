@@ -261,7 +261,7 @@ def extract_commander_json_data(payload: Dict[str, Any]) -> Dict[str, Any]:
         panels.get("jsonCardLists"),
     ]
 
-    categories: Dict[str, List[Dict[str, Any]]] = {}
+    categories: Dict[str, Dict[str, Any]] = {}
     for candidate in cardlists_sources:
         if not candidate:
             continue
@@ -312,7 +312,7 @@ def extract_commander_json_data(payload: Dict[str, Any]) -> Dict[str, Any]:
                     }
                 )
             if normalized_cards:
-                categories[header] = normalized_cards
+                categories[header] = {"cards": normalized_cards}
         if categories:
             break
 
