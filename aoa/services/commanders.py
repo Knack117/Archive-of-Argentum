@@ -5,7 +5,7 @@ import logging
 import re
 from collections import deque
 from datetime import datetime
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -165,8 +165,23 @@ def _gather_section_card_names(source: Any) -> List[str]:
     return deduped
 
 
-async def scrape_edhrec_commander_page(commander_url: str) -> Dict[str, Any]:
-    """Fetch commander data from EDHRec's live JSON endpoints."""
+async def scrape_edhrec_commander_page(
+    commander_url: str,
+    limit_per_category: Optional[int] = None,
+    categories_filter: Optional[Set[str]] = None,
+    compact_mode: bool = False
+) -> Dict[str, Any]:
+    """Fetch commander data from EDHRec's live JSON endpoints.
+    
+    Args:
+        commander_url: EDHRec commander URL
+        limit_per_category: Maximum cards to return per category
+        categories_filter: Set of category names to include (lowercase)
+        compact_mode: If True, return minimal card data
+        
+    Returns:
+        Extracted and filtered commander data
+    """
     commander_name = extract_commander_name_from_url(commander_url)
 
     try:
@@ -177,7 +192,12 @@ async def scrape_edhrec_commander_page(commander_url: str) -> Dict[str, Any]:
         logger.error("Unexpected error fetching commander JSON for %s: %s", commander_url, exc)
         raise HTTPException(status_code=500, detail="Failed to fetch commander data") from exc
 
-    json_data = extract_commander_json_data(payload)
+    json_data = extract_commander_json_data(
+        payload,
+        limit_per_category=limit_per_category,
+        categories_filter=categories_filter,
+        compact_mode=compact_mode
+    )
 
     return {
         "commander_name": commander_name,
@@ -191,8 +211,23 @@ async def scrape_edhrec_commander_page(commander_url: str) -> Dict[str, Any]:
         "timestamp": datetime.utcnow().isoformat(),
     }
 
-def extract_commander_json_data(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract commander data from the live EDHRec JSON payload."""
+def extract_commander_json_data(
+    payload: Dict[str, Any],
+    limit_per_category: Optional[int] = None,
+    categories_filter: Optional[Set[str]] = None,
+    compact_mode: bool = False
+) -> Dict[str, Any]:
+    """Extract commander data from the live EDHRec JSON payload.
+    
+    Args:
+        payload: Raw JSON payload from EDHRec
+        limit_per_category: Maximum cards to return per category
+        categories_filter: Set of category names to include (lowercase)
+        compact_mode: If True, return minimal card data
+        
+    Returns:
+        Extracted and filtered commander data
+    """
     page_data = _extract_page_data(payload)
     panels = page_data.get("panels", {})
     container = page_data.get("container", {})
@@ -269,7 +304,20 @@ def extract_commander_json_data(payload: Dict[str, Any]) -> Dict[str, Any]:
             if not isinstance(section, dict):
                 continue
             header = section.get("header") or section.get("label") or "cards"
+            
+            # Apply category filter
+            if categories_filter:
+                header_lower = header.lower().replace(" ", "").replace("-", "")
+                # Check if this category matches any in the filter
+                if not any(filter_cat in header_lower for filter_cat in categories_filter):
+                    continue
+            
             cards = section.get("cardviews") or section.get("cards") or []
+            
+            # Apply limit per category
+            if limit_per_category:
+                cards = cards[:limit_per_category]
+            
             normalized_cards = []
             for card in cards:
                 if not isinstance(card, dict):
@@ -300,8 +348,20 @@ def extract_commander_json_data(payload: Dict[str, Any]) -> Dict[str, Any]:
                 if card_url and not card_url.startswith("http"):
                     card_url = f"{EDHREC_BASE_URL}{card_url}"
                 
-                normalized_cards.append(
-                    {
+                # Build card data based on mode
+                if compact_mode:
+                    # Compact mode: essential data without sanitized_name
+                    card_data = {
+                        "name": card_name,
+                        "num_decks": num_decks,
+                        "potential_decks": potential_decks,
+                        "inclusion_percentage": round(inclusion_percentage, 1),
+                        "synergy_percentage": round(synergy_percentage, 1),
+                        "card_url": card_url,
+                    }
+                else:
+                    # Standard mode: full data including sanitized_name
+                    card_data = {
                         "name": card_name,
                         "num_decks": num_decks,
                         "potential_decks": potential_decks,
@@ -310,7 +370,9 @@ def extract_commander_json_data(payload: Dict[str, Any]) -> Dict[str, Any]:
                         "sanitized_name": card.get("sanitized_name") or card.get("sanitized"),
                         "card_url": card_url,
                     }
-                )
+                
+                normalized_cards.append(card_data)
+            
             if normalized_cards:
                 categories[header] = {"cards": normalized_cards}
         if categories:
