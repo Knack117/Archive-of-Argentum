@@ -175,36 +175,57 @@ async def parse_moxfield_mass_land_destruction(html_content: str) -> List[Dict[s
 
 
 async def fetch_mass_land_destruction() -> List[Dict[str, Any]]:
-    """Fetch Mass Land Destruction cards from Moxfield."""
+    """Fetch Mass Land Destruction cards, using Scryfall as primary source.
+    
+    Note: Moxfield requires JavaScript rendering, so we use Scryfall's search
+    for cards that meet the Mass Land Denial criteria defined by WotC:
+    - Cards that regularly destroy, exile, or bounce other lands
+    - Cards that keep lands tapped
+    - Cards that change what mana is produced by 4+ lands without replacing them
+    """
     try:
-        url = "https://moxfield.com/commanderbrackets/masslanddenial"
+        # Use Scryfall search for comprehensive MLD cards
+        # This includes various types of mass land disruption
+        search_queries = [
+            # Direct land destruction
+            'o:"destroy all lands" legal:commander',
+            'o:"destroy all nonbasic" o:"land" legal:commander',
+            'o:"exile all lands" legal:commander',
+            # Land tap/untap denial
+            'o:"lands don\'t untap" legal:commander',
+            'o:"lands enter the battlefield tapped" legal:commander',
+            # Mana denial/replacement effects on multiple lands
+            'o:"all lands are" legal:commander',
+            'o:"nonbasic lands are" legal:commander',
+        ]
         
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://moxfield.com/",
-        }
+        all_cards = []
+        seen_names = set()
         
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            logger.info("Fetching Mass Land Destruction list from Moxfield")
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
+        logger.info("Fetching Mass Land Destruction cards from Scryfall")
+        
+        for query in search_queries:
+            try:
+                cards = await fetch_scryfall_search_cards(query, order="name", dir="asc")
+                for card in cards:
+                    name = card.get("name", "")
+                    # Avoid duplicates
+                    if name and name not in seen_names:
+                        seen_names.add(name)
+                        all_cards.append(card)
+            except Exception as query_exc:
+                # Log but continue with other queries
+                logger.warning(f"Query failed: {query} - {query_exc}")
+                continue
+        
+        # Sort alphabetically by name
+        all_cards.sort(key=lambda x: x.get("name", "").lower())
+        
+        logger.info(f"Found {len(all_cards)} Mass Land Destruction cards from Scryfall")
+        return all_cards
             
-            # Parse the HTML content
-            cards = await parse_moxfield_mass_land_destruction(response.text)
-            return cards
-            
-    except httpx.HTTPStatusError as exc:
-        logger.error(f"Moxfield HTTP error: {exc.response.status_code} - {exc}")
-        if exc.response.status_code == 404:
-            raise HTTPException(status_code=404, detail="Mass Land Destruction list not found")
-        else:
-            raise HTTPException(status_code=502, detail="Error communicating with Moxfield")
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Error fetching Mass Land Destruction cards: {exc}")
         raise HTTPException(status_code=500, detail=f"Error fetching Mass Land Destruction cards: {str(exc)}")
