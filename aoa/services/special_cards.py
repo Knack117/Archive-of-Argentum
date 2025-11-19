@@ -89,21 +89,61 @@ async def fetch_scryfall_search_cards(search_query: str, order: str = "usd", dir
 
 
 async def fetch_gamechangers() -> List[Dict[str, Any]]:
-    """Fetch all gamechanger cards from Scryfall."""
-    return await fetch_scryfall_search_cards(
+    """Fetch all gamechanger cards from Scryfall.
+    
+    Returns a lightweight list with only essential card information
+    to keep response size manageable for GPT compatibility.
+    """
+    # Fetch full data from Scryfall
+    full_cards = await fetch_scryfall_search_cards(
         search_query="is:gamechanger",
         order="usd",
         dir="desc"
     )
+    
+    # Return only essential fields to minimize response size
+    lightweight_cards = []
+    for card in full_cards:
+        lightweight_card = {
+            "name": card.get("name", "Unknown"),
+            "type_line": card.get("type_line", ""),
+            "mana_cost": card.get("mana_cost", ""),
+            "mana_value": card.get("mana_value", 0),
+            "oracle_text": card.get("oracle_text", "")[:300] + "..." if len(card.get("oracle_text", "")) > 300 else card.get("oracle_text", ""),  # Truncate long text
+            "usd": card.get("usd", ""),
+            "scryfall_uri": card.get("scryfall_uri", ""),
+        }
+        lightweight_cards.append(lightweight_card)
+    
+    return lightweight_cards
 
 
 async def fetch_banned_cards() -> List[Dict[str, Any]]:
-    """Fetch all banned Commander cards from Scryfall."""
-    return await fetch_scryfall_search_cards(
+    """Fetch all banned Commander cards from Scryfall.
+    
+    Returns a lightweight list with only essential card information
+    to keep response size small for GPT compatibility.
+    """
+    # Fetch full data from Scryfall
+    full_cards = await fetch_scryfall_search_cards(
         search_query="banned:commander",
         order="name",
         dir="asc"
     )
+    
+    # Return only essential fields to minimize response size
+    lightweight_cards = []
+    for card in full_cards:
+        lightweight_card = {
+            "name": card.get("name", "Unknown"),
+            "type_line": card.get("type_line", ""),
+            "mana_cost": card.get("mana_cost", ""),
+            "oracle_text": card.get("oracle_text", "")[:150] + "..." if len(card.get("oracle_text", "")) > 150 else card.get("oracle_text", ""),  # Truncate to 150 chars for banned list
+            "scryfall_uri": card.get("scryfall_uri", ""),
+        }
+        lightweight_cards.append(lightweight_card)
+    
+    return lightweight_cards
 
 
 async def parse_moxfield_mass_land_destruction(html_content: str) -> List[Dict[str, Any]]:
@@ -276,17 +316,9 @@ async def fetch_mass_land_destruction() -> List[Dict[str, Any]]:
                             "name": card_data.get("name", card_name),
                             "mana_cost": card_data.get("mana_cost", ""),
                             "type_line": card_data.get("type_line", ""),
-                            "oracle_text": card_data.get("oracle_text", ""),
                             "mana_value": card_data.get("mana_value", 0),
-                            "colors": card_data.get("colors", []),
-                            "color_identity": card_data.get("color_identity", []),
-                            "rarity": card_data.get("rarity", ""),
-                            "set_name": card_data.get("set_name", ""),
-                            "set_code": card_data.get("set_code", ""),
-                            "image_uris": card_data.get("image_uris", {}),
-                            "prices": card_data.get("prices", {}),
+                            "oracle_text": (card_data.get("oracle_text", "")[:300] + "...") if len(card_data.get("oracle_text", "")) > 300 else card_data.get("oracle_text", ""),
                             "scryfall_uri": card_data.get("scryfall_uri", ""),
-                            "id": card_data.get("id", ""),
                         }
                         all_cards.append(formatted_card)
                     else:
