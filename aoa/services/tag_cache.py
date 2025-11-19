@@ -127,35 +127,38 @@ async def get_tag_cache() -> TagCacheService:
 
 
 async def validate_theme_slug(theme_slug: str, cache: TagCacheService) -> None:
-    """Validate that a theme slug exists or can be constructed."""
-    await cache.load_cache()
+    """Validate that a theme slug is properly formatted.
     
+    This is a lenient validation that allows themes not in the cache to proceed
+    to EDHRec lookup. Only rejects obviously malformed inputs.
+    """
     sanitized = (theme_slug or "").strip().lower()
     if not sanitized:
         raise HTTPException(status_code=400, detail="Theme slug cannot be empty")
     
-    # Check if it exists directly
-    if await cache.tag_exists(sanitized):
-        return
+    # Reject slugs with invalid characters (only allow alphanumeric, hyphens, and underscores)
+    import re
+    if not re.match(r'^[a-z0-9\-_]+$', sanitized):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Theme slug '{sanitized}' contains invalid characters. Use only letters, numbers, and hyphens."
+        )
     
-    # Check if it's a color-prefixed theme (e.g., izzet-goblins)
-    if '-' in sanitized:
-        parts = sanitized.split('-', 1)
-        if len(parts) == 2:
-            color_part, theme_part = parts
-            
-            # Try the correct pattern: theme-color (goblins-izzet)
-            correct_suggestion = f"{theme_part}-{color_part}"
-            if await cache.tag_exists(correct_suggestion):
-                return
-            
-            # Also try individual parts
-            if await cache.tag_exists(theme_part) and await cache.tag_exists(color_part):
-                return
+    # Warn if not in cache but allow request to proceed
+    await cache.load_cache()
+    if not await cache.tag_exists(sanitized):
+        # Check if it's a composite theme (color-theme or theme-color)
+        if '-' in sanitized:
+            parts = sanitized.split('-', 1)
+            if len(parts) == 2:
+                part1, part2 = parts
+                # If either part exists in cache, allow it through
+                if await cache.tag_exists(part1) or await cache.tag_exists(part2):
+                    logger.info(f"Theme '{sanitized}' not in cache but has valid components, allowing")
+                    return
+        
+        # Not in cache, but we'll still try EDHRec (lenient validation)
+        logger.info(f"Theme '{sanitized}' not in cache, will attempt EDHRec lookup")
     
-    # Not found
-    examples = await cache.get_tag_examples(5)
-    raise HTTPException(
-        status_code=404,
-        detail=f"Theme '{sanitized}' not found. Available themes: {', '.join(examples)}"
-    )
+    # All checks passed (or we're being lenient)
+    return
