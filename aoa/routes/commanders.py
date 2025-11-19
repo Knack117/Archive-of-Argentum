@@ -1,6 +1,6 @@
 """Commander summary and average deck endpoints."""
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -19,11 +19,40 @@ logger = logging.getLogger(__name__)
 
 @router.get("/commander/summary", response_model=CommanderSummary)
 async def get_commander_summary(
-    name: Optional[str] = Query(None),
-    commander_url: Optional[str] = Query(None),
+    name: Optional[str] = Query(None, description="Commander name"),
+    commander_url: Optional[str] = Query(None, description="EDHRec commander URL"),
+    limit: int = Query(
+        40,
+        ge=1,
+        le=200,
+        description="Maximum cards per category (default: 40 for GPT compatibility)"
+    ),
+    categories: Optional[str] = Query(
+        None,
+        description="Comma-separated category filters (e.g., 'creatures,instants,enchantments'). "
+                   "Supports: creatures, instants, sorceries, artifacts, enchantments, planeswalkers, "
+                   "lands, highsynergy, topcards, newcards"
+    ),
+    mode: str = Query(
+        "standard",
+        regex="^(standard|compact)$",
+        description="Response mode: 'standard' (full data) or 'compact' (minimal data)"
+    ),
     api_key: str = Depends(verify_api_key),
 ) -> CommanderSummary:
-    """Fetch EDHRec commander summary data."""
+    """Fetch EDHRec commander summary data with pagination and filtering.
+    
+    **GPT Compatibility Notes:**
+    - Default limit (40 cards/category) keeps responses within GPT limits
+    - Filter categories to reduce response size further
+    - Use compact mode for minimal responses
+    
+    **Examples:**
+    - Basic: `?name=halana-kessig-ranger`
+    - Limited: `?name=halana&limit=30`
+    - Filtered: `?name=halana&categories=creatures,instants,enchantments`
+    - Compact: `?name=halana&mode=compact&limit=20`
+    """
     if name:
         slug = normalize_commander_name(name)
     elif commander_url:
@@ -37,7 +66,26 @@ async def get_commander_summary(
 
     commander_url_val = f"{EDHREC_BASE_URL}commanders/{slug}"
 
-    commander_data = await scrape_edhrec_commander_page(commander_url_val)
+    # Parse categories filter
+    categories_filter: Optional[Set[str]] = None
+    if categories:
+        # Normalize category names (remove spaces, lowercase)
+        categories_filter = {
+            cat.strip().lower().replace(" ", "").replace("-", "")
+            for cat in categories.split(",")
+            if cat.strip()
+        }
+
+    # Determine compact mode
+    compact_mode = (mode == "compact")
+
+    # Fetch commander data with filters
+    commander_data = await scrape_edhrec_commander_page(
+        commander_url_val,
+        limit_per_category=limit,
+        categories_filter=categories_filter,
+        compact_mode=compact_mode
+    )
 
     categories_output: Dict[str, List[CommanderCard]] = {}
     for category_key, category_data in commander_data.get("categories", {}).items():
@@ -124,6 +172,21 @@ async def get_average_deck_summary(
         None,
         description="Bracket type: exhibition, core, upgraded, optimized, or cedh.",
     ),
+    limit: int = Query(
+        40,
+        ge=1,
+        le=200,
+        description="Maximum cards per category (default: 40 for GPT compatibility)"
+    ),
+    categories: Optional[str] = Query(
+        None,
+        description="Comma-separated category filters (e.g., 'creatures,instants,enchantments')"
+    ),
+    mode: str = Query(
+        "standard",
+        regex="^(standard|compact)$",
+        description="Response mode: 'standard' (full data) or 'compact' (minimal data)"
+    ),
     api_key: str = Depends(verify_api_key),
 ) -> CommanderSummary:
     """Fetch a summary of an EDHRec Average Deck page for a given commander."""
@@ -142,8 +205,24 @@ async def get_average_deck_summary(
     if bracket:
         base_url += f"/{bracket.strip().lower()}"
 
+    # Parse categories filter
+    categories_filter: Optional[Set[str]] = None
+    if categories:
+        categories_filter = {
+            cat.strip().lower().replace(" ", "").replace("-", "")
+            for cat in categories.split(",")
+            if cat.strip()
+        }
+
+    compact_mode = (mode == "compact")
+
     try:
-        commander_data = await scrape_edhrec_commander_page(base_url)
+        commander_data = await scrape_edhrec_commander_page(
+            base_url,
+            limit_per_category=limit,
+            categories_filter=categories_filter,
+            compact_mode=compact_mode
+        )
     except HTTPException:
         raise
     except Exception as exc:
