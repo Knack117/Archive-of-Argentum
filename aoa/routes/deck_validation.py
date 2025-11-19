@@ -188,6 +188,110 @@ EARLY_GAME_COMBOS = [
     }
 ]
 
+# Early game 2-card combo pairs (tuples format for efficient checking)
+# Source: https://edhrec.com/combos/early-game-2-card-combos
+EARLY_GAME_COMBO_PAIRS = [
+    ("Demonic Consultation", "Thassa's Oracle"),
+    ("Tainted Pact", "Thassa's Oracle"),
+    ("Tainted Pact", "Laboratory Maniac"),
+    ("Demonic Consultation", "Laboratory Maniac"),
+    ("Exquisite Blood", "Sanguine Bond"),
+    ("Exquisite Blood", "Vito, Thorn of the Dusk Rose"),
+    ("Dramatic Reversal", "Isochron Scepter"),
+    ("Dualcaster Mage", "Twinflame"),
+    ("Dualcaster Mage", "Heat Shimmer"),
+    ("Niv-Mizzet, Parun", "Curiosity"),
+    ("Niv-Mizzet, Parun", "Ophidian Eye"),
+    ("Niv-Mizzet, Parun", "Tandem Lookout"),
+    ("Niv-Mizzet, the Firemind", "Curiosity"),
+    ("Niv-Mizzet, the Firemind", "Ophidian Eye"),
+    ("Niv-Mizzet, the Firemind", "Tandem Lookout"),
+    ("Gravecrawler", "Phyrexian Altar"),
+    ("Gravecrawler", "Pitiless Plunderer"),
+    ("Exquisite Blood", "Bloodthirsty Conqueror"),
+    ("Sanguine Bond", "Bloodthirsty Conqueror"),
+    ("Chatterfang, Squirrel General", "Pitiless Plunderer"),
+    ("Bloodchief Ascension", "Mindcrank"),
+    ("Basalt Monolith", "Rings of Brighthearth"),
+    ("Basalt Monolith", "Forsaken Monument"),
+    ("Exquisite Blood", "Marauding Blight-Priest"),
+    ("Heliod, Sun-Crowned", "Walking Ballista"),
+    ("Maddening Cacophony", "Bruvac the Grandiloquent"),
+    ("Maddening Cacophony", "Fraying Sanity"),
+    ("Enduring Tenacity", "Peregrin Took"),
+    ("Nuka-Cola Vending Machine", "Kinnan, Bonder Prodigy"),
+    ("Dualcaster Mage", "Molten Duplication"),
+    ("Felidar Guardian", "Restoration Angel"),
+    ("Peregrine Drake", "Deadeye Navigator"),
+    ("The Gitrog Monster", "Dakmor Salvage"),
+    ("Squee, the Immortal", "Food Chain"),
+    ("Eternal Scourge", "Food Chain"),
+    ("Blasphemous Act", "Repercussion"),
+    ("Experimental Confectioner", "The Reaver Cleaver"),
+    ("Aggravated Assault", "Sword of Feast and Famine"),
+    ("Aggravated Assault", "Bear Umbra"),
+    ("Aggravated Assault", "Savage Ventmaw"),
+    ("Aggravated Assault", "Neheb, the Eternal"),
+    ("Kiki-Jiki, Mirror Breaker", "Zealous Conscripts"),
+    ("Kiki-Jiki, Mirror Breaker", "Felidar Guardian"),
+    ("Kiki-Jiki, Mirror Breaker", "Restoration Angel"),
+    ("Kiki-Jiki, Mirror Breaker", "Village Bell-Ringer"),
+    ("Kiki-Jiki, Mirror Breaker", "Combat Celebrant"),
+    ("Staff of Domination", "Priest of Titania"),
+    ("Staff of Domination", "Elvish Archdruid"),
+    ("Staff of Domination", "Circle of Dreams Druid"),
+    ("Staff of Domination", "Bloom Tender"),
+    ("Umbral Mantle", "Priest of Titania"),
+    ("Umbral Mantle", "Elvish Archdruid"),
+    ("Umbral Mantle", "Circle of Dreams Druid"),
+    ("Umbral Mantle", "Bloom Tender"),
+    ("Umbral Mantle", "Selvala, Heart of the Wilds"),
+    ("Dualcaster Mage", "Saw in Half"),
+    ("Godo, Bandit Warlord", "Helm of the Host"),
+    ("Scurry Oak", "Ivy Lane Denizen"),
+    ("Ashaya, Soul of the Wild", "Quirion Ranger"),
+    ("Ashaya, Soul of the Wild", "Scryb Ranger"),
+    ("Marwyn, the Nurturer", "Umbral Mantle"),
+    ("Malcolm, Keen-Eyed Navigator", "Glint-Horn Buccaneer"),
+    ("Storm-Kiln Artist", "Haze of Rage"),
+    ("Karn, the Great Creator", "Mycosynth Lattice"),
+    ("Traumatize", "Maddening Cacophony"),
+    ("Traumatize", "Bruvac the Grandiloquent"),
+    ("Kaalia of the Vast", "Master of Cruelties"),
+    ("Forensic Gadgeteer", "Toralf, God of Fury"),
+    ("Professor Onyx", "Chain of Smog"),
+    ("Witherbloom Apprentice", "Chain of Smog"),
+    ("Solphim, Mayhem Dominus", "Heartless Hidetsugu"),
+    ("Cut Your Losses", "Bruvac the Grandiloquent"),
+    ("Starscape Cleric", "Peregrin Took"),
+    ("Ondu Spiritdancer", "Secret Arcade"),
+    ("Ondu Spiritdancer", "Dusty Parlor"),
+    ("Vandalblast", "Toralf, God of Fury"),
+    ("Nest of Scarabs", "Blowfly Infestation"),
+    ("Duskmantle Guildmage", "Mindcrank"),
+    ("Rosie Cotton of South Lane", "Peregrin Took"),
+    ("Terisian Mindbreaker", "Maddening Cacophony"),
+    ("Bloom Tender", "Freed from the Real"),
+    ("Priest of Titania", "Freed from the Real"),
+    ("Devoted Druid", "Swift Reconfiguration"),
+    ("Basking Broodscale", "Ivy Lane Denizen"),
+    ("Ratadrabik of Urborg", "Boromir, Warden of the Tower"),
+    ("Dualcaster Mage", "Electroduplicate"),
+    ("Abdel Adrian, Gorion's Ward", "Animate Dead"),
+    ("Animate Dead", "Worldgorger Dragon"),
+    ("Tivit, Seller of Secrets", "Time Sieve"),
+    ("Satya, Aetherflux Genius", "Lightning Runner"),
+    ("Ghostly Flicker", "Naru Meha, Master Wizard"),
+    ("Ghostly Flicker", "Dualcaster Mage"),
+    ("Vizkopa Guildmage", "Exquisite Blood"),
+    ("Doomsday", "Thassa's Oracle"),
+    ("Doomsday", "Laboratory Maniac"),
+    ("Heliod, Sun-Crowned", "Triskelion"),
+    ("Grindstone", "Painter's Servant"),
+    ("Splinter Twin", "Pestermite"),
+    ("Splinter Twin", "Deceiver Exarch")
+]
+
 
 # Cards that are allowed to break the traditional singleton rule.
 # Includes all basic lands, their snow-covered variants, and cards that
@@ -774,110 +878,8 @@ class DeckValidator:
             "Winter Orb", "Worldfire", "Worldpurge", "Worldslayer"
         }
 
-        # Early game 2-card combo pairs from EDHRec
-        # Source: https://edhrec.com/combos/early-game-2-card-combos
-        # Format: List of tuples (card1, card2) - both pieces must be present to flag as combo
-        early_game_combo_pairs = [
-            ("Demonic Consultation", "Thassa's Oracle"),
-            ("Tainted Pact", "Thassa's Oracle"),
-            ("Tainted Pact", "Laboratory Maniac"),
-            ("Demonic Consultation", "Laboratory Maniac"),
-            ("Exquisite Blood", "Sanguine Bond"),
-            ("Exquisite Blood", "Vito, Thorn of the Dusk Rose"),
-            ("Dramatic Reversal", "Isochron Scepter"),
-            ("Dualcaster Mage", "Twinflame"),
-            ("Dualcaster Mage", "Heat Shimmer"),
-            ("Niv-Mizzet, Parun", "Curiosity"),
-            ("Niv-Mizzet, Parun", "Ophidian Eye"),
-            ("Niv-Mizzet, Parun", "Tandem Lookout"),
-            ("Niv-Mizzet, the Firemind", "Curiosity"),
-            ("Niv-Mizzet, the Firemind", "Ophidian Eye"),
-            ("Niv-Mizzet, the Firemind", "Tandem Lookout"),
-            ("Gravecrawler", "Phyrexian Altar"),
-            ("Gravecrawler", "Pitiless Plunderer"),
-            ("Exquisite Blood", "Bloodthirsty Conqueror"),
-            ("Sanguine Bond", "Bloodthirsty Conqueror"),
-            ("Chatterfang, Squirrel General", "Pitiless Plunderer"),
-            ("Bloodchief Ascension", "Mindcrank"),
-            ("Basalt Monolith", "Rings of Brighthearth"),
-            ("Basalt Monolith", "Forsaken Monument"),
-            ("Exquisite Blood", "Marauding Blight-Priest"),
-            ("Heliod, Sun-Crowned", "Walking Ballista"),
-            ("Maddening Cacophony", "Bruvac the Grandiloquent"),
-            ("Maddening Cacophony", "Fraying Sanity"),
-            ("Enduring Tenacity", "Peregrin Took"),
-            ("Nuka-Cola Vending Machine", "Kinnan, Bonder Prodigy"),
-            ("Dualcaster Mage", "Molten Duplication"),
-            ("Felidar Guardian", "Restoration Angel"),
-            ("Peregrine Drake", "Deadeye Navigator"),
-            ("The Gitrog Monster", "Dakmor Salvage"),
-            ("Squee, the Immortal", "Food Chain"),
-            ("Eternal Scourge", "Food Chain"),
-            ("Blasphemous Act", "Repercussion"),
-            ("Experimental Confectioner", "The Reaver Cleaver"),
-            ("Aggravated Assault", "Sword of Feast and Famine"),
-            ("Aggravated Assault", "Bear Umbra"),
-            ("Aggravated Assault", "Savage Ventmaw"),
-            ("Aggravated Assault", "Neheb, the Eternal"),
-            ("Kiki-Jiki, Mirror Breaker", "Zealous Conscripts"),
-            ("Kiki-Jiki, Mirror Breaker", "Felidar Guardian"),
-            ("Kiki-Jiki, Mirror Breaker", "Restoration Angel"),
-            ("Kiki-Jiki, Mirror Breaker", "Village Bell-Ringer"),
-            ("Kiki-Jiki, Mirror Breaker", "Combat Celebrant"),
-            ("Staff of Domination", "Priest of Titania"),
-            ("Staff of Domination", "Elvish Archdruid"),
-            ("Staff of Domination", "Circle of Dreams Druid"),
-            ("Staff of Domination", "Bloom Tender"),
-            ("Umbral Mantle", "Priest of Titania"),
-            ("Umbral Mantle", "Elvish Archdruid"),
-            ("Umbral Mantle", "Circle of Dreams Druid"),
-            ("Umbral Mantle", "Bloom Tender"),
-            ("Umbral Mantle", "Selvala, Heart of the Wilds"),
-            ("Dualcaster Mage", "Saw in Half"),
-            ("Godo, Bandit Warlord", "Helm of the Host"),
-            ("Scurry Oak", "Ivy Lane Denizen"),
-            ("Ashaya, Soul of the Wild", "Quirion Ranger"),
-            ("Ashaya, Soul of the Wild", "Scryb Ranger"),
-            ("Marwyn, the Nurturer", "Umbral Mantle"),
-            ("Malcolm, Keen-Eyed Navigator", "Glint-Horn Buccaneer"),
-            ("Storm-Kiln Artist", "Haze of Rage"),
-            ("Karn, the Great Creator", "Mycosynth Lattice"),
-            ("Traumatize", "Maddening Cacophony"),
-            ("Traumatize", "Bruvac the Grandiloquent"),
-            ("Kaalia of the Vast", "Master of Cruelties"),
-            ("Forensic Gadgeteer", "Toralf, God of Fury"),
-            ("Professor Onyx", "Chain of Smog"),
-            ("Witherbloom Apprentice", "Chain of Smog"),
-            ("Solphim, Mayhem Dominus", "Heartless Hidetsugu"),
-            ("Cut Your Losses", "Bruvac the Grandiloquent"),
-            ("Starscape Cleric", "Peregrin Took"),
-            ("Ondu Spiritdancer", "Secret Arcade"),
-            ("Ondu Spiritdancer", "Dusty Parlor"),
-            ("Vandalblast", "Toralf, God of Fury"),
-            ("Nest of Scarabs", "Blowfly Infestation"),
-            ("Duskmantle Guildmage", "Mindcrank"),
-            ("Rosie Cotton of South Lane", "Peregrin Took"),
-            ("Terisian Mindbreaker", "Maddening Cacophony"),
-            ("Bloom Tender", "Freed from the Real"),
-            ("Priest of Titania", "Freed from the Real"),
-            ("Devoted Druid", "Swift Reconfiguration"),
-            ("Basking Broodscale", "Ivy Lane Denizen"),
-            ("Ratadrabik of Urborg", "Boromir, Warden of the Tower"),
-            ("Dualcaster Mage", "Electroduplicate"),
-            ("Abdel Adrian, Gorion's Ward", "Animate Dead"),
-            ("Animate Dead", "Worldgorger Dragon"),
-            ("Tivit, Seller of Secrets", "Time Sieve"),
-            ("Satya, Aetherflux Genius", "Lightning Runner"),
-            ("Ghostly Flicker", "Naru Meha, Master Wizard"),
-            ("Ghostly Flicker", "Dualcaster Mage"),
-            ("Vizkopa Guildmage", "Exquisite Blood"),
-            ("Doomsday", "Thassa's Oracle"),
-            ("Doomsday", "Laboratory Maniac"),
-            ("Heliod, Sun-Crowned", "Triskelion"),
-            ("Grindstone", "Painter's Servant"),
-            ("Splinter Twin", "Pestermite"),
-            ("Splinter Twin", "Deceiver Exarch")
-        ]
+        # Use module-level early game combo pairs constant
+        early_game_combo_pairs = EARLY_GAME_COMBO_PAIRS
 
         # Load salt scores from cache (fast, comprehensive)
         salt_cache = get_salt_cache()
@@ -2243,3 +2245,204 @@ async def get_card_salt_score(
 # --------------------------------------------------------------------
 
 
+
+
+
+# --------------------------------------------------------------------
+# Combo Detection Endpoints (Deck Validation)
+# --------------------------------------------------------------------
+
+def check_early_game_combos_in_cards(card_names: List[str]) -> List[Dict[str, Any]]:
+    """
+    Check if any early-game 2-card combos are present in the given card list.
+    
+    Args:
+        card_names: List of card names to check
+        
+    Returns:
+        List of early-game combos found in the card list
+    """
+    found_combos = []
+    # Normalize card names for comparison
+    normalized_cards = {name.lower().strip() for name in card_names}
+    
+    for card1, card2 in EARLY_GAME_COMBO_PAIRS:
+        combo_cards = [card1.lower().strip(), card2.lower().strip()]
+        # Check if both cards of the combo are in the deck
+        if all(card in normalized_cards for card in combo_cards):
+            found_combos.append({
+                "cards": [card1, card2],
+                "acceptable_brackets": ["4", "5"],
+                "bracket_recommendation": "Acceptable ONLY for brackets 4 (Optimized) and 5 (cEDH)"
+            })
+    
+    return found_combos
+
+
+def check_late_game_combos_in_cards(card_names: List[str]) -> List[Dict[str, Any]]:
+    """
+    Check if any late-game 2-card combos are present in the given card list.
+    
+    Args:
+        card_names: List of card names to check
+        
+    Returns:
+        List of late-game combos found in the card list
+    """
+    from aoa.routes.combos import LATE_GAME_COMBOS, LATE_GAME_COMBO_BRACKETS
+    
+    found_combos = []
+    # Normalize card names for comparison
+    normalized_cards = {name.lower().strip() for name in card_names}
+    
+    for combo in LATE_GAME_COMBOS:
+        combo_cards = [card.lower().strip() for card in combo["cards"]]
+        # Check if both cards of the combo are in the deck
+        if all(card in normalized_cards for card in combo_cards):
+            found_combos.append({
+                "cards": combo["cards"],
+                "effects": combo["effects"],
+                "acceptable_brackets": LATE_GAME_COMBO_BRACKETS,
+                "bracket_recommendation": "Acceptable for brackets 3, 4, and 5"
+            })
+    
+    return found_combos
+
+
+@router.post("/api/v1/deck/check-early-game-combos")
+async def check_deck_for_early_game_combos(
+    card_names: List[str],
+    api_key: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """
+    Check if a deck contains any early-game 2-card combos.
+    
+    Send a list of card names in the request body.
+    Returns any early-game combos found and their bracket acceptability.
+    
+    Early-game combos are ONLY acceptable for brackets 4 (Optimized) and 5 (cEDH).
+    
+    Example request body:
+    ```json
+    ["Demonic Consultation", "Thassa's Oracle", "Sol Ring", "Command Tower"]
+    ```
+    """
+    if not card_names:
+        raise HTTPException(
+            status_code=400,
+            detail="Card names list is required and cannot be empty",
+        )
+    
+    found_combos = check_early_game_combos_in_cards(card_names)
+    
+    return {
+        "success": True,
+        "cards_checked": len(card_names),
+        "combos_found": len(found_combos),
+        "combos": found_combos,
+        "recommendation": (
+            f"Found {len(found_combos)} early-game combo(s). "
+            "These combos are acceptable ONLY for brackets 4 (Optimized) and 5 (cEDH)."
+        ) if found_combos else "No early-game combos detected in this card list.",
+        "acceptable_brackets": ["4", "5"],
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.post("/api/v1/deck/check-late-game-combos")
+async def check_deck_for_late_game_combos(
+    card_names: List[str],
+    api_key: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """
+    Check if a deck contains any late-game 2-card combos.
+    
+    Send a list of card names in the request body.
+    Returns any late-game combos found and their bracket acceptability.
+    
+    Late-game combos are acceptable for brackets 3 (Upgraded), 4 (Optimized), and 5 (cEDH).
+    
+    Example request body:
+    ```json
+    ["Mikaeus, the Unhallowed", "Triskelion", "Sol Ring", "Command Tower"]
+    ```
+    """
+    if not card_names:
+        raise HTTPException(
+            status_code=400,
+            detail="Card names list is required and cannot be empty",
+        )
+    
+    found_combos = check_late_game_combos_in_cards(card_names)
+    
+    return {
+        "success": True,
+        "cards_checked": len(card_names),
+        "combos_found": len(found_combos),
+        "combos": found_combos,
+        "recommendation": (
+            f"Found {len(found_combos)} late-game combo(s). "
+            "These combos are acceptable for brackets 3 (Upgraded), 4 (Optimized), and 5 (cEDH)."
+        ) if found_combos else "No late-game combos detected in this card list.",
+        "acceptable_brackets": ["3", "4", "5"],
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.post("/api/v1/deck/check-all-combos")
+async def check_deck_for_all_combos(
+    card_names: List[str],
+    api_key: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """
+    Check if a deck contains any 2-card combos (both early-game and late-game).
+    
+    Send a list of card names in the request body.
+    Returns all combos found with their bracket acceptability.
+    
+    Example request body:
+    ```json
+    ["Demonic Consultation", "Thassa's Oracle", "Mikaeus, the Unhallowed", "Triskelion"]
+    ```
+    """
+    if not card_names:
+        raise HTTPException(
+            status_code=400,
+            detail="Card names list is required and cannot be empty",
+        )
+    
+    early_game_combos = check_early_game_combos_in_cards(card_names)
+    late_game_combos = check_late_game_combos_in_cards(card_names)
+    
+    total_combos = len(early_game_combos) + len(late_game_combos)
+    
+    return {
+        "success": True,
+        "cards_checked": len(card_names),
+        "total_combos_found": total_combos,
+        "early_game_combos": {
+            "count": len(early_game_combos),
+            "combos": early_game_combos,
+            "acceptable_brackets": ["4", "5"]
+        },
+        "late_game_combos": {
+            "count": len(late_game_combos),
+            "combos": late_game_combos,
+            "acceptable_brackets": ["3", "4", "5"]
+        },
+        "bracket_recommendation": (
+            "This deck contains early-game combos and should be played in brackets 4 or 5 only."
+            if early_game_combos
+            else (
+                "This deck contains late-game combos and is suitable for brackets 3, 4, or 5."
+                if late_game_combos
+                else "No 2-card combos detected. Suitable for all brackets."
+            )
+        ),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+# --------------------------------------------------------------------
+# Exception Handlers
+# --------------------------------------------------------------------
