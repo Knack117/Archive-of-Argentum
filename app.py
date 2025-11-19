@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from aoa.models import DeckCard, DeckValidationRequest, DeckValidationResponse
-from aoa.routes import cards, commanders, combos, deck_validation, popular_decks, system, themes
+from aoa.routes import cards, cedh, commanders, combos, deck_validation, popular_decks, system, themes
 from aoa.routes.deck_validation import (
     COMMANDER_BRACKETS,
     EARLY_GAME_COMBOS,
@@ -59,6 +59,7 @@ app.include_router(combos.router)
 app.include_router(themes.router)
 app.include_router(deck_validation.router)
 app.include_router(popular_decks.router)
+app.include_router(cedh.router)
 
 __all__ = [
     "app",
