@@ -1740,49 +1740,53 @@ class DeckValidator:
         return candidates
 
     async def _get_commander_salt_score(self, commander_name: str) -> float:
-        """
-        Get salt score for a commander from EDHRec.
-        Returns 0.0 if not found.
-        """
+        """Get salt score for a commander from EDHRec or cache (with fuzzy lookup)."""
         if not commander_name:
             return 0.0
 
-        # First, try to get from the salt cache (same data source as deck cards)
         salt_cache = get_salt_cache()
         await salt_cache.ensure_loaded()
 
-        for candidate in self._generate_commander_lookup_names(commander_name):
+        # Generate name variants
+        candidates = self._generate_commander_lookup_names(commander_name)
+        normalized_candidates = [c.lower().replace(",", "").replace("’", "'") for c in candidates]
+
+        # 1️⃣ Try exact cache match
+        for candidate in candidates:
             cache_score = salt_cache.get_card_salt(candidate)
-            if cache_score > 0:
+            if cache_score and cache_score > 0:
                 return round(cache_score, 2)
 
-        # Fallback: Try to fetch from EDHRec commander page
+        # 2️⃣ Try lowercase or comma-stripped variants
+        for name in normalized_candidates:
+            for cached_name, salt in salt_cache.get_all_salt_scores().items():
+                normalized_cached = cached_name.lower().replace(",", "").replace("’", "'")
+                if normalized_cached == name:
+                    return round(salt, 2)
+
+        # 3️⃣ Try fuzzy partial match (e.g., "Aesi" inside "Aesi Tyrant of Gyre Strait")
+        for name in normalized_candidates:
+            for cached_name, salt in salt_cache.get_all_salt_scores().items():
+                if name in cached_name.lower() and salt > 0:
+                    return round(salt, 2)
+
+        # 4️⃣ Final fallback - use EDHRec direct lookup
         try:
-            # Normalize commander name for URL
             commander_normalized = commander_name.lower().replace(" ", "-").replace(",", "").replace("'", "")
             url = f"https://edhrec.com/commanders/{commander_normalized}"
-            
+
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(url, timeout=10.0)
-                if response.status_code != 200:
-                    # Fallback to known commanders list
-                    return self._get_fallback_commander_salt(commander_normalized)
-                
-                # Parse HTML for salt score using the same method as deck cards
-                html_content = response.text
-                soup = BeautifulSoup(html_content, "html.parser")
-                
-                # Look for salt score in the page content
-                salt_score = self._extract_salt_score_from_html_commander(soup, commander_name)
-                if salt_score > 0:
-                    return salt_score
-                
-                # Final fallback to known commanders
-                return self._get_fallback_commander_salt(commander_normalized)
-                
+                response = await client.get(url)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    salt_score = self._extract_salt_score_from_html_commander(soup, commander_name)
+                    if salt_score > 0:
+                        return salt_score
         except Exception as e:
-            logger.warning(f"Failed to fetch commander salt score for {commander_name}: {e}")
-            return self._get_fallback_commander_salt(commander_normalized)
+            logger.warning(f"Failed live fetch for commander salt ({commander_name}): {e}")
+
+        # 5️⃣ Last fallback
+        return self._get_fallback_commander_salt(commander_name.lower().replace(" ", "-"))
 
     def _get_fallback_commander_salt(self, commander_normalized: str) -> float:
         """Fallback salt scores for known high-salt commanders."""
