@@ -2038,16 +2038,15 @@ async def get_commander_salt(
     
     logger.info(f"Commander salt query for '{commander_name}': enhanced={enhanced_score}, basic={basic_score}, normalized={normalized_score}")
     
-    return {
-        "commander_name": commander_name,
-        "enhanced_lookup": enhanced_score,
-        "basic_lookup": basic_score,
-        "normalized_lookup": normalized_score,
-        "found": enhanced_score > 0,
-        "variants_count": len(variants),
-        "variants": variants[:5],  # Show first 5 variants for debugging
-        "cache_size": len(salt_cache.salt_data)
-    }
+    # Use the enhanced score as the primary result
+    final_score = enhanced_score if enhanced_score > 0 else (basic_score if basic_score > 0 else normalized_score)
+    
+    return CommanderSaltResponse(
+        commander_name=commander_name,
+        salt_score=final_score,
+        rank=None,  # Rank calculation can be added later if needed
+        timestamp=datetime.utcnow().isoformat()
+    )
 
 
 @router.post("/api/v1/deck/validate", response_model=DeckValidationResponse)
@@ -2056,13 +2055,7 @@ async def validate_deck(
     api_key: str = Depends(verify_api_key)
 ) -> DeckValidationResponse:
     """
-    Validate a deck against Commander Brackets rules and format legality.
-    
-    Provide a decklist via list of card names, text blob, or deck URL.
-    Optionally specify commander and target bracket.
-    Validates against official Commander Brackets system.
-    Checks for Game Changers, format legality, and power level compliance.
-    """
+    Validate a deck against Commander Brackets rules and format legality."""
     try:
         result = await deck_validator.validate_deck(request)
 
@@ -2126,26 +2119,13 @@ async def get_brackets_info(
     Returns official bracket definitions, expectations, and restrictions
     based on Wizards of the Coast's October 21, 2025 update.
     """
-    return {
-        "brackets": COMMANDER_BRACKETS,
-        "game_changers": {
-            "current_list_size": len(GAME_CHANGERS["current_list"]),
-            "recent_removals": GAME_CHANGERS["removed_2025"],
-            "total_removed_2025": len(GAME_CHANGERS["removed_2025"])
-        },
-        "validation_categories": {
-            "mass_land_denial": {
-                "description": "Cards that destroy, exile, or bounce multiple lands",
-                "sample_cards": MASS_LAND_DENIAL[:10]
-            },
-            "early_game_combos": {
-                "description": "2-card combinations that can win early",
-                "combos": EARLY_GAME_COMBOS
-            }
-        },
-        "last_updated": "2025-10-21",
-        "source": "https://magic.wizards.com/en/news/announcements/commander-brackets-beta-update-october-21-2025"
-    }
+    from datetime import datetime
+    
+    return BracketsInfoResponse(
+        brackets=COMMANDER_BRACKETS,
+        description="Commander Brackets system information",
+        timestamp=datetime.utcnow().isoformat() + "Z"
+    )
 
 
 @router.get("/api/v1/brackets/game-changers/list")
@@ -2205,7 +2185,14 @@ async def get_salt_cache_info(
     Returns cache status, card count, and last refresh time.
     """
     salt_cache = get_salt_cache()
-    return salt_cache.get_cache_info()
+    cache_info = salt_cache.get_cache_info()
+    
+    return SaltInfoResponse(
+        cache_stats=cache_info,
+        total_cards=cache_info.get('card_count', 0),
+        last_updated=cache_info.get('cached_at') or '2025-01-01T00:00:00Z',
+        description="Salt score cache information"
+    )
 
 
 @router.get("/api/v1/salt/card/{card_name}")
@@ -2320,17 +2307,17 @@ async def check_deck_for_early_game_combos(
     
     Early-game combos are ONLY acceptable for brackets 4 (Optimized) and 5 (cEDH).
     """
-    if not card_names:
+    if not request.card_names:
         raise HTTPException(
             status_code=400,
             detail="Card names list is required and cannot be empty",
         )
     
-    found_combos = check_early_game_combos_in_cards(card_names)
+    found_combos = check_early_game_combos_in_cards(request.card_names)
     
     return {
         "success": True,
-        "cards_checked": len(card_names),
+        "cards_checked": len(request.card_names),
         "combos_found": len(found_combos),
         "combos": found_combos,
         "recommendation": (
@@ -2354,17 +2341,17 @@ async def check_deck_for_late_game_combos(
     
     Late-game combos are acceptable for brackets 3 (Upgraded), 4 (Optimized), and 5 (cEDH).
     """
-    if not card_names:
+    if not request.card_names:
         raise HTTPException(
             status_code=400,
             detail="Card names list is required and cannot be empty",
         )
     
-    found_combos = check_late_game_combos_in_cards(card_names)
+    found_combos = check_late_game_combos_in_cards(request.card_names)
     
     return {
         "success": True,
-        "cards_checked": len(card_names),
+        "cards_checked": len(request.card_names),
         "combos_found": len(found_combos),
         "combos": found_combos,
         "recommendation": (
@@ -2388,20 +2375,20 @@ async def check_deck_for_all_combos(
     
     Checks both early-game and late-game combos.
     """
-    if not card_names:
+    if not request.card_names:
         raise HTTPException(
             status_code=400,
             detail="Card names list is required and cannot be empty. Send cards as a JSON array or with 'card_names' key.",
         )
     
-    early_game_combos = check_early_game_combos_in_cards(card_names)
-    late_game_combos = check_late_game_combos_in_cards(card_names)
+    early_game_combos = check_early_game_combos_in_cards(request.card_names)
+    late_game_combos = check_late_game_combos_in_cards(request.card_names)
     
     total_combos = len(early_game_combos) + len(late_game_combos)
     
     return {
         "success": True,
-        "cards_checked": len(card_names),
+        "cards_checked": len(request.card_names),
         "total_combos_found": total_combos,
         "early_game_combos": {
             "count": len(early_game_combos),
