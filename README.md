@@ -53,6 +53,16 @@ Required variables:
 
 The API will be available at `http://localhost:8000`
 
+### Authentication and API keys
+
+All API routes except `/`, `/health`, and `/api/v1/status` require a Bearer token in the `Authorization` header:
+
+```
+Authorization: Bearer <your API key>
+```
+
+Set `API_KEY` in your environment (or `.env` file) before running the application.
+
 ### Render Deployment
 
 1. **Build and push to Docker registry** (or use Render's auto-deploy from GitHub)
@@ -181,6 +191,16 @@ The API uses mightstone's built-in persistence with Beanie ODM for MongoDB.
 - Health check endpoints for uptime monitoring
 - Structured logging for troubleshooting
 - Error handling with appropriate HTTP status codes
+
+## OpenAPI documentation
+
+Regenerate the OpenAPI document directly from the FastAPI application to ensure it stays in sync:
+
+```bash
+python scripts/generate_openapi.py
+```
+
+The generated file is saved as `openapi.json` in the repository root.
 
 ## Development
 

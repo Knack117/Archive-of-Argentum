@@ -9,6 +9,8 @@ from cachetools import TTLCache
 
 from config import settings
 
+API_VERSION = "1.1.0"
+
 EDHREC_BASE_URL = "https://edhrec.com/"
 EDHREC_JSON_BASE_URL = "https://json.edhrec.com/pages/"
 COMMANDERSPELLBOOK_BASE_URL = "https://backend.commanderspellbook.com/"
@@ -64,6 +66,7 @@ _theme_catalog_cache: Dict[str, Any] = {"timestamp": 0.0, "slugs": set()}
 _theme_catalog_lock = asyncio.Lock()
 
 __all__ = [
+    "API_VERSION",
     "EDHREC_BASE_URL",
     "EDHREC_JSON_BASE_URL",
     "COMMANDERSPELLBOOK_BASE_URL",

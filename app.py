@@ -6,7 +6,9 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.openapi.utils import get_openapi
 
+from aoa.constants import API_VERSION
 from config import settings
 from aoa.models import DeckCard, DeckValidationRequest, DeckValidationResponse
 from aoa.routes import cards, cedh, commanders, combos, deck_validation, popular_decks, system, themes
@@ -41,7 +43,7 @@ from aoa.services.commanders import (
 app = FastAPI(
     title="MTG Deckbuilding API",
     description="Commander utility endpoints including deck validation and EDHRec tooling.",
-    version="1.1.0",
+    version=API_VERSION,
 )
 
 app.add_middleware(
@@ -60,6 +62,43 @@ app.include_router(themes.router)
 app.include_router(deck_validation.router)
 app.include_router(popular_decks.router)
 app.include_router(cedh.router)
+
+
+def custom_openapi():
+    """Generate OpenAPI schema with consistent security defaults."""
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=API_VERSION,
+        description=app.description,
+        routes=app.routes,
+    )
+
+    security_schemes = openapi_schema.setdefault("components", {}).setdefault("securitySchemes", {})
+    security_schemes.setdefault(
+        "HTTPBearer",
+        {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "API Key",
+            "description": "All endpoints (except status, health, and root) require a Bearer API key.",
+        },
+    )
+
+    unsecured_paths = {"/", "/health", "/api/v1/status"}
+    for path, methods in openapi_schema.get("paths", {}).items():
+        if path in unsecured_paths:
+            continue
+        for method in methods.values():
+            method.setdefault("security", [{"HTTPBearer": []}])
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 __all__ = [
     "app",
