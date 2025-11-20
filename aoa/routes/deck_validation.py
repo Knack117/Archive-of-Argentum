@@ -2404,13 +2404,106 @@ async def check_deck_for_all_combos(
     
     Example request body:
     ```json
-    ["Demonic Consultation", "Thassa's Oracle", "Mikaeus, the Unhallowed", "Triskelion"]
+    ["Jeska's Will", "Reiterate", "Mana Geyser", "Lightning Greaves"]
+    ```
+    
+    Alternative request format (also supported):
+    ```json
+    {
+        "card_names": ["Jeska's Will", "Reiterate", "Mana Geyser", "Lightning Greaves"]
+    }
     ```
     """
     if not card_names:
         raise HTTPException(
             status_code=400,
-            detail="Card names list is required and cannot be empty",
+            detail="Card names list is required and cannot be empty. Send cards as a JSON array or with 'card_names' key.",
+        )
+    
+    early_game_combos = check_early_game_combos_in_cards(card_names)
+    late_game_combos = check_late_game_combos_in_cards(card_names)
+    
+    total_combos = len(early_game_combos) + len(late_game_combos)
+    
+    return {
+        "success": True,
+        "cards_checked": len(card_names),
+        "total_combos_found": total_combos,
+        "early_game_combos": {
+            "count": len(early_game_combos),
+            "combos": early_game_combos,
+            "acceptable_brackets": ["4", "5"]
+        },
+        "late_game_combos": {
+            "count": len(late_game_combos),
+            "combos": late_game_combos,
+            "acceptable_brackets": ["3", "4", "5"]
+        },
+        "bracket_recommendation": (
+            "This deck contains early-game combos and should be played in brackets 4 or 5 only."
+            if early_game_combos
+            else (
+                "This deck contains late-game combos and is suitable for brackets 3, 4, or 5."
+                if late_game_combos
+                else "No 2-card combos detected. Suitable for all brackets."
+            )
+        ),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.post("/api/v1/deck/checkDeckAllCombos")
+async def check_deck_all_combos_flexible(
+    request: Dict[str, Any],
+    api_key: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """
+    Check if a deck contains any 2-card combos (both early-game and late-game).
+    
+    This endpoint supports multiple request formats for maximum compatibility:
+    
+    Format 1 (direct array):
+    ```json
+    ["Jeska's Will", "Reiterate", "Mana Geyser"]
+    ```
+    
+    Format 2 (object with card_names):
+    ```json
+    {
+        "card_names": ["Jeska's Will", "Reiterate", "Mana Geyser"]
+    }
+    ```
+    
+    Format 3 (object with cards):
+    ```json
+    {
+        "cards": ["Jeska's Will", "Reiterate", "Mana Geyser"]
+    }
+    ```
+    
+    Returns all combos found with their bracket acceptability.
+    """
+    # Extract card names from various request formats
+    card_names = None
+    
+    # Check if it's a direct array
+    if isinstance(request, list):
+        card_names = request
+    
+    # Check if it's an object with card_names or cards keys
+    elif isinstance(request, dict):
+        if "card_names" in request and isinstance(request["card_names"], list):
+            card_names = request["card_names"]
+        elif "cards" in request and isinstance(request["cards"], list):
+            card_names = request["cards"]
+    
+    if not card_names:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid request format. Send cards as a JSON array, or use "
+                "'card_names' or 'cards' keys in the request object."
+            ),
         )
     
     early_game_combos = check_early_game_combos_in_cards(card_names)
