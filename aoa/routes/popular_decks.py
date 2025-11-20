@@ -7,6 +7,7 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
+from aoa.models import PopularDecksResponse, PopularDecksInfoResponse
 from aoa.security import verify_api_key
 
 logger = logging.getLogger(__name__)
@@ -224,7 +225,7 @@ async def scrape_archidekt_popular_decks(
         return []
 
 
-@router.get("/api/v1/popular-decks")
+@router.get("/api/v1/popular-decks", response_model=PopularDecksResponse)
 async def get_all_popular_decks(
     limit_per_source: int = Query(
         5, 
@@ -238,19 +239,12 @@ async def get_all_popular_decks(
     ),
     api_key: str = Depends(verify_api_key)
 ) -> Dict[str, Any]:
-    """
-    Get the top most viewed decks from both Moxfield and Archidekt without bracket filtering.
+    """Get top most-viewed Commander decks from Moxfield and Archidekt without bracket filtering.
     
     When a commander is specified, only Moxfield results are returned (10 decks total).
     Without a commander, returns decks from both sources (5 from each by default).
     
-    Returns deck URLs with metadata including:
-    - Deck URL
-    - View count
-    - Whether it includes a primer
-    - Deck title
-    - Source (moxfield or archidekt)
-    - Bracket information (when available)
+    Returns deck URLs with metadata including view count, primer status, and source information.
     - Commander name (for search context)
     
     Args:
@@ -320,7 +314,7 @@ async def get_all_popular_decks(
 
 
 
-@router.get("/api/v1/popular-decks/info")
+@router.get("/api/v1/popular-decks/info", response_model=PopularDecksInfoResponse)
 async def get_popular_decks_info(
     api_key: str = Depends(verify_api_key)
 ) -> Dict[str, Any]:
@@ -397,7 +391,7 @@ async def get_popular_decks_info(
     }
 
 
-@router.get("/api/v1/popular-decks/{bracket}")
+@router.get("/api/v1/popular-decks/{bracket}", response_model=PopularDecksResponse)
 async def get_popular_decks(
     bracket: str = Path(
         ..., 
@@ -415,15 +409,12 @@ async def get_popular_decks(
     ),
     api_key: str = Depends(verify_api_key)
 ) -> Dict[str, Any]:
-    """
-    Get the top most viewed decks for a given commander bracket from both Moxfield and Archidekt.
+    """Get top most-viewed decks for a specific commander bracket from both Moxfield and Archidekt.
     
     When a commander is specified, only Moxfield results are returned (10 decks total).
     Without a commander, returns decks from both sources (5 from each by default).
     
-    Returns deck URLs with metadata including:
-    - Deck URL
-    - View count
+    Returns deck URLs with metadata including view count, primer status, and source information.
     - Whether it includes a primer
     - Deck title
     - Source (moxfield or archidekt)
