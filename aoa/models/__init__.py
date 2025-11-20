@@ -28,6 +28,11 @@ from .responses import (
     BracketsInfoResponse,
     SaltInfoResponse,
     CommanderSaltResponse,
+    EarlyGameCombosResponse,
+    LateGameCombosResponse,
+    ComboApiInfoResponse,
+    AvailableTagsResponse,
+    TagsCatalogResponse,
 )
 from .requests import (
     ComboCheckRequest,
@@ -67,4 +72,9 @@ __all__ = [
     "CommanderSaltResponse",
     "ComboCheckRequest",
     "DeckComboCheckRequest",
+    "EarlyGameCombosResponse",
+    "LateGameCombosResponse",
+    "ComboApiInfoResponse",
+    "AvailableTagsResponse",
+    "TagsCatalogResponse",
 ]
