@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from aoa.models import CEDHSearchResponse
 from aoa.security import verify_api_key
 
 logger = logging.getLogger(__name__)
@@ -198,21 +199,7 @@ def format_deck_entry(deck: Dict[str, Any]) -> Dict[str, Any]:
 @router.get(
     "/search",
     summary="Search cEDH Database",
-    description="""
-    Search the competitive EDH decklist database with various filters.
-    
-    **Filter Options:**
-    - `commander`: Search by commander name (partial match, case-insensitive)
-    - `colors`: Exact color identity match (e.g., "ub" for Dimir, "wubrg" for 5-color)
-    - `section`: Filter by competitive level (COMPETITIVE, DEPRECATED, BREW)
-    - `primer_only`: Only return decks with primers available
-    - `limit`: Maximum number of results to return (default: 20)
-    
-    **Examples:**
-    - `/api/v1/cedh/search?commander=tymna` - Find all Tymna decks
-    - `/api/v1/cedh/search?colors=ub&section=COMPETITIVE` - Competitive Dimir decks
-    - `/api/v1/cedh/search?primer_only=true&limit=10` - Top 10 decks with primers
-    """,
+    description="Search the competitive EDH decklist database with filters for commander, colors, section, primer availability, and result limit.",
 )
 async def search_cedh_decks(
     commander: Optional[str] = Query(None, description="Commander name to search for"),
@@ -220,7 +207,7 @@ async def search_cedh_decks(
     section: Optional[str] = Query(None, description="Section filter: COMPETITIVE, DEPRECATED, or BREW"),
     primer_only: bool = Query(False, description="Only return decks with primers"),
     limit: int = Query(20, ge=1, le=100, description="Maximum number of results"),
-):
+) -> CEDHSearchResponse:
     """Search the cEDH database with filters."""
     # Fetch database
     database = await fetch_cedh_database()
@@ -240,16 +227,18 @@ async def search_cedh_decks(
     # Format results
     results = [format_deck_entry(deck) for deck in filtered]
     
-    return {
-        "total_results": len(results),
-        "filters_applied": {
+    return CEDHSearchResponse(
+        success=True,
+        data=results,
+        count=len(results),
+        filters_applied={
             "commander": commander,
             "colors": colors,
             "section": section,
             "primer_only": primer_only
         },
-        "decks": results
-    }
+        timestamp=datetime.utcnow().isoformat()
+    )
 
 
 @router.get(
