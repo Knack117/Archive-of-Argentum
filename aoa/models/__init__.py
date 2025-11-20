@@ -16,6 +16,23 @@ from .deck_validation import (
     DeckValidationResponse,
 )
 from .themes import PageTheme, ThemeCollection, ThemeContainer, ThemeItem
+from .responses import (
+    GameChangerResponse,
+    BannedCardsResponse,
+    MassLandDestructionResponse,
+    ComboCheckResponse,
+    AutocompleteResponse,
+    PopularDecksResponse,
+    PopularDecksInfoResponse,
+    CEDHSearchResponse,
+    BracketsInfoResponse,
+    SaltInfoResponse,
+    CommanderSaltResponse,
+)
+from .requests import (
+    ComboCheckRequest,
+    DeckComboCheckRequest,
+)
 
 __all__ = [
     "Card",
@@ -37,4 +54,17 @@ __all__ = [
     "ThemeCollection",
     "ThemeContainer",
     "ThemeItem",
+    "GameChangerResponse",
+    "BannedCardsResponse",
+    "MassLandDestructionResponse",
+    "ComboCheckResponse",
+    "AutocompleteResponse",
+    "PopularDecksResponse",
+    "PopularDecksInfoResponse",
+    "CEDHSearchResponse",
+    "BracketsInfoResponse",
+    "SaltInfoResponse",
+    "CommanderSaltResponse",
+    "ComboCheckRequest",
+    "DeckComboCheckRequest",
 ]
