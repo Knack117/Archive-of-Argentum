@@ -76,6 +76,14 @@ def custom_openapi():
         routes=app.routes,
     )
 
+    servers = openapi_schema.setdefault("servers", [])
+    render_server = {
+        "url": "https://mtg-mightstone-gpt.onrender.com",
+        "description": "Render production deployment",
+    }
+    if render_server not in servers:
+        servers.append(render_server)
+
     security_schemes = openapi_schema.setdefault("components", {}).setdefault("securitySchemes", {})
     security_schemes.setdefault(
         "HTTPBearer",

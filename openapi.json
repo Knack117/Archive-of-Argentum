@@ -3385,5 +3385,11 @@
         "scheme": "bearer"
       }
     }
-  }
+  },
+  "servers": [
+    {
+      "url": "https://mtg-mightstone-gpt.onrender.com",
+      "description": "Render production deployment"
+    }
+  ]
 }
