@@ -119,7 +119,7 @@ COMMANDER_BRACKETS = {
     }
 }
 
-# Game Changers list (October 2025 update)
+# Game Changers list (Official Scryfall is:gamechanger search - 51 cards)
 GAME_CHANGERS = {
     "removed_2025": [
         "Expropriate", "Jin-Gitaxias, Core Augur", "Sway of the Stars", "Vorinclex, Voice of Hunger",
@@ -127,27 +127,46 @@ GAME_CHANGERS = {
         "Yuriko, the Tiger's Shadow", "Deflecting Swat", "Food Chain"
     ],
     "current_list": [
-        # High-impact cards that warp games
-        "Ad Nauseam", "Demonic Consultation", "Thassa's Oracle", "Tainted Pact",
-        "Exquisite Blood", "Sanguine Bond", "Consecrated Sphinx", "Coalition Victory",
-        "Panoptic Mirror", "Time Walk", "Ancestral Recall", "Black Lotus",
-        "Mox Sapphire", "Mox Jet", "Mox Pearl", "Mox Ruby", "Mox Emerald",
-        "Fastbond", "Lion's Eye Diamond", "Mana Vault", "Sol Ring", "Mana Crypt",
-        "Chrome Mox", "Mox Opal", "Lotus Petal", "Dark Ritual", "Cabal Ritual",
-        "Necropotence", "Yawgmoth's Will", "Timetwister", "Wheel of Fortune",
-        "Mystical Tutor", "Vampiric Tutor", "Demonic Tutor", "Imperial Seal",
-        "Grim Tutor", "Beseech the Mirror", "Wish", "Cunning Wish", "Ritual Wish",
-        "Biorhythm", "Enter the Infinite", "Laboratory Maniac", "Jace, Wielder of Mysteries",
-        "Laboratory Maniac", "Neurok Transmuter", "Split Decision", "Brainstorm", "Ponder",
-        "Preordain", "Spell Pierce", "Force of Will", "Force of Negation", "Mana Drain",
-        "Counterspell", "Misdirection", "Pact of Negation", "Snapback", "Cyclonic Rift",
-        "Vandalblast", "Armageddon", "Ravages of War", "Cataclysm", "Balance",
-        "Life from the Loam", "The Tabernacle at Pendrell Vale", "Back to Basics",
-        "Winter Orb", "Static Orb", "Tangle Wire", "Smokestack", "Crucible of Worlds",
-        "Land Tax", "Scroll Rack", "Miren's Oracle Engine", "Sensei's Divining Top",
-        "The One Ring", "Ring of Maiev", "Shaharazad", "Panoptic Mirror"
+        # Official Game Changers from Scryfall is:gamechanger search (51 cards)
+        "Ad Nauseam", "Ancient Tomb", "Aura Shards", "Bolas's Citadel",
+        "Braids, Cabal Minion", "Chrome Mox", "Coalition Victory", "Consecrated Sphinx",
+        "Crop Rotation", "Cyclonic Rift", "Demonic Tutor", "Drannith Magistrate",
+        "Enlightened Tutor", "Field of the Dead", "Fierce Guardianship", "Force of Will",
+        "Gaea's Cradle", "Gamble", "Gifts Ungiven", "Glacial Chasm",
+        "Grand Arbiter Augustin IV", "Grim Monolith", "Humility", "Imperial Seal",
+        "Intuition", "Jeska's Will", "Lion's Eye Diamond", "Mana Vault",
+        "Mishra's Workshop", "Mox Diamond", "Mystical Tutor", "Narset, Parter of Veils",
+        "Natural Order", "Necropotence", "Notion Thief", "Opposition Agent",
+        "Orcish Bowmasters", "Panoptic Mirror", "Rhystic Study", "Seedborn Muse",
+        "Serra's Sanctum", "Smothering Tithe", "Survival of the Fittest",
+        "Teferi's Protection", "Tergrid, God of Fright // Tergrid's Lantern",
+        "Thassa's Oracle", "The One Ring", "The Tabernacle at Pendrell Vale",
+        "Underworld Breach", "Vampiric Tutor", "Worldly Tutor"
     ]
 }
+
+# Official Commander Banned List (85 cards from Scryfall banned:commander search)
+BANNED_CARDS = [
+    "Adriana's Valor", "Advantageous Proclamation", "Amulet of Quoz", "Ancestral Recall",
+    "Assemble the Rank and Vile", "Backup Plan", "Balance", "Biorhythm", "Black Lotus",
+    "Brago's Favor", "Bronze Tablet", "Channel", "Chaos Orb", "Cleanse", "Contract from Below",
+    "Crusade", "Darkpact", "Demonic Attorney", "Dockside Extortionist", "Double Stroke",
+    "Echoing Boon", "Emissary's Ploy", "Emrakul, the Aeons Torn", 
+    "Erayo, Soratami Ascendant // Erayo's Essence", "Falling Star", "Fastbond", "Flash",
+    "Golos, Tireless Pilgrim", "Griselbrand", "Hired Heist", "Hold the Perimeter",
+    "Hullbreacher", "Hymn of the Wilds", "Immediate Action", "Imprison", "Incendiary Dissent",
+    "Invoke Prejudice", "Iona, Shield of Emeria", "Iterative Analysis", "Jeweled Bird",
+    "Jeweled Lotus", "Jihad", "Karakas", "Leovold, Emissary of Trest", "Library of Alexandria",
+    "Limited Resources", "Lutri, the Spellchaser", "Mana Crypt", "Mox Emerald", "Mox Jet",
+    "Mox Pearl", "Mox Ruby", "Mox Sapphire", "Muzzio's Preparations", "Nadu, Winged Wisdom",
+    "Natural Unity", "Paradox Engine", "Power Play", "Pradesh Gypsies", "Primeval Titan",
+    "Prophet of Kruphix", "Rebirth", "Recurring Nightmare", "Rofellos, Llanowar Emissary",
+    "Secrets of Paradise", "Secret Summoning", "Sentinel Dispatch", "Shahrazad",
+    "Sovereign's Realm", "Stone-Throwing Devils", "Summoner's Bond", "Sundering Titan",
+    "Sylvan Primordial", "Tempest Efreet", "Time Vault", "Time Walk", "Timmerian Fiends",
+    "Tinker", "Tolarian Academy", "Trade Secrets", "Unexpected Potential", "Upheaval",
+    "Weight Advantage", "Worldknit", "Yawgmoth's Bargain"
+]
 
 # Mass Land Denial cards curated from Commander resources
 MASS_LAND_DENIAL = [
@@ -834,25 +853,8 @@ class DeckValidator:
         if "authoritative_data" in self.cache:
             return self.cache["authoritative_data"]
 
-        # Authoritative Game Changers list maintained from Wizards/RC guidance
-        game_changers = {
-            "Ad Nauseam", "Ancient Tomb", "Aura Shards", "Bolas's Citadel", 
-            "Braids, Cabal Minion", "Chrome Mox", "Coalition Victory", 
-            "Consecrated Sphinx", "Crop Rotation", "Cyclonic Rift", 
-            "Demonic Tutor", "Drannith Magistrate", "Enlightened Tutor", 
-            "Field of the Dead", "Fierce Guardianship", "Force of Will", 
-            "Gaea's Cradle", "Gamble", "Gifts Ungiven", "Glacial Chasm", 
-            "Grand Arbiter Augustin IV", "Grim Monolith", "Humility", 
-            "Imperial Seal", "Intuition", "Jeska's Will", "Lion's Eye Diamond", 
-            "Mana Vault", "Mishra's Workshop", "Mox Diamond", "Mystical Tutor", 
-            "Narset, Parter of Veils", "Natural Order", "Necropotence", 
-            "Notion Thief", "Opposition Agent", "Orcish Bowmasters", 
-            "Panoptic Mirror", "Rhystic Study", "Seedborn Muse", "Serra's Sanctum", 
-            "Smothering Tithe", "Survival of the Fittest", "Teferi's Protection", 
-            "Tergrid, God of Fright // Tergrid's Lantern", "Tergrid, God of Fright",
-            "Thassa's Oracle", "The One Ring", "The Tabernacle at Pendrell Vale", 
-            "Underworld Breach", "Vampiric Tutor", "Worldly Tutor"
-        }
+        # Use the official Game Changers list from the module-level constant
+        game_changers = set(GAME_CHANGERS["current_list"])
 
         # Mass Land Denial list curated from Wizards/RC resources
         mass_land_denial = {
@@ -1320,10 +1322,10 @@ class DeckValidator:
                 f"detected: {duplicate_list}."
             )
 
-        # Check for banned cards (placeholder - would need comprehensive banlist)
-        banned_cards = ["Ancestral Recall", "Black Lotus", "Time Walk", "Mox Sapphire", "Mox Jet", "Mox Pearl", "Mox Ruby", "Mox Emerald"]
+        # Check for banned cards using official Commander banlist
+        banned_cards_set = set(BANNED_CARDS)
         for card in cards:
-            if card.name in banned_cards:
+            if card.name in banned_cards_set:
                 legality_issues.append(f"Card '{card.name}' is banned in Commander")
 
         return {
