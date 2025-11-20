@@ -23,6 +23,12 @@ from aoa.models import (
     DeckCard,
     DeckValidationRequest,
     DeckValidationResponse,
+    ComboCheckRequest,
+    DeckComboCheckRequest,
+    ComboCheckResponse,
+    BracketsInfoResponse,
+    SaltInfoResponse,
+    CommanderSaltResponse,
 )
 from aoa.security import verify_api_key
 from aoa.services.salt_cache import SaltCacheService, get_salt_cache, refresh_salt_cache
@@ -2010,19 +2016,14 @@ deck_validator = DeckValidator()
 # Deck Validation API Endpoints
 # --------------------------------------------------------------------
 
-@router.get("/api/v1/deck/commander-salt/{commander_name}")
+@router.get("/api/v1/deck/commander-salt/{commander_name}", response_model=CommanderSaltResponse)
 async def get_commander_salt(
     commander_name: str,
     api_key: str = Depends(verify_api_key)
-) -> Dict[str, Any]:
-    """
-    Get the salt score for a specific commander with enhanced normalization.
+) -> CommanderSaltResponse:
+    """Get the salt score for a specific commander with enhanced normalization.
     
-    Args:
-        commander_name: The name of the commander
-        
-    Returns:
-        Commander name and salt score with debug information
+    Returns the commander's salt score with rank information.
     """
     salt_cache = get_salt_cache()
     await salt_cache.ensure_loaded()
@@ -2057,14 +2058,10 @@ async def validate_deck(
     """
     Validate a deck against Commander Brackets rules and format legality.
     
-    - Provide a decklist via:
-      * List of card names
-      * Multi-line text blob
-      * Text chunks
-      * Deck URL (Moxfield or Archidekt)
-    - Optionally specify commander and target bracket
-    - Validates against official Commander Brackets system
-    - Checks for Game Changers, format legality, and power level compliance
+    Provide a decklist via list of card names, text blob, or deck URL.
+    Optionally specify commander and target bracket.
+    Validates against official Commander Brackets system.
+    Checks for Game Changers, format legality, and power level compliance.
     """
     try:
         result = await deck_validator.validate_deck(request)
@@ -2123,9 +2120,8 @@ async def get_sample_validation(
 @router.get("/api/v1/brackets/info")
 async def get_brackets_info(
     api_key: str = Depends(verify_api_key)
-) -> Dict[str, Any]:
-    """
-    Get comprehensive information about Commander Brackets system.
+) -> BracketsInfoResponse:
+    """Get comprehensive information about Commander Brackets system.
     
     Returns official bracket definitions, expectations, and restrictions
     based on Wizards of the Coast's October 21, 2025 update.
@@ -2203,9 +2199,8 @@ async def refresh_salt_data(
 @router.get("/api/v1/salt/info")
 async def get_salt_cache_info(
     api_key: str = Depends(verify_api_key)
-) -> Dict[str, Any]:
-    """
-    Get information about the current salt score cache.
+) -> SaltInfoResponse:
+    """Get information about the current salt score cache.
     
     Returns cache status, card count, and last refresh time.
     """
@@ -2313,23 +2308,17 @@ def check_late_game_combos_in_cards(card_names: List[str]) -> List[Dict[str, Any
     return found_combos
 
 
-@router.post("/api/v1/deck/check-early-game-combos")
+@router.post("/api/v1/deck/check-early-game-combos", response_model=ComboCheckResponse)
 async def check_deck_for_early_game_combos(
-    card_names: List[str],
+    request: ComboCheckRequest,
     api_key: str = Depends(verify_api_key),
-) -> Dict[str, Any]:
-    """
-    Check if a deck contains any early-game 2-card combos.
+) -> ComboCheckResponse:
+    """Check if a deck contains early-game 2-card combos acceptable for Optimized+ brackets.
     
     Send a list of card names in the request body.
     Returns any early-game combos found and their bracket acceptability.
     
     Early-game combos are ONLY acceptable for brackets 4 (Optimized) and 5 (cEDH).
-    
-    Example request body:
-    ```json
-    ["Demonic Consultation", "Thassa's Oracle", "Sol Ring", "Command Tower"]
-    ```
     """
     if not card_names:
         raise HTTPException(
@@ -2353,23 +2342,17 @@ async def check_deck_for_early_game_combos(
     }
 
 
-@router.post("/api/v1/deck/check-late-game-combos")
+@router.post("/api/v1/deck/check-late-game-combos", response_model=ComboCheckResponse)
 async def check_deck_for_late_game_combos(
-    card_names: List[str],
+    request: ComboCheckRequest,
     api_key: str = Depends(verify_api_key),
-) -> Dict[str, Any]:
-    """
-    Check if a deck contains any late-game 2-card combos.
+) -> ComboCheckResponse:
+    """Check if a deck contains late-game 2-card combos acceptable for Upgraded+ brackets.
     
     Send a list of card names in the request body.
     Returns any late-game combos found and their bracket acceptability.
     
     Late-game combos are acceptable for brackets 3 (Upgraded), 4 (Optimized), and 5 (cEDH).
-    
-    Example request body:
-    ```json
-    ["Mikaeus, the Unhallowed", "Triskelion", "Sol Ring", "Command Tower"]
-    ```
     """
     if not card_names:
         raise HTTPException(
@@ -2393,28 +2376,17 @@ async def check_deck_for_late_game_combos(
     }
 
 
-@router.post("/api/v1/deck/check-all-combos")
+@router.post("/api/v1/deck/check-all-combos", response_model=ComboCheckResponse)
 async def check_deck_for_all_combos(
-    card_names: List[str],
+    request: ComboCheckRequest,
     api_key: str = Depends(verify_api_key),
-) -> Dict[str, Any]:
-    """
-    Check if a deck contains any 2-card combos (both early-game and late-game).
+) -> ComboCheckResponse:
+    """Check if a deck contains any 2-card combos with bracket acceptability information.
     
     Send a list of card names in the request body.
     Returns all combos found with their bracket acceptability.
     
-    Example request body:
-    ```json
-    ["Jeska's Will", "Reiterate", "Mana Geyser", "Lightning Greaves"]
-    ```
-    
-    Alternative request format (also supported):
-    ```json
-    {
-        "card_names": ["Jeska's Will", "Reiterate", "Mana Geyser", "Lightning Greaves"]
-    }
-    ```
+    Checks both early-game and late-game combos.
     """
     if not card_names:
         raise HTTPException(
