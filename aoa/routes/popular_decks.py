@@ -1,6 +1,7 @@
 """Popular decks routes - fetch top decks from Moxfield and Archidekt."""
 import logging
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -291,26 +292,15 @@ async def get_all_popular_decks(
             
             bracket_distribution[bracket_name] = bracket_distribution.get(bracket_name, 0) + 1
     
-    return {
-        "bracket_filter": None,
-        "commander_filter": commander,
-        "total_decks": len(all_decks),
-        "moxfield": {
-            "count": len(moxfield_decks),
-            "decks": moxfield_decks
-        },
-        "archidekt": {
-            "count": len(archidekt_decks),
-            "decks": archidekt_decks
-        },
-        "all_decks": all_decks,
-        "summary": {
-            "total_with_primer": sum(1 for d in all_decks if d.get('has_primer', False)),
-            "average_views": sum(d.get('views', 0) for d in all_decks) / len(all_decks) if all_decks else 0,
-            "bracket_distribution": bracket_distribution,
-            "decks_with_bracket_info": sum(1 for d in all_decks if d.get('bracket') is not None)
-        }
-    }
+    return PopularDecksResponse(
+        success=True,
+        data=all_decks,
+        count=len(all_decks),
+        source="moxfield+archidekt",
+        description="Top most-viewed Commander decks from Moxfield and Archidekt",
+        bracket=None,
+        timestamp=datetime.utcnow().isoformat()
+    )
 
 
 
@@ -323,72 +313,17 @@ async def get_popular_decks_info(
     
     Returns supported brackets and usage examples.
     """
-    return {
-        "description": "Fetch top most-viewed Commander decks from Moxfield and Archidekt",
-        "endpoints": [
-            {
-                "path": "/api/v1/popular-decks",
-                "description": "Get popular decks without bracket filtering (includes bracket info for each deck)"
-            },
-            {
-                "path": "/api/v1/popular-decks/{bracket}",
-                "description": "Get popular decks filtered by specific bracket"
-            }
-        ],
-        "supported_brackets": [
-            "exhibition",
-            "core",
-            "upgraded",
-            "optimized",
-            "cedh"
-        ],
-        "commander_filtering": {
-            "description": "Filter decks by commander name using the 'commander' query parameter",
-            "source": "Moxfield only (Archidekt commander filtering not available without headless browser)",
-            "decks_returned_with_commander": "10 decks from Moxfield",
-            "examples": [
-                "commander=Brudiclad",
-                "commander=Brudiclad, Telchor Engineer",
-                "commander=Yuriko"
-            ]
+    return PopularDecksInfoResponse(
+        description="Fetch top most-viewed Commander decks from Moxfield and Archidekt",
+        supported_brackets=["exhibition", "core", "upgraded", "optimized", "cedh"],
+        usage_examples={
+            "/api/v1/popular-decks": "Get top 5 decks from each source (no bracket filter)",
+            "/api/v1/popular-decks/upgraded": "Get top 5 decks from each source for Upgraded bracket",
+            "/api/v1/popular-decks?limit_per_source=10": "Get top 10 decks from each source",
+            "/api/v1/popular-decks?commander=Brudiclad": "Get top 10 Brudiclad decks from Moxfield"
         },
-        "default_limit_per_source": 5,
-        "max_limit_per_source": 20,
-        "total_decks_returned": "10 (5 from each source by default, or 10 from Moxfield when commander is specified)",
-        "example_usage": [
-            {
-                "url": "/api/v1/popular-decks",
-                "description": "Get top 5 decks from each source (no bracket filter, shows bracket info for each deck)"
-            },
-            {
-                "url": "/api/v1/popular-decks/upgraded",
-                "description": "Get top 5 decks from each source for Upgraded bracket"
-            },
-            {
-                "url": "/api/v1/popular-decks?limit_per_source=10",
-                "description": "Get top 10 decks from each source (no bracket filter)"
-            },
-            {
-                "url": "/api/v1/popular-decks?commander=Brudiclad",
-                "description": "Get top 10 Brudiclad decks from Moxfield (any bracket)"
-            },
-            {
-                "url": "/api/v1/popular-decks/upgraded?commander=Brudiclad",
-                "description": "Get top 10 Brudiclad decks from Moxfield in Upgraded bracket"
-            }
-        ],
-        "deck_metadata_included": [
-            "url",
-            "title",
-            "views",
-            "has_primer",
-            "source",
-            "format",
-            "bracket (included when available, always present for Archidekt decks)",
-            "author (Moxfield only)",
-            "last_updated (Moxfield only)"
-        ]
-    }
+        timestamp=datetime.utcnow().isoformat()
+    )
 
 
 @router.get("/api/v1/popular-decks/{bracket}", response_model=PopularDecksResponse)
@@ -474,25 +409,14 @@ async def get_popular_decks(
             
             bracket_distribution[bracket_name] = bracket_distribution.get(bracket_name, 0) + 1
     
-    return {
-        "bracket_filter": bracket.lower(),
-        "commander_filter": commander,
-        "total_decks": len(all_decks),
-        "moxfield": {
-            "count": len(moxfield_decks),
-            "decks": moxfield_decks
-        },
-        "archidekt": {
-            "count": len(archidekt_decks),
-            "decks": archidekt_decks
-        },
-        "all_decks": all_decks,
-        "summary": {
-            "total_with_primer": sum(1 for d in all_decks if d.get('has_primer', False)),
-            "average_views": sum(d.get('views', 0) for d in all_decks) / len(all_decks) if all_decks else 0,
-            "bracket_distribution": bracket_distribution,
-            "decks_with_bracket_info": sum(1 for d in all_decks if d.get('bracket') is not None)
-        }
-    }
+    return PopularDecksResponse(
+        success=True,
+        data=all_decks,
+        count=len(all_decks),
+        source="moxfield+archidekt",
+        description="Top most-viewed Commander decks from Moxfield and Archidekt",
+        bracket=bracket.lower(),
+        timestamp=datetime.utcnow().isoformat()
+    )
 
 

@@ -2315,18 +2315,22 @@ async def check_deck_for_early_game_combos(
     
     found_combos = check_early_game_combos_in_cards(request.card_names)
     
-    return {
-        "success": True,
-        "cards_checked": len(request.card_names),
-        "combos_found": len(found_combos),
-        "combos": found_combos,
-        "recommendation": (
-            f"Found {len(found_combos)} early-game combo(s). "
-            "These combos are acceptable ONLY for brackets 4 (Optimized) and 5 (cEDH)."
-        ) if found_combos else "No early-game combos detected in this card list.",
-        "acceptable_brackets": ["4", "5"],
-        "timestamp": datetime.utcnow().isoformat(),
+    # Build bracket acceptability
+    bracket_acceptable = {
+        "1": False,  # Exhibition
+        "2": False,  # Core
+        "3": False,  # Upgraded
+        "4": True,   # Optimized
+        "5": True,   # cEDH
     }
+    
+    return ComboCheckResponse(
+        card_names=request.card_names,
+        combos_found=found_combos,
+        total_combos=len(found_combos),
+        bracket_acceptable=bracket_acceptable,
+        timestamp=datetime.utcnow().isoformat(),
+    )
 
 
 @router.post("/api/v1/deck/check-late-game-combos", response_model=ComboCheckResponse)
@@ -2349,18 +2353,22 @@ async def check_deck_for_late_game_combos(
     
     found_combos = check_late_game_combos_in_cards(request.card_names)
     
-    return {
-        "success": True,
-        "cards_checked": len(request.card_names),
-        "combos_found": len(found_combos),
-        "combos": found_combos,
-        "recommendation": (
-            f"Found {len(found_combos)} late-game combo(s). "
-            "These combos are acceptable for brackets 3 (Upgraded), 4 (Optimized), and 5 (cEDH)."
-        ) if found_combos else "No late-game combos detected in this card list.",
-        "acceptable_brackets": ["3", "4", "5"],
-        "timestamp": datetime.utcnow().isoformat(),
+    # Build bracket acceptability
+    bracket_acceptable = {
+        "1": False,  # Exhibition
+        "2": False,  # Core
+        "3": True,   # Upgraded
+        "4": True,   # Optimized
+        "5": True,   # cEDH
     }
+    
+    return ComboCheckResponse(
+        card_names=request.card_names,
+        combos_found=found_combos,
+        total_combos=len(found_combos),
+        bracket_acceptable=bracket_acceptable,
+        timestamp=datetime.utcnow().isoformat(),
+    )
 
 
 @router.post("/api/v1/deck/check-all-combos", response_model=ComboCheckResponse)
@@ -2384,33 +2392,26 @@ async def check_deck_for_all_combos(
     early_game_combos = check_early_game_combos_in_cards(request.card_names)
     late_game_combos = check_late_game_combos_in_cards(request.card_names)
     
-    total_combos = len(early_game_combos) + len(late_game_combos)
+    # Combine all combos
+    all_combos = early_game_combos + late_game_combos
+    total_combos = len(all_combos)
     
-    return {
-        "success": True,
-        "cards_checked": len(request.card_names),
-        "total_combos_found": total_combos,
-        "early_game_combos": {
-            "count": len(early_game_combos),
-            "combos": early_game_combos,
-            "acceptable_brackets": ["4", "5"]
-        },
-        "late_game_combos": {
-            "count": len(late_game_combos),
-            "combos": late_game_combos,
-            "acceptable_brackets": ["3", "4", "5"]
-        },
-        "bracket_recommendation": (
-            "This deck contains early-game combos and should be played in brackets 4 or 5 only."
-            if early_game_combos
-            else (
-                "This deck contains late-game combos and is suitable for brackets 3, 4, or 5."
-                if late_game_combos
-                else "No 2-card combos detected. Suitable for all brackets."
-            )
-        ),
-        "timestamp": datetime.utcnow().isoformat(),
+    # Determine bracket acceptability
+    bracket_acceptable = {
+        "1": False,  # Exhibition
+        "2": False,  # Core
+        "3": len(late_game_combos) > 0,  # Upgraded - only if late game combos
+        "4": True,   # Optimized
+        "5": True,   # cEDH
     }
+    
+    return ComboCheckResponse(
+        card_names=request.card_names,
+        combos_found=all_combos,
+        total_combos=total_combos,
+        bracket_acceptable=bracket_acceptable,
+        timestamp=datetime.utcnow().isoformat(),
+    )
 
 
 @router.post(
