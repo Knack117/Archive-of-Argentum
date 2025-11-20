@@ -106,3 +106,48 @@ class CommanderSaltResponse(BaseModel):
     salt_score: float = Field(..., description="Commander salt score")
     rank: Optional[int] = Field(None, description="Salt rank")
     timestamp: str = Field(..., description="Response timestamp")
+
+
+class EarlyGameCombosResponse(BaseModel):
+    """Response model for early game combos endpoint."""
+    combos: List[Dict[str, Any]] = Field(..., description="List of early game 2-card combos")
+    total_count: int = Field(..., description="Total number of combos")
+    description: str = Field("Complete list of early-game 2-card combos NOT acceptable for brackets 1-3", description="Endpoint description")
+    bracket_info: str = Field("Only acceptable for brackets 4 (Optimized) and 5 (cEDH)", description="Bracket acceptability information")
+    timestamp: str = Field(..., description="Response timestamp")
+
+
+class LateGameCombosResponse(BaseModel):
+    """Response model for late game combos endpoint."""
+    combos: List[Dict[str, Any]] = Field(..., description="List of late game 2-card combos")
+    total_count: int = Field(..., description="Total number of combos")
+    description: str = Field("Complete list of late-game 2-card combos acceptable for brackets 3-5", description="Endpoint description")
+    bracket_info: str = Field("Acceptable for brackets 3 (Upgraded), 4 (Optimized), and 5 (cEDH)", description="Bracket acceptability information")
+    timestamp: str = Field(..., description="Response timestamp")
+
+
+class ComboApiInfoResponse(BaseModel):
+    """Response model for combo API info endpoint."""
+    endpoints: Dict[str, str] = Field(..., description="Available combo endpoints")
+    combo_categories: List[str] = Field(..., description="Available combo categories")
+    usage_examples: Dict[str, str] = Field(default_factory=dict, description="Usage examples")
+    description: str = Field("Overview of combo API endpoints, categories, and usage examples", description="Endpoint description")
+    timestamp: str = Field(..., description="Response timestamp")
+
+
+class AvailableTagsResponse(BaseModel):
+    """Response model for available tags endpoint."""
+    tags: List[str] = Field(..., description="List of available tags/themes")
+    total_count: int = Field(..., description="Total number of available tags")
+    source: str = Field("edhrec", description="Data source")
+    description: str = Field("Complete list of available tags and themes from EDHRec", description="Endpoint description")
+    timestamp: str = Field(..., description="Response timestamp")
+
+
+class TagsCatalogResponse(BaseModel):
+    """Response model for tags catalog endpoint."""
+    tags_catalog: Dict[str, Dict[str, Any]] = Field(..., description="Complete tags catalog with examples and usage info")
+    total_tags: int = Field(..., description="Total number of tags in catalog")
+    source: str = Field("edhrec", description="Data source")
+    description: str = Field("Complete tags catalog with examples and usage information", description="Endpoint description")
+    timestamp: str = Field(..., description="Response timestamp")
