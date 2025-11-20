@@ -42,12 +42,12 @@ async def get_commander_summary(
 ) -> CommanderSummary:
     """Fetch EDHRec commander summary data with pagination and filtering.
     
-    **GPT Compatibility Notes:**
+    GPT compatibility notes:
     - Default limit (40 cards/category) keeps responses within GPT limits
     - Filter categories to reduce response size further
     - Use compact mode for minimal responses
     
-    **Examples:**
+    Examples:
     - Basic: `?name=halana-kessig-ranger`
     - Limited: `?name=halana&limit=30`
     - Filtered: `?name=halana&categories=creatures,instants,enchantments`
