@@ -46,6 +46,40 @@ app = FastAPI(
     version=API_VERSION,
 )
 
+MAX_OPENAPI_OPERATIONS = 30
+PRIORITIZED_OPENAPI_PATHS = [
+    "/api/v1/cards/search",
+    "/api/v1/cards/autocomplete",
+    "/api/v1/cards/random",
+    "/api/v1/cards/gamechangers",
+    "/api/v1/cards/banned",
+    "/api/v1/cards/mass-land-destruction",
+    "/api/v1/cards/{card_id}",
+    "/api/v1/commander/summary",
+    "/api/v1/combos/commander/{commander_name}",
+    "/api/v1/combos/search",
+    "/api/v1/combos/early-game",
+    "/api/v1/combos/late-game",
+    "/api/v1/combos/info",
+    "/api/v1/tags/available",
+    "/api/v1/themes/{theme_slug}",
+    "/api/v1/tags/catalog",
+    "/api/v1/deck/commander-salt/{commander_name}",
+    "/api/v1/deck/validate",
+    "/api/v1/brackets/info",
+    "/api/v1/salt/info",
+    "/api/v1/deck/check-early-game-combos",
+    "/api/v1/deck/check-late-game-combos",
+    "/api/v1/deck/check-all-combos",
+    "/api/v1/popular-decks",
+    "/api/v1/popular-decks/info",
+    "/api/v1/popular-decks/{bracket}",
+    "/api/v1/cedh/search",
+    "/api/v1/cedh/commanders",
+    "/api/v1/cedh/stats",
+    "/api/v1/cedh/info",
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
@@ -62,6 +96,35 @@ app.include_router(themes.router)
 app.include_router(deck_validation.router)
 app.include_router(popular_decks.router)
 app.include_router(cedh.router)
+
+
+def _limit_openapi_paths(openapi_schema: dict) -> None:
+    """Restrict the number of OpenAPI operations to the configured maximum."""
+
+    paths = openapi_schema.get("paths", {})
+    if not paths:
+        return
+
+    operation_count = sum(len(methods) for methods in paths.values())
+    if operation_count <= MAX_OPENAPI_OPERATIONS:
+        return
+
+    allowed_paths = []
+    for prioritized_path in PRIORITIZED_OPENAPI_PATHS:
+        if prioritized_path in paths:
+            allowed_paths.append(prioritized_path)
+        if len(allowed_paths) >= MAX_OPENAPI_OPERATIONS:
+            break
+
+    if len(allowed_paths) < MAX_OPENAPI_OPERATIONS:
+        for path in paths:
+            if path in allowed_paths:
+                continue
+            allowed_paths.append(path)
+            if len(allowed_paths) >= MAX_OPENAPI_OPERATIONS:
+                break
+
+    openapi_schema["paths"] = {path: paths[path] for path in allowed_paths if path in paths}
 
 
 def custom_openapi():
@@ -101,6 +164,8 @@ def custom_openapi():
             continue
         for method in methods.values():
             method.setdefault("security", [{"HTTPBearer": []}])
+
+    _limit_openapi_paths(openapi_schema)
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema
