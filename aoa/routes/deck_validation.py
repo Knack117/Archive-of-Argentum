@@ -2454,7 +2454,10 @@ async def check_deck_for_all_combos(
     }
 
 
-@router.post("/api/v1/deck/checkDeckAllCombos")
+@router.post(
+    "/api/v1/deck/check-all-combos-flexible",
+    summary="Check deck for any combos (flexible format)",
+)
 async def check_deck_all_combos_flexible(
     request: Dict[str, Any],
     api_key: str = Depends(verify_api_key),

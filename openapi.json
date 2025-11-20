@@ -1,0 +1,3389 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MTG Deckbuilding API",
+    "description": "Commander utility endpoints including deck validation and EDHRec tooling.",
+    "version": "1.1.0"
+  },
+  "paths": {
+    "/api/v1/status": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Api Status",
+        "description": "API status endpoint.",
+        "operationId": "api_status_api_v1_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Api Status Api V1 Status Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Root",
+        "description": "Root endpoint.",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Root  Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Health Check",
+        "description": "Health check endpoint expected by hosting environments.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Health Check Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cards/search": {
+      "post": {
+        "tags": [
+          "cards"
+        ],
+        "summary": "Search Cards",
+        "description": "Search for MTG cards using Scryfall API.\n\nNOTE: Scryfall returns up to 175 cards per page (fixed by Scryfall).\nThe per_page parameter limits results client-side after fetching from Scryfall.",
+        "operationId": "search_cards_api_v1_cards_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cards/autocomplete": {
+      "get": {
+        "tags": [
+          "cards"
+        ],
+        "summary": "Autocomplete Card Names",
+        "description": "Return card name suggestions using Scryfall autocomplete API.",
+        "operationId": "autocomplete_card_names_api_v1_cards_autocomplete_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "description": "Search query (minimum 2 characters)",
+              "title": "Q"
+            },
+            "description": "Search query (minimum 2 characters)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Autocomplete Card Names Api V1 Cards Autocomplete Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cards/random": {
+      "get": {
+        "tags": [
+          "cards"
+        ],
+        "summary": "Get Random Card",
+        "description": "Return a random card from Scryfall API.",
+        "operationId": "get_random_card_api_v1_cards_random_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Card"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cards/gamechangers": {
+      "get": {
+        "tags": [
+          "cards"
+        ],
+        "summary": "Get Gamechangers",
+        "description": "Get list of Commander Game Changer cards from Scryfall.\n\nReturns cards that are tagged as \"gamechanger\" on Scryfall, \nsorted by USD price in descending order.",
+        "operationId": "get_gamechangers_api_v1_cards_gamechangers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Gamechangers Api V1 Cards Gamechangers Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cards/banned": {
+      "get": {
+        "tags": [
+          "cards"
+        ],
+        "summary": "Get Banned Cards",
+        "description": "Get list of banned Commander cards from Scryfall.\n\nReturns cards that are banned in the Commander format,\nsorted alphabetically by name.",
+        "operationId": "get_banned_cards_api_v1_cards_banned_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Banned Cards Api V1 Cards Banned Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cards/mass-land-destruction": {
+      "get": {
+        "tags": [
+          "cards"
+        ],
+        "summary": "Get Mass Land Destruction",
+        "description": "Get list of Mass Land Destruction cards from Scryfall.\n\nReturns cards that match the Mass Land Denial criteria as defined by Wizards of the Coast.\nThese cards regularly destroy, exile, and bounce other lands, keep lands tapped,\nor change what mana is produced by four or more lands per player without replacing them.\n\nNote: Uses Scryfall search queries to identify MLD cards based on card text patterns.",
+        "operationId": "get_mass_land_destruction_api_v1_cards_mass_land_destruction_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Mass Land Destruction Api V1 Cards Mass Land Destruction Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cards/{card_id}": {
+      "get": {
+        "tags": [
+          "cards"
+        ],
+        "summary": "Get Card",
+        "description": "Return a specific card by ID from Scryfall API.",
+        "operationId": "get_card_api_v1_cards__card_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "card_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Card Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Card"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/commander/summary": {
+      "get": {
+        "tags": [
+          "commanders"
+        ],
+        "summary": "Get Commander Summary",
+        "description": "Fetch EDHRec commander summary data with pagination and filtering.\n\n**GPT Compatibility Notes:**\n- Default limit (40 cards/category) keeps responses within GPT limits\n- Filter categories to reduce response size further\n- Use compact mode for minimal responses\n\n**Examples:**\n- Basic: `?name=halana-kessig-ranger`\n- Limited: `?name=halana&limit=30`\n- Filtered: `?name=halana&categories=creatures,instants,enchantments`\n- Compact: `?name=halana&mode=compact&limit=20`",
+        "operationId": "get_commander_summary_api_v1_commander_summary_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Commander name",
+              "title": "Name"
+            },
+            "description": "Commander name"
+          },
+          {
+            "name": "commander_url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "EDHRec commander URL",
+              "title": "Commander Url"
+            },
+            "description": "EDHRec commander URL"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Maximum cards per category (default: 40 for GPT compatibility)",
+              "default": 40,
+              "title": "Limit"
+            },
+            "description": "Maximum cards per category (default: 40 for GPT compatibility)"
+          },
+          {
+            "name": "categories",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated category filters (e.g., 'creatures,instants,enchantments'). Supports: creatures, instants, sorceries, artifacts, enchantments, planeswalkers, lands, highsynergy, topcards, newcards",
+              "title": "Categories"
+            },
+            "description": "Comma-separated category filters (e.g., 'creatures,instants,enchantments'). Supports: creatures, instants, sorceries, artifacts, enchantments, planeswalkers, lands, highsynergy, topcards, newcards"
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(standard|compact)$",
+              "description": "Response mode: 'standard' (full data) or 'compact' (minimal data)",
+              "default": "standard",
+              "title": "Mode"
+            },
+            "description": "Response mode: 'standard' (full data) or 'compact' (minimal data)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommanderSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/average_deck/summary": {
+      "get": {
+        "tags": [
+          "commanders"
+        ],
+        "summary": "Get Average Deck Summary",
+        "description": "Fetch a summary of an EDHRec Average Deck page for a given commander.",
+        "operationId": "get_average_deck_summary_api_v1_average_deck_summary_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "commander_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Commander Name"
+            }
+          },
+          {
+            "name": "commander_slug",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Commander Slug"
+            }
+          },
+          {
+            "name": "bracket",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bracket type: exhibition, core, upgraded, optimized, or cedh.",
+              "title": "Bracket"
+            },
+            "description": "Bracket type: exhibition, core, upgraded, optimized, or cedh."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Maximum cards per category (default: 40 for GPT compatibility)",
+              "default": 40,
+              "title": "Limit"
+            },
+            "description": "Maximum cards per category (default: 40 for GPT compatibility)"
+          },
+          {
+            "name": "categories",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated category filters (e.g., 'creatures,instants,enchantments')",
+              "title": "Categories"
+            },
+            "description": "Comma-separated category filters (e.g., 'creatures,instants,enchantments')"
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(standard|compact)$",
+              "description": "Response mode: 'standard' (full data) or 'compact' (minimal data)",
+              "default": "standard",
+              "title": "Mode"
+            },
+            "description": "Response mode: 'standard' (full data) or 'compact' (minimal data)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommanderSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/combos/commander/{commander_name}": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Get Commander Combos Endpoint",
+        "description": "Fetch all combos for a specific commander from Commander Spellbook.",
+        "operationId": "get_commander_combos_endpoint_api_v1_combos_commander__commander_name__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "commander_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Commander Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComboSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/combos/search": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Search Combos By Card",
+        "description": "Search for combos containing a specific card from Commander Spellbook.",
+        "operationId": "search_combos_by_card_api_v1_combos_search_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "card_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Card name to search for in combos",
+              "title": "Card Name"
+            },
+            "description": "Card name to search for in combos"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComboSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/debug/combos/test": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Debug Combo Search",
+        "description": "Debug endpoint to test combo search and show raw backend API info.",
+        "operationId": "debug_combo_search_api_v1_debug_combos_test_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Test search query",
+              "title": "Query"
+            },
+            "description": "Test search query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Debug Combo Search Api V1 Debug Combos Test Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/combos/early-game": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Get Early Game Combos",
+        "description": "Get the complete list of early-game 2-card combos.\n\nThese combos are NOT acceptable for brackets 1 (Exhibition), 2 (Core), or 3 (Upgraded).\nThey are only acceptable for brackets 4 (Optimized) and 5 (cEDH).",
+        "operationId": "get_early_game_combos_api_v1_combos_early_game_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Early Game Combos Api V1 Combos Early Game Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/combos/late-game": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Get Late Game Combos",
+        "description": "Get the complete list of late-game 2-card combos.\n\nThese combos are considered acceptable for play in brackets 3, 4, and 5\naccording to community voting on EDHRec.",
+        "operationId": "get_late_game_combos_api_v1_combos_late_game_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Late Game Combos Api V1 Combos Late Game Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/combos/search-early-game": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Search Early Game Combos By Card",
+        "description": "Search for early-game combos containing a specific card.\n\nReturns all early-game 2-card combos that include the specified card.",
+        "operationId": "search_early_game_combos_by_card_api_v1_combos_search_early_game_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "card_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Card name to search for in early-game combos",
+              "title": "Card Name"
+            },
+            "description": "Card name to search for in early-game combos"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Search Early Game Combos By Card Api V1 Combos Search Early Game Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/combos/search-late-game": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Search Late Game Combos By Card",
+        "description": "Search for late-game combos containing a specific card.\n\nReturns all late-game 2-card combos that include the specified card.",
+        "operationId": "search_late_game_combos_by_card_api_v1_combos_search_late_game_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "card_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Card name to search for in late-game combos",
+              "title": "Card Name"
+            },
+            "description": "Card name to search for in late-game combos"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Search Late Game Combos By Card Api V1 Combos Search Late Game Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/combos/info": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Get Combo Api Info",
+        "description": "Get information about the combo API endpoints.\n\nProvides an overview of available endpoints, combo categories, and usage examples.",
+        "operationId": "get_combo_api_info_api_v1_combos_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Combo Api Info Api V1 Combos Info Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/tags/available": {
+      "get": {
+        "tags": [
+          "themes"
+        ],
+        "summary": "Get Available Tags",
+        "description": "Fetch the complete list of available tags/themes from EDHRec.",
+        "operationId": "get_available_tags_api_v1_tags_available_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Available Tags Api V1 Tags Available Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/themes/{theme_slug}": {
+      "get": {
+        "tags": [
+          "themes"
+        ],
+        "summary": "Get Theme",
+        "description": "Fetch EDHRec theme or tag data.",
+        "operationId": "get_theme_api_v1_themes__theme_slug__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "theme_slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Theme Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageTheme"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tags/refresh-cache": {
+      "post": {
+        "tags": [
+          "themes"
+        ],
+        "summary": "Refresh Tags Cache",
+        "description": "Refresh the EDHRec tags cache from the source.",
+        "operationId": "refresh_tags_cache_api_v1_tags_refresh_cache_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "force_refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Force Refresh"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Refresh Tags Cache Api V1 Tags Refresh Cache Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tags/catalog": {
+      "get": {
+        "tags": [
+          "themes"
+        ],
+        "summary": "Get Tags Catalog",
+        "description": "Get the complete tags catalog with examples and usage info.",
+        "operationId": "get_tags_catalog_api_v1_tags_catalog_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Tags Catalog Api V1 Tags Catalog Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/deck/commander-salt/{commander_name}": {
+      "get": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Get Commander Salt",
+        "description": "Get the salt score for a specific commander with enhanced normalization.\n\nArgs:\n    commander_name: The name of the commander\n    \nReturns:\n    Commander name and salt score with debug information",
+        "operationId": "get_commander_salt_api_v1_deck_commander_salt__commander_name__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "commander_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Commander Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Commander Salt Api V1 Deck Commander Salt  Commander Name  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/deck/validate": {
+      "post": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Validate Deck",
+        "description": "Validate a deck against Commander Brackets rules and format legality.\n\n- Provide a decklist via:\n  * List of card names\n  * Multi-line text blob\n  * Text chunks\n  * Deck URL (Moxfield or Archidekt)\n- Optionally specify commander and target bracket\n- Validates against official Commander Brackets system\n- Checks for Game Changers, format legality, and power level compliance",
+        "operationId": "validate_deck_api_v1_deck_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeckValidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeckValidationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/deck/validate/sample": {
+      "get": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Get Sample Validation",
+        "description": "Get sample deck validation to demonstrate the endpoint functionality.",
+        "operationId": "get_sample_validation_api_v1_deck_validate_sample_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Sample Validation Api V1 Deck Validate Sample Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/brackets/info": {
+      "get": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Get Brackets Info",
+        "description": "Get comprehensive information about Commander Brackets system.\n\nReturns official bracket definitions, expectations, and restrictions\nbased on Wizards of the Coast's October 21, 2025 update.",
+        "operationId": "get_brackets_info_api_v1_brackets_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Brackets Info Api V1 Brackets Info Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/brackets/game-changers/list": {
+      "get": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Get Game Changers List",
+        "description": "Get the complete list of Game Changers cards.\n\nBased on the October 21, 2025 update from Wizards of the Coast.",
+        "operationId": "get_game_changers_list_api_v1_brackets_game_changers_list_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Game Changers List Api V1 Brackets Game Changers List Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/salt/refresh": {
+      "post": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Refresh Salt Data",
+        "description": "Manually refresh the salt score cache from EDHRec.\n\nThis fetches all 30,000+ cards with salt scores from EDHRec's JSON API\nand saves them to the local cache. The cache never expires automatically -\nonly use this endpoint when you want fresh data.\n\nRecommended refresh interval: Every 3 months.",
+        "operationId": "refresh_salt_data_api_v1_salt_refresh_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Refresh Salt Data Api V1 Salt Refresh Post"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/salt/info": {
+      "get": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Get Salt Cache Info",
+        "description": "Get information about the current salt score cache.\n\nReturns cache status, card count, and last refresh time.",
+        "operationId": "get_salt_cache_info_api_v1_salt_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Salt Cache Info Api V1 Salt Info Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/salt/card/{card_name}": {
+      "get": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Get Card Salt Score",
+        "description": "Get the salt score for a specific card using enhanced normalization.\n\nArgs:\n    card_name: The name of the card (case-insensitive)\n\nReturns:\n    Card name and salt score with enhanced lookup",
+        "operationId": "get_card_salt_score_api_v1_salt_card__card_name__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "card_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Card Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Card Salt Score Api V1 Salt Card  Card Name  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/deck/check-early-game-combos": {
+      "post": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Check Deck For Early Game Combos",
+        "description": "Check if a deck contains any early-game 2-card combos.\n\nSend a list of card names in the request body.\nReturns any early-game combos found and their bracket acceptability.\n\nEarly-game combos are ONLY acceptable for brackets 4 (Optimized) and 5 (cEDH).\n\nExample request body:\n```json\n[\"Demonic Consultation\", \"Thassa's Oracle\", \"Sol Ring\", \"Command Tower\"]\n```",
+        "operationId": "check_deck_for_early_game_combos_api_v1_deck_check_early_game_combos_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Card Names"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Check Deck For Early Game Combos Api V1 Deck Check Early Game Combos Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/deck/check-late-game-combos": {
+      "post": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Check Deck For Late Game Combos",
+        "description": "Check if a deck contains any late-game 2-card combos.\n\nSend a list of card names in the request body.\nReturns any late-game combos found and their bracket acceptability.\n\nLate-game combos are acceptable for brackets 3 (Upgraded), 4 (Optimized), and 5 (cEDH).\n\nExample request body:\n```json\n[\"Mikaeus, the Unhallowed\", \"Triskelion\", \"Sol Ring\", \"Command Tower\"]\n```",
+        "operationId": "check_deck_for_late_game_combos_api_v1_deck_check_late_game_combos_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Card Names"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Check Deck For Late Game Combos Api V1 Deck Check Late Game Combos Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/deck/check-all-combos": {
+      "post": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Check Deck For All Combos",
+        "description": "Check if a deck contains any 2-card combos (both early-game and late-game).\n\nSend a list of card names in the request body.\nReturns all combos found with their bracket acceptability.\n\nExample request body:\n```json\n[\"Jeska's Will\", \"Reiterate\", \"Mana Geyser\", \"Lightning Greaves\"]\n```\n\nAlternative request format (also supported):\n```json\n{\n    \"card_names\": [\"Jeska's Will\", \"Reiterate\", \"Mana Geyser\", \"Lightning Greaves\"]\n}\n```",
+        "operationId": "check_deck_for_all_combos_api_v1_deck_check_all_combos_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "title": "Card Names"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Check Deck For All Combos Api V1 Deck Check All Combos Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/deck/check-all-combos-flexible": {
+      "post": {
+        "tags": [
+          "deck-validation"
+        ],
+        "summary": "Check deck for any combos (flexible format)",
+        "description": "Check if a deck contains any 2-card combos (both early-game and late-game).\n\nThis endpoint supports multiple request formats for maximum compatibility:\n\nFormat 1 (direct array):\n```json\n[\"Jeska's Will\", \"Reiterate\", \"Mana Geyser\"]\n```\n\nFormat 2 (object with card_names):\n```json\n{\n    \"card_names\": [\"Jeska's Will\", \"Reiterate\", \"Mana Geyser\"]\n}\n```\n\nFormat 3 (object with cards):\n```json\n{\n    \"cards\": [\"Jeska's Will\", \"Reiterate\", \"Mana Geyser\"]\n}\n```\n\nReturns all combos found with their bracket acceptability.",
+        "operationId": "check_deck_all_combos_flexible_api_v1_deck_check_all_combos_flexible_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "title": "Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Check Deck All Combos Flexible Api V1 Deck Check All Combos Flexible Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/popular-decks": {
+      "get": {
+        "tags": [
+          "popular-decks"
+        ],
+        "summary": "Get All Popular Decks",
+        "description": "Get the top most viewed decks from both Moxfield and Archidekt without bracket filtering.\n\nWhen a commander is specified, only Moxfield results are returned (10 decks total).\nWithout a commander, returns decks from both sources (5 from each by default).\n\nReturns deck URLs with metadata including:\n- Deck URL\n- View count\n- Whether it includes a primer\n- Deck title\n- Source (moxfield or archidekt)\n- Bracket information (when available)\n- Commander name (for search context)\n\nArgs:\n    limit_per_source: Number of decks to fetch from each source (default 5, max 20)\n    commander: Optional commander name to filter results\n    \nReturns:\n    Dictionary containing decks with metadata including bracket info",
+        "operationId": "get_all_popular_decks_api_v1_popular_decks_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit_per_source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "description": "Number of decks to fetch from each source (default 5)",
+              "default": 5,
+              "title": "Limit Per Source"
+            },
+            "description": "Number of decks to fetch from each source (default 5)"
+          },
+          {
+            "name": "commander",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by commander name (e.g., 'Brudiclad' or 'Brudiclad, Telchor Engineer')",
+              "title": "Commander"
+            },
+            "description": "Filter by commander name (e.g., 'Brudiclad' or 'Brudiclad, Telchor Engineer')"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get All Popular Decks Api V1 Popular Decks Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/popular-decks/info": {
+      "get": {
+        "tags": [
+          "popular-decks"
+        ],
+        "summary": "Get Popular Decks Info",
+        "description": "Get information about the popular decks endpoint.\n\nReturns supported brackets and usage examples.",
+        "operationId": "get_popular_decks_info_api_v1_popular_decks_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Popular Decks Info Api V1 Popular Decks Info Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/popular-decks/{bracket}": {
+      "get": {
+        "tags": [
+          "popular-decks"
+        ],
+        "summary": "Get Popular Decks",
+        "description": "Get the top most viewed decks for a given commander bracket from both Moxfield and Archidekt.\n\nWhen a commander is specified, only Moxfield results are returned (10 decks total).\nWithout a commander, returns decks from both sources (5 from each by default).\n\nReturns deck URLs with metadata including:\n- Deck URL\n- View count\n- Whether it includes a primer\n- Deck title\n- Source (moxfield or archidekt)\n- Bracket information\n- Commander name (for search context)\n\nArgs:\n    bracket: Commander bracket (exhibition, core, upgraded, optimized, cedh)\n    limit_per_source: Number of decks to fetch from each source (default 5, max 20)\n    commander: Optional commander name to filter results\n    \nReturns:\n    Dictionary containing decks with metadata",
+        "operationId": "get_popular_decks_api_v1_popular_decks__bracket__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "bracket",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Commander bracket: exhibition, core, upgraded, optimized, or cedh",
+              "title": "Bracket"
+            },
+            "description": "Commander bracket: exhibition, core, upgraded, optimized, or cedh"
+          },
+          {
+            "name": "limit_per_source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "description": "Number of decks to fetch from each source (default 5)",
+              "default": 5,
+              "title": "Limit Per Source"
+            },
+            "description": "Number of decks to fetch from each source (default 5)"
+          },
+          {
+            "name": "commander",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by commander name (e.g., 'Brudiclad' or 'Brudiclad, Telchor Engineer')",
+              "title": "Commander"
+            },
+            "description": "Filter by commander name (e.g., 'Brudiclad' or 'Brudiclad, Telchor Engineer')"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Popular Decks Api V1 Popular Decks  Bracket  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cedh/search": {
+      "get": {
+        "tags": [
+          "cedh"
+        ],
+        "summary": "Search cEDH Database",
+        "description": "Search the competitive EDH decklist database with various filters.\n    \n    **Filter Options:**\n    - `commander`: Search by commander name (partial match, case-insensitive)\n    - `colors`: Exact color identity match (e.g., \"ub\" for Dimir, \"wubrg\" for 5-color)\n    - `section`: Filter by competitive level (COMPETITIVE, DEPRECATED, BREW)\n    - `primer_only`: Only return decks with primers available\n    - `limit`: Maximum number of results to return (default: 20)\n    \n    **Examples:**\n    - `/api/v1/cedh/search?commander=tymna` - Find all Tymna decks\n    - `/api/v1/cedh/search?colors=ub&section=COMPETITIVE` - Competitive Dimir decks\n    - `/api/v1/cedh/search?primer_only=true&limit=10` - Top 10 decks with primers",
+        "operationId": "search_cedh_decks_api_v1_cedh_search_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "commander",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Commander name to search for",
+              "title": "Commander"
+            },
+            "description": "Commander name to search for"
+          },
+          {
+            "name": "colors",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Color identity (e.g., 'ub', 'wubrg')",
+              "title": "Colors"
+            },
+            "description": "Color identity (e.g., 'ub', 'wubrg')"
+          },
+          {
+            "name": "section",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Section filter: COMPETITIVE, DEPRECATED, or BREW",
+              "title": "Section"
+            },
+            "description": "Section filter: COMPETITIVE, DEPRECATED, or BREW"
+          },
+          {
+            "name": "primer_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Only return decks with primers",
+              "default": false,
+              "title": "Primer Only"
+            },
+            "description": "Only return decks with primers"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Maximum number of results",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Maximum number of results"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cedh/commanders": {
+      "get": {
+        "tags": [
+          "cedh"
+        ],
+        "summary": "List All Commanders",
+        "description": "Get a list of all commanders in the cEDH database with deck counts.",
+        "operationId": "list_commanders_api_v1_cedh_commanders_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cedh/stats": {
+      "get": {
+        "tags": [
+          "cedh"
+        ],
+        "summary": "Database Statistics",
+        "description": "Get statistics about the cEDH database including color distribution, section breakdown, and more.",
+        "operationId": "get_database_stats_api_v1_cedh_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cedh/info": {
+      "get": {
+        "tags": [
+          "cedh"
+        ],
+        "summary": "API Information",
+        "description": "Get information about the cEDH database API endpoints and usage.",
+        "operationId": "get_api_info_api_v1_cedh_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BracketValidation": {
+        "properties": {
+          "target_bracket": {
+            "type": "string",
+            "title": "Target Bracket"
+          },
+          "overall_compliance": {
+            "type": "boolean",
+            "title": "Overall Compliance"
+          },
+          "bracket_score": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Bracket Score",
+            "description": "Bracket confidence score"
+          },
+          "compliance_details": {
+            "type": "object",
+            "title": "Compliance Details"
+          },
+          "violations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Violations"
+          },
+          "recommendations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recommendations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_bracket",
+          "overall_compliance",
+          "bracket_score"
+        ],
+        "title": "BracketValidation",
+        "description": "Bracket validation results."
+      },
+      "Card": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "mana_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mana Cost"
+          },
+          "cmc": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cmc"
+          },
+          "type_line": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type Line"
+          },
+          "oracle_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oracle Text"
+          },
+          "power": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power"
+          },
+          "toughness": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toughness"
+          },
+          "loyalty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loyalty"
+          },
+          "colors": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Colors"
+          },
+          "color_identity": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Identity"
+          },
+          "keywords": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keywords"
+          },
+          "legalities": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legalities"
+          },
+          "games": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Games"
+          },
+          "reserved": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserved"
+          },
+          "foil": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Foil"
+          },
+          "nonfoil": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nonfoil"
+          },
+          "oversized": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oversized"
+          },
+          "promo": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promo"
+          },
+          "reprint": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reprint"
+          },
+          "variation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variation"
+          },
+          "set_id": {
+            "type": "string",
+            "title": "Set Id"
+          },
+          "set": {
+            "type": "string",
+            "title": "Set"
+          },
+          "set_name": {
+            "type": "string",
+            "title": "Set Name"
+          },
+          "set_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Type"
+          },
+          "set_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Uri"
+          },
+          "set_search_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Search Uri"
+          },
+          "rulings_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rulings Uri"
+          },
+          "prints_search_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prints Search Uri"
+          },
+          "collector_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collector Number"
+          },
+          "digital": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digital"
+          },
+          "rarity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rarity"
+          },
+          "artist": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artist"
+          },
+          "artist_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artist Ids"
+          },
+          "illustration_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Illustration Id"
+          },
+          "border_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Border Color"
+          },
+          "frame": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frame"
+          },
+          "full_art": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Art"
+          },
+          "textless": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Textless"
+          },
+          "booster": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booster"
+          },
+          "story_spotlight": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Story Spotlight"
+          },
+          "edhrec_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edhrec Rank"
+          },
+          "penny_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Penny Rank"
+          },
+          "prices": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prices"
+          },
+          "related_uris": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Uris"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "set_id",
+          "set",
+          "set_name"
+        ],
+        "title": "Card"
+      },
+      "CardSearchRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order",
+            "default": "name"
+          },
+          "unique": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unique",
+            "default": "cards"
+          },
+          "include_extras": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Extras",
+            "default": false
+          },
+          "include_multilingual": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Multilingual",
+            "default": false
+          },
+          "include_foil": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Foil",
+            "default": true
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page",
+            "default": 1
+          },
+          "per_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Page",
+            "default": 20
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "CardSearchRequest"
+      },
+      "CardSearchResponse": {
+        "properties": {
+          "object": {
+            "type": "string",
+            "title": "Object"
+          },
+          "total_cards": {
+            "type": "integer",
+            "title": "Total Cards"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Card"
+            },
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "object",
+          "total_cards",
+          "data"
+        ],
+        "title": "CardSearchResponse"
+      },
+      "ComboResult": {
+        "properties": {
+          "combo_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combo Id"
+          },
+          "combo_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combo Name"
+          },
+          "color_identity": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Color Identity"
+          },
+          "cards_in_combo": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Cards In Combo"
+          },
+          "results_in_combo": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Results In Combo"
+          },
+          "decks_edhrec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decks Edhrec"
+          },
+          "variants": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variants"
+          },
+          "combo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combo Url"
+          },
+          "price_info": {
+            "type": "object",
+            "title": "Price Info"
+          }
+        },
+        "type": "object",
+        "title": "ComboResult",
+        "description": "Serialized representation of a Commander Spellbook combo."
+      },
+      "ComboSearchResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "commander_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commander Name"
+          },
+          "search_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Query"
+          },
+          "total_results": {
+            "type": "integer",
+            "title": "Total Results"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ComboResult"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "total_results",
+          "results",
+          "source_url",
+          "timestamp"
+        ],
+        "title": "ComboSearchResponse",
+        "description": "Envelope describing combo search API responses."
+      },
+      "CommanderCard": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "num_decks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Decks"
+          },
+          "potential_decks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Potential Decks"
+          },
+          "inclusion_percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inclusion Percentage"
+          },
+          "synergy_percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synergy Percentage"
+          },
+          "sanitized_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanitized Name"
+          },
+          "card_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Url"
+          }
+        },
+        "type": "object",
+        "title": "CommanderCard"
+      },
+      "CommanderCombo": {
+        "properties": {
+          "combo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combo"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "title": "CommanderCombo"
+      },
+      "CommanderSummary": {
+        "properties": {
+          "commander_name": {
+            "type": "string",
+            "title": "Commander Name"
+          },
+          "commander_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commander Url"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "commander_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Commander Tags"
+          },
+          "top_10_tags": {
+            "items": {
+              "$ref": "#/components/schemas/CommanderTag"
+            },
+            "type": "array",
+            "title": "Top 10 Tags"
+          },
+          "all_tags": {
+            "items": {
+              "$ref": "#/components/schemas/CommanderTag"
+            },
+            "type": "array",
+            "title": "All Tags"
+          },
+          "combos": {
+            "items": {
+              "$ref": "#/components/schemas/CommanderCombo"
+            },
+            "type": "array",
+            "title": "Combos"
+          },
+          "similar_commanders": {
+            "items": {
+              "$ref": "#/components/schemas/SimilarCommander"
+            },
+            "type": "array",
+            "title": "Similar Commanders"
+          },
+          "categories": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/CommanderCard"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Categories"
+          }
+        },
+        "type": "object",
+        "required": [
+          "commander_name"
+        ],
+        "title": "CommanderSummary"
+      },
+      "CommanderTag": {
+        "properties": {
+          "tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tag"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link"
+          }
+        },
+        "type": "object",
+        "title": "CommanderTag"
+      },
+      "DeckCard": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "quantity": {
+            "type": "integer",
+            "title": "Quantity",
+            "default": 1
+          },
+          "is_game_changer": {
+            "type": "boolean",
+            "title": "Is Game Changer",
+            "default": false
+          },
+          "bracket_categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Bracket Categories"
+          },
+          "legality_status": {
+            "type": "string",
+            "title": "Legality Status",
+            "default": "unknown"
+          },
+          "validation_issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validation Issues"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DeckCard",
+        "description": "Individual card in deck with validation metadata."
+      },
+      "DeckValidationRequest": {
+        "properties": {
+          "decklist": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Decklist",
+            "description": "List of card names in the deck. Useful for short requests."
+          },
+          "decklist_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decklist Text",
+            "description": "Optional multi-line decklist text blob. Each line should represent a card entry."
+          },
+          "decklist_chunks": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decklist Chunks",
+            "description": "Optional list of decklist text chunks. Use this when client payload limits require splitting a decklist into several strings."
+          },
+          "decklist_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decklist Url",
+            "description": "Optional URL to a deck on supported platforms (Moxfield, Archidekt). The validator will extract the decklist from this URL."
+          },
+          "commander": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commander",
+            "description": "Commander name"
+          },
+          "target_bracket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Bracket",
+            "description": "Target bracket (exhibition, core, upgraded, optimized, cedh)"
+          },
+          "validate_bracket": {
+            "type": "boolean",
+            "title": "Validate Bracket",
+            "description": "Validate against bracket rules",
+            "default": true
+          },
+          "validate_legality": {
+            "type": "boolean",
+            "title": "Validate Legality",
+            "description": "Validate Commander format legality",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "DeckValidationRequest",
+        "description": "Request model for deck validation (simplified, no user-supplied sources)."
+      },
+      "DeckValidationResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "deck_summary": {
+            "type": "object",
+            "title": "Deck Summary"
+          },
+          "cards": {
+            "items": {
+              "$ref": "#/components/schemas/DeckCard"
+            },
+            "type": "array",
+            "title": "Cards"
+          },
+          "bracket_validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BracketValidation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "legality_validation": {
+            "type": "object",
+            "title": "Legality Validation"
+          },
+          "validation_timestamp": {
+            "type": "string",
+            "title": "Validation Timestamp"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "salt_scores": {
+            "type": "object",
+            "title": "Salt Scores"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "deck_summary",
+          "cards",
+          "bracket_validation",
+          "legality_validation",
+          "validation_timestamp"
+        ],
+        "title": "DeckValidationResponse",
+        "description": "Complete deck validation response."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "PageTheme": {
+        "properties": {
+          "header": {
+            "type": "string",
+            "title": "Header"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "container": {
+            "$ref": "#/components/schemas/ThemeContainer"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "header",
+          "description",
+          "tags",
+          "container",
+          "source_url"
+        ],
+        "title": "PageTheme"
+      },
+      "SimilarCommander": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "type": "object",
+        "title": "SimilarCommander"
+      },
+      "ThemeCollection": {
+        "properties": {
+          "header": {
+            "type": "string",
+            "title": "Header"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ThemeItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "header",
+          "items"
+        ],
+        "title": "ThemeCollection"
+      },
+      "ThemeContainer": {
+        "properties": {
+          "collections": {
+            "items": {
+              "$ref": "#/components/schemas/ThemeCollection"
+            },
+            "type": "array",
+            "title": "Collections"
+          }
+        },
+        "type": "object",
+        "required": [
+          "collections"
+        ],
+        "title": "ThemeContainer"
+      },
+      "ThemeItem": {
+        "properties": {
+          "card_name": {
+            "type": "string",
+            "title": "Card Name"
+          },
+          "inclusion_percentage": {
+            "type": "string",
+            "title": "Inclusion Percentage"
+          },
+          "synergy_percentage": {
+            "type": "string",
+            "title": "Synergy Percentage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "card_name",
+          "inclusion_percentage",
+          "synergy_percentage"
+        ],
+        "title": "ThemeItem"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

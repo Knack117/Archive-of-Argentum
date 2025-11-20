@@ -4,13 +4,18 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from aoa.security import verify_api_key
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["cedh"], prefix="/api/v1/cedh")
+# All cEDH endpoints inherit API key authentication from the router dependency.
+router = APIRouter(
+    tags=["cedh"],
+    prefix="/api/v1/cedh",
+    dependencies=[Depends(verify_api_key)],
+)
 
 # Database URL
 CEDH_DATABASE_URL = "https://raw.githubusercontent.com/AverageDragon/cEDH-Decklist-Database/master/_data/database.json"
@@ -46,29 +51,32 @@ async def fetch_cedh_database(force_refresh: bool = False) -> List[Dict[str, Any
             response = await client.get(CEDH_DATABASE_URL)
             response.raise_for_status()
             data = response.json()
-            
+
             # Update cache
             _database_cache = data
             _cache_timestamp = datetime.utcnow()
-            
+
             logger.info(f"Successfully fetched {len(data)} cEDH deck entries")
             return data
-            
-    except httpx.HTTPError as e:
-        logger.error(f"Failed to fetch cEDH database: {e}")
-        # Return cached data if available, even if stale
-        if _database_cache is not None:
-            logger.warning("Returning stale cached data due to fetch error")
-            return _database_cache
-        raise HTTPException(
-            status_code=503,
-            detail="Unable to fetch cEDH database and no cached data available"
+
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Failed to fetch cEDH database (status %s): %s",
+            exc.response.status_code,
+            exc.response.text,
         )
-    except Exception as e:
-        logger.error(f"Unexpected error fetching cEDH database: {e}")
-        if _database_cache is not None:
-            return _database_cache
-        raise HTTPException(status_code=500, detail="Internal server error")
+    except httpx.RequestError as exc:
+        logger.error("Failed to fetch cEDH database: %s", exc)
+
+    # Return cached data if available, even if stale
+    if _database_cache is not None:
+        logger.warning("Returning cached cEDH database after fetch failure")
+        return _database_cache
+
+    raise HTTPException(
+        status_code=503,
+        detail="Unable to fetch cEDH database and no cached data available",
+    )
 
 
 def filter_decks(

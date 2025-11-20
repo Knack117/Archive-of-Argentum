@@ -4,6 +4,8 @@ from typing import Any, Dict
 
 from fastapi import APIRouter
 
+from aoa.constants import API_VERSION
+
 router = APIRouter(tags=["system"])
 
 
@@ -14,7 +16,7 @@ async def api_status() -> Dict[str, Any]:
         "success": True,
         "status": "online",
         "timestamp": datetime.utcnow().isoformat(),
-        "version": "1.1.0",
+        "version": API_VERSION,
     }
 
 
@@ -24,7 +26,7 @@ async def root() -> Dict[str, Any]:
     return {
         "success": True,
         "message": "MTG Deckbuilding API",
-        "version": "1.1.0",
+        "version": API_VERSION,
         "docs": "/docs",
         "status": "/api/v1/status",
     }
