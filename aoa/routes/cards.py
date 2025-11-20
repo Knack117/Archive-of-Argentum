@@ -8,7 +8,15 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from aoa.models import Card, CardSearchRequest, CardSearchResponse
+from aoa.models import (
+    Card, 
+    CardSearchRequest, 
+    CardSearchResponse,
+    GameChangerResponse,
+    BannedCardsResponse,
+    MassLandDestructionResponse,
+    AutocompleteResponse
+)
 from aoa.security import verify_api_key
 from aoa.services.special_cards import fetch_gamechangers, fetch_banned_cards, fetch_mass_land_destruction
 
@@ -127,11 +135,11 @@ async def search_cards(request: CardSearchRequest, api_key: str = Depends(verify
         raise HTTPException(status_code=500, detail=f"Error searching cards: {str(exc)}")
 
 
-@router.get("/autocomplete")
+@router.get("/autocomplete", response_model=AutocompleteResponse)
 async def autocomplete_card_names(
     q: str = Query(..., min_length=2, description="Search query (minimum 2 characters)"),
     api_key: str = Depends(verify_api_key),
-) -> Dict[str, Any]:
+) -> AutocompleteResponse:
     """Return card name suggestions using Scryfall autocomplete API."""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -188,8 +196,8 @@ async def get_random_card(api_key: str = Depends(verify_api_key)) -> Card:
 
 
 
-@router.get("/gamechangers")
-async def get_gamechangers(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
+@router.get("/gamechangers", response_model=GameChangerResponse)
+async def get_gamechangers(api_key: str = Depends(verify_api_key)) -> GameChangerResponse:
     """Get list of Commander Game Changer cards from Scryfall.
     
     Returns cards that are tagged as "gamechanger" on Scryfall, 
@@ -217,8 +225,8 @@ async def get_gamechangers(api_key: str = Depends(verify_api_key)) -> Dict[str, 
         raise HTTPException(status_code=500, detail=f"Error fetching gamechanger cards: {str(exc)}")
 
 
-@router.get("/banned")
-async def get_banned_cards(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
+@router.get("/banned", response_model=BannedCardsResponse)
+async def get_banned_cards(api_key: str = Depends(verify_api_key)) -> BannedCardsResponse:
     """Get list of banned Commander cards from Scryfall.
     
     Returns cards that are banned in the Commander format,
@@ -246,15 +254,13 @@ async def get_banned_cards(api_key: str = Depends(verify_api_key)) -> Dict[str, 
         raise HTTPException(status_code=500, detail=f"Error fetching banned cards: {str(exc)}")
 
 
-@router.get("/mass-land-destruction")
-async def get_mass_land_destruction(api_key: str = Depends(verify_api_key)) -> Dict[str, Any]:
-    """Get list of Mass Land Destruction cards from Scryfall.
+@router.get("/mass-land-destruction", response_model=MassLandDestructionResponse)
+async def get_mass_land_destruction(api_key: str = Depends(verify_api_key)) -> MassLandDestructionResponse:
+    """Get Mass Land Destruction cards from Scryfall matching official MLD criteria.
     
     Returns cards that match the Mass Land Denial criteria as defined by Wizards of the Coast.
     These cards regularly destroy, exile, and bounce other lands, keep lands tapped,
     or change what mana is produced by four or more lands per player without replacing them.
-    
-    Note: Uses Scryfall search queries to identify MLD cards based on card text patterns.
     """
     try:
         cards = await fetch_mass_land_destruction()
