@@ -86,8 +86,24 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Autocomplete Card Names Api V1 Cards Autocomplete Get",
                   "type": "object",
-                  "title": "Response Autocomplete Card Names Api V1 Cards Autocomplete Get"
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "description": "Scryfall catalog type"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Matching card names"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
                 }
               }
             }
@@ -146,8 +162,43 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Gamechangers Api V1 Cards Gamechangers Get",
                   "type": "object",
-                  "title": "Response Get Gamechangers Api V1 Cards Gamechangers Get"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      },
+                      "description": "Commander game changer cards"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "query": {
+                      "type": "string"
+                    },
+                    "order": {
+                      "type": "string"
+                    },
+                    "direction": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
                 }
               }
             }
@@ -174,8 +225,43 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Banned Cards Api V1 Cards Banned Get",
                   "type": "object",
-                  "title": "Response Get Banned Cards Api V1 Cards Banned Get"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      },
+                      "description": "Cards banned in Commander"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "query": {
+                      "type": "string"
+                    },
+                    "order": {
+                      "type": "string"
+                    },
+                    "direction": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
                 }
               }
             }
@@ -194,7 +280,7 @@
           "cards"
         ],
         "summary": "Get Mass Land Destruction",
-        "description": "Get list of Mass Land Destruction cards from Scryfall.\n\nReturns cards that match the Mass Land Denial criteria as defined by Wizards of the Coast.\nThese cards regularly destroy, exile, and bounce other lands, keep lands tapped,\nor change what mana is produced by four or more lands per player without replacing them.\n\nNote: Uses Scryfall search queries to identify MLD cards based on card text patterns.",
+        "description": "List Mass Land Denial cards sourced from Scryfall using Wizards of the Coast criteria, including metadata such as count, query context, and timestamps.",
         "operationId": "get_mass_land_destruction_api_v1_cards_mass_land_destruction_get",
         "responses": {
           "200": {
@@ -202,8 +288,40 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Mass Land Destruction Api V1 Cards Mass Land Destruction Get",
                   "type": "object",
-                  "title": "Response Get Mass Land Destruction Api V1 Cards Mass Land Destruction Get"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      },
+                      "description": "Mass land denial cards"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "definition": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
                 }
               }
             }
@@ -270,7 +388,7 @@
           "commanders"
         ],
         "summary": "Get Commander Summary",
-        "description": "Fetch EDHRec commander summary data with pagination and filtering.\n\n**GPT Compatibility Notes:**\n- Default limit (40 cards/category) keeps responses within GPT limits\n- Filter categories to reduce response size further\n- Use compact mode for minimal responses\n\n**Examples:**\n- Basic: `?name=halana-kessig-ranger`\n- Limited: `?name=halana&limit=30`\n- Filtered: `?name=halana&categories=creatures,instants,enchantments`\n- Compact: `?name=halana&mode=compact&limit=20`",
+        "description": "Fetch EDHRec commander summary data with optional limits, category filters, and a compact response mode suitable for GPT-sized payloads.",
         "operationId": "get_commander_summary_api_v1_commander_summary_get",
         "security": [
           {
@@ -496,8 +614,52 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Early Game Combos Api V1 Combos Early Game Get",
                   "type": "object",
-                  "title": "Response Get Early Game Combos Api V1 Combos Early Game Get"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "total_combos": {
+                      "type": "integer"
+                    },
+                    "acceptable_brackets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "bracket_description": {
+                      "type": "string"
+                    },
+                    "combos": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "cards": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "card_1": {
+                            "type": "string"
+                          },
+                          "card_2": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
                 }
               }
             }
@@ -524,8 +686,58 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Late Game Combos Api V1 Combos Late Game Get",
                   "type": "object",
-                  "title": "Response Get Late Game Combos Api V1 Combos Late Game Get"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "total_combos": {
+                      "type": "integer"
+                    },
+                    "acceptable_brackets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "bracket_description": {
+                      "type": "string"
+                    },
+                    "combos": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "cards": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "effects": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "card_1": {
+                            "type": "string"
+                          },
+                          "card_2": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
                 }
               }
             }
@@ -552,8 +764,40 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Combo Api Info Api V1 Combos Info Get",
                   "type": "object",
-                  "title": "Response Get Combo Api Info Api V1 Combos Info Get"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "endpoints": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object"
+                      }
+                    },
+                    "combo_categories": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object"
+                      }
+                    },
+                    "bracket_system": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -580,8 +824,46 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Available Tags Api V1 Tags Available Get",
                   "type": "object",
-                  "title": "Response Get Available Tags Api V1 Tags Available Get"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "themes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "color_identities": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "examples": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "usage": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "source_url": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
                 }
               }
             }
@@ -656,8 +938,43 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Tags Catalog Api V1 Tags Catalog Get",
                   "type": "object",
-                  "title": "Response Get Tags Catalog Api V1 Tags Catalog Get"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "color_identifiers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "examples": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "usage": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
                 }
               }
             }
@@ -700,8 +1017,46 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Commander Salt Api V1 Deck Commander Salt Commander Name Get",
                   "type": "object",
-                  "title": "Response Get Commander Salt Api V1 Deck Commander Salt  Commander Name  Get"
+                  "properties": {
+                    "commander_name": {
+                      "type": "string"
+                    },
+                    "enhanced_lookup": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "basic_lookup": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "normalized_lookup": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "found": {
+                      "type": "boolean"
+                    },
+                    "variants_count": {
+                      "type": "integer"
+                    },
+                    "variants": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "cache_size": {
+                      "type": "integer"
+                    }
+                  }
                 }
               }
             }
@@ -725,7 +1080,7 @@
           "deck-validation"
         ],
         "summary": "Validate Deck",
-        "description": "Validate a deck against Commander Brackets rules and format legality.\n\n- Provide a decklist via:\n  * List of card names\n  * Multi-line text blob\n  * Text chunks\n  * Deck URL (Moxfield or Archidekt)\n- Optionally specify commander and target bracket\n- Validates against official Commander Brackets system\n- Checks for Game Changers, format legality, and power level compliance",
+        "description": "Validate a Commander deck against bracket rules and format legality using card names, text blobs, or deck URLs, with optional commander and bracket inputs.",
         "operationId": "validate_deck_api_v1_deck_validate_post",
         "requestBody": {
           "content": {
@@ -780,8 +1135,28 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Brackets Info Api V1 Brackets Info Get",
                   "type": "object",
-                  "title": "Response Get Brackets Info Api V1 Brackets Info Get"
+                  "properties": {
+                    "brackets": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "game_changers": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "validation_categories": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "last_updated": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -808,8 +1183,25 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Salt Cache Info Api V1 Salt Info Get",
                   "type": "object",
-                  "title": "Response Get Salt Cache Info Api V1 Salt Info Get"
+                  "properties": {
+                    "cached_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "card_count": {
+                      "type": "integer"
+                    },
+                    "cache_file": {
+                      "type": "string"
+                    },
+                    "is_loaded": {
+                      "type": "boolean"
+                    }
+                  }
                 }
               }
             }
@@ -828,17 +1220,32 @@
           "deck-validation"
         ],
         "summary": "Check Deck For Early Game Combos",
-        "description": "Check if a deck contains any early-game 2-card combos.\n\nSend a list of card names in the request body.\nReturns any early-game combos found and their bracket acceptability.\n\nEarly-game combos are ONLY acceptable for brackets 4 (Optimized) and 5 (cEDH).\n\nExample request body:\n```json\n[\"Demonic Consultation\", \"Thassa's Oracle\", \"Sol Ring\", \"Command Tower\"]\n```",
+        "description": "Identify early-game two-card combos in a submitted deck list and report bracket suitability for brackets 4 and 5.",
         "operationId": "check_deck_for_early_game_combos_api_v1_deck_check_early_game_combos_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "items": {
-                  "type": "string"
+                "type": "object",
+                "title": "Card Names",
+                "properties": {
+                  "card_names": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "cards": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
                 },
-                "type": "array",
-                "title": "Card Names"
+                "description": "List of card names to scan for early-game combos.",
+                "required": [
+                  "card_names"
+                ]
               }
             }
           },
@@ -850,8 +1257,39 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Check Deck For Early Game Combos Api V1 Deck Check Early Game Combos Post",
                   "type": "object",
-                  "title": "Response Check Deck For Early Game Combos Api V1 Deck Check Early Game Combos Post"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "cards_checked": {
+                      "type": "integer"
+                    },
+                    "combos_found": {
+                      "type": "integer"
+                    },
+                    "combos": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "recommendation": {
+                      "type": "string"
+                    },
+                    "acceptable_brackets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
                 }
               }
             }
@@ -880,17 +1318,32 @@
           "deck-validation"
         ],
         "summary": "Check Deck For Late Game Combos",
-        "description": "Check if a deck contains any late-game 2-card combos.\n\nSend a list of card names in the request body.\nReturns any late-game combos found and their bracket acceptability.\n\nLate-game combos are acceptable for brackets 3 (Upgraded), 4 (Optimized), and 5 (cEDH).\n\nExample request body:\n```json\n[\"Mikaeus, the Unhallowed\", \"Triskelion\", \"Sol Ring\", \"Command Tower\"]\n```",
+        "description": "Identify late-game two-card combos in a submitted deck list and report bracket suitability for brackets 3, 4, and 5.",
         "operationId": "check_deck_for_late_game_combos_api_v1_deck_check_late_game_combos_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "items": {
-                  "type": "string"
+                "type": "object",
+                "title": "Card Names",
+                "properties": {
+                  "card_names": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "cards": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
                 },
-                "type": "array",
-                "title": "Card Names"
+                "description": "List of card names to scan for late-game combos.",
+                "required": [
+                  "card_names"
+                ]
               }
             }
           },
@@ -902,8 +1355,39 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Check Deck For Late Game Combos Api V1 Deck Check Late Game Combos Post",
                   "type": "object",
-                  "title": "Response Check Deck For Late Game Combos Api V1 Deck Check Late Game Combos Post"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "cards_checked": {
+                      "type": "integer"
+                    },
+                    "combos_found": {
+                      "type": "integer"
+                    },
+                    "combos": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "recommendation": {
+                      "type": "string"
+                    },
+                    "acceptable_brackets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
                 }
               }
             }
@@ -932,17 +1416,32 @@
           "deck-validation"
         ],
         "summary": "Check Deck For All Combos",
-        "description": "Check if a deck contains any 2-card combos (both early-game and late-game).\n\nSend a list of card names in the request body.\nReturns all combos found with their bracket acceptability.\n\nExample request body:\n```json\n[\"Jeska's Will\", \"Reiterate\", \"Mana Geyser\", \"Lightning Greaves\"]\n```\n\nAlternative request format (also supported):\n```json\n{\n    \"card_names\": [\"Jeska's Will\", \"Reiterate\", \"Mana Geyser\", \"Lightning Greaves\"]\n}\n```",
+        "description": "Scan a deck list for early- and late-game two-card combos, summarizing totals and bracket recommendations.",
         "operationId": "check_deck_for_all_combos_api_v1_deck_check_all_combos_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "items": {
-                  "type": "string"
+                "type": "object",
+                "title": "Card Names",
+                "properties": {
+                  "card_names": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "cards": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
                 },
-                "type": "array",
-                "title": "Card Names"
+                "description": "List of card names to scan for any two-card combos.",
+                "required": [
+                  "card_names"
+                ]
               }
             }
           },
@@ -954,8 +1453,34 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Check Deck For All Combos Api V1 Deck Check All Combos Post",
                   "type": "object",
-                  "title": "Response Check Deck For All Combos Api V1 Deck Check All Combos Post"
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "cards_checked": {
+                      "type": "integer"
+                    },
+                    "total_combos_found": {
+                      "type": "integer"
+                    },
+                    "early_game_combos": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "late_game_combos": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "bracket_recommendation": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
                 }
               }
             }
@@ -984,7 +1509,7 @@
           "popular-decks"
         ],
         "summary": "Get All Popular Decks",
-        "description": "Get the top most viewed decks from both Moxfield and Archidekt without bracket filtering.\n\nWhen a commander is specified, only Moxfield results are returned (10 decks total).\nWithout a commander, returns decks from both sources (5 from each by default).\n\nReturns deck URLs with metadata including:\n- Deck URL\n- View count\n- Whether it includes a primer\n- Deck title\n- Source (moxfield or archidekt)\n- Bracket information (when available)\n- Commander name (for search context)\n\nArgs:\n    limit_per_source: Number of decks to fetch from each source (default 5, max 20)\n    commander: Optional commander name to filter results\n    \nReturns:\n    Dictionary containing decks with metadata including bracket info",
+        "description": "Return the most viewed Commander decks from Moxfield and Archidekt without bracket filtering, optionally narrowed by commander name.",
         "operationId": "get_all_popular_decks_api_v1_popular_decks_get",
         "security": [
           {
@@ -1031,8 +1556,44 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get All Popular Decks Api V1 Popular Decks Get",
                   "type": "object",
-                  "title": "Response Get All Popular Decks Api V1 Popular Decks Get"
+                  "properties": {
+                    "bracket_filter": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "commander_filter": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "total_decks": {
+                      "type": "integer"
+                    },
+                    "moxfield": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "archidekt": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "all_decks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "summary": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
                 }
               }
             }
@@ -1064,8 +1625,52 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Popular Decks Info Api V1 Popular Decks Info Get",
                   "type": "object",
-                  "title": "Response Get Popular Decks Info Api V1 Popular Decks Info Get"
+                  "properties": {
+                    "description": {
+                      "type": "string"
+                    },
+                    "endpoints": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "supported_brackets": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "commander_filtering": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "default_limit_per_source": {
+                      "type": "integer"
+                    },
+                    "max_limit_per_source": {
+                      "type": "integer"
+                    },
+                    "total_decks_returned": {
+                      "type": "string"
+                    },
+                    "example_usage": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "deck_metadata_included": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -1084,7 +1689,7 @@
           "popular-decks"
         ],
         "summary": "Get Popular Decks",
-        "description": "Get the top most viewed decks for a given commander bracket from both Moxfield and Archidekt.\n\nWhen a commander is specified, only Moxfield results are returned (10 decks total).\nWithout a commander, returns decks from both sources (5 from each by default).\n\nReturns deck URLs with metadata including:\n- Deck URL\n- View count\n- Whether it includes a primer\n- Deck title\n- Source (moxfield or archidekt)\n- Bracket information\n- Commander name (for search context)\n\nArgs:\n    bracket: Commander bracket (exhibition, core, upgraded, optimized, cedh)\n    limit_per_source: Number of decks to fetch from each source (default 5, max 20)\n    commander: Optional commander name to filter results\n    \nReturns:\n    Dictionary containing decks with metadata",
+        "description": "Return the most viewed Commander decks for a specific bracket from Moxfield and Archidekt, optionally filtered by commander name.",
         "operationId": "get_popular_decks_api_v1_popular_decks__bracket__get",
         "security": [
           {
@@ -1142,8 +1747,41 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "title": "Response Get Popular Decks Api V1 Popular Decks Bracket Get",
                   "type": "object",
-                  "title": "Response Get Popular Decks Api V1 Popular Decks  Bracket  Get"
+                  "properties": {
+                    "bracket_filter": {
+                      "type": "string"
+                    },
+                    "commander_filter": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "total_decks": {
+                      "type": "integer"
+                    },
+                    "moxfield": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "archidekt": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "all_decks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "summary": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
                 }
               }
             }
@@ -1167,7 +1805,7 @@
           "cedh"
         ],
         "summary": "Search cEDH Database",
-        "description": "Search the competitive EDH decklist database with various filters.\n    \n    **Filter Options:**\n    - `commander`: Search by commander name (partial match, case-insensitive)\n    - `colors`: Exact color identity match (e.g., \"ub\" for Dimir, \"wubrg\" for 5-color)\n    - `section`: Filter by competitive level (COMPETITIVE, DEPRECATED, BREW)\n    - `primer_only`: Only return decks with primers available\n    - `limit`: Maximum number of results to return (default: 20)\n    \n    **Examples:**\n    - `/api/v1/cedh/search?commander=tymna` - Find all Tymna decks\n    - `/api/v1/cedh/search?colors=ub&section=COMPETITIVE` - Competitive Dimir decks\n    - `/api/v1/cedh/search?primer_only=true&limit=10` - Top 10 decks with primers",
+        "description": "Search the competitive EDH deck database with commander, color identity, section, primer-only, and limit filters.",
         "operationId": "search_cedh_decks_api_v1_cedh_search_get",
         "security": [
           {
@@ -1261,7 +1899,82 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "title": "Response Search Cedh Decks Api V1 Cedh Search Get",
+                  "type": "object",
+                  "properties": {
+                    "total_results": {
+                      "type": "integer"
+                    },
+                    "filters_applied": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "decks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "commanders": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "color_identity": {
+                            "type": "string"
+                          },
+                          "colors": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "section": {
+                            "type": "string"
+                          },
+                          "recommended": {
+                            "type": "boolean"
+                          },
+                          "updated": {
+                            "type": "string"
+                          },
+                          "discord": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "decklists": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          },
+                          "decklist_count": {
+                            "type": "integer"
+                          },
+                          "has_primer": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           },
