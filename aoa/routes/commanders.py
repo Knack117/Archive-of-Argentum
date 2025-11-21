@@ -1,4 +1,5 @@
 """Commander summary and average deck endpoints."""
+import asyncio
 import logging
 from typing import Dict, List, Optional, Set
 
@@ -55,6 +56,22 @@ async def get_commander_summary(
     """
     logger.info(f"Commander summary endpoint accessed with params: name={name}, commander_url={commander_url}, limit={limit}, categories={categories}, mode={mode}")
     
+    # Add timeout wrapper for commander data fetching
+    try:
+        # Use asyncio.wait_for to limit total execution time
+        commander_data = await asyncio.wait_for(
+            _fetch_commander_data(name, commander_url, limit, categories, mode),
+            timeout=25.0  # 25 second total timeout
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"Commander summary timeout for {name or commander_url}")
+        raise HTTPException(
+            status_code=504,
+            detail="Request timed out while fetching commander data from EDHRec. Please try again later."
+        )
+    
+async def _fetch_commander_data(name, commander_url, limit, categories, mode):
+    """Internal function to fetch commander data with better error handling."""
     if name:
         slug = normalize_commander_name(name)
     elif commander_url:
@@ -88,6 +105,8 @@ async def get_commander_summary(
         categories_filter=categories_filter,
         compact_mode=compact_mode
     )
+    
+    return commander_data
 
     categories_output: Dict[str, List[CommanderCard]] = {}
     for category_key, category_data in commander_data.get("categories", {}).items():
