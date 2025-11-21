@@ -131,10 +131,10 @@ async def fetch_edhrec_json(path_or_url: str, max_retries: int = 3) -> Dict[str,
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=15.0, read=90.0, write=15.0, pool=10.0),
+                timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0),
                 follow_redirects=True,
                 trust_env=False,
-                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+                limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
             ) as client:
                 logger.info(f"Fetching EDHRec JSON (attempt {attempt + 1}): {json_url}")
                 response = await client.get(json_url, headers=headers)
