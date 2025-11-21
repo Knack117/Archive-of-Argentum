@@ -81,11 +81,17 @@ async def _fallback_html_scraping(commander_url: str) -> Dict[str, Any]:
     try:
         # Convert JSON URL to HTML URL
         if "json.edhrec.com" in commander_url:
-            html_url = commander_url.replace("json.edhrec.com/pages/", "thedocs.esearchtools.com/")
-            if not html_url.endswith("/"):
-                html_url += "/"
+            html_url = commander_url.replace("json.edhrec.com/pages/", "edhrec.com/")
         else:
-            html_url = commander_url
+            # If it's already a direct URL, convert to proper EDHRec format
+            if "commanders/" in commander_url:
+                # Extract commander name from URL and construct proper EDHRec URL
+                name_part = commander_url.split("commanders/")[-1]
+                if not name_part.endswith("/"):
+                    name_part += "/"
+                html_url = f"https://edhrec.com/commanders/{name_part}"
+            else:
+                html_url = commander_url
         
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(connect=15.0, read=45.0, write=10.0, pool=5.0),
@@ -105,37 +111,45 @@ async def _fallback_html_scraping(commander_url: str) -> Dict[str, Any]:
             
             # Extract commander name from URL
             if "commanders/" in commander_url:
-                name_part = commander_url.split("commanders/")[-1]
+                name_part = commander_url.split("commanders/")[-1].rstrip("/")
                 commander_name = name_part.replace("-", " ").title()
             else:
                 commander_name = "Unknown Commander"
+                name_part = ""
             
+            # Return data in the expected format for scrape_edhrec_commander_page
             return {
-                "card": {
-                    "name": commander_name,
-                    "sanitized": name_part if "commanders/" in commander_url else "",
-                    "num_decks": 0,
-                    "rank": None,
-                    "salt": None,
-                    "cmc": None,
-                    "rarity": None,
-                    "color_identity": []
-                },
-                "taglinks": [],
-                "similar": [],
-                "container": {
-                    "json_dict": {
-                        "cardlists": []
-                    }
-                },
-                "combocounts": []
+                "commander_name": commander_name,
+                "commander_url": html_url,
+                "timestamp": datetime.utcnow().isoformat(),
+                "commander_tags": ["unavailable due to EDHRec access restrictions"],
+                "top_10_tags": [{
+                    "tag": "unavailable due to EDHRec access restrictions",
+                    "count": None,
+                    "link": None
+                }],
+                "all_tags": [{
+                    "tag": "unavailable due to EDHRec access restrictions",
+                    "count": None,
+                    "link": None
+                }],
+                "combos": [],
+                "similar_commanders": [],
+                "categories": {},
+                "warning": "EDHRec service is temporarily unavailable. Limited commander data available."
             }
             
     except Exception as exc:
-        logger.error(f"HTML scraping fallback failed: {exc}")
+        logger.error(f"HTML scraping fallback failed for {commander_url}: {exc}")
+        # Extract commander name for better error message
+        commander_name = "Unknown Commander"
+        if "commanders/" in commander_url:
+            name_part = commander_url.split("commanders/")[-1].rstrip("/")
+            commander_name = name_part.replace("-", " ").title()
+        
         raise HTTPException(
             status_code=503,
-            detail=f"Both JSON API and HTML scraping failed for commander data. EDHRec service may be temporarily unavailable."
+            detail=f"EDHRec service is currently unavailable for commander '{commander_name}'. Both JSON API and HTML scraping have failed. Please try again later."
         )
 
 
@@ -159,7 +173,7 @@ def extract_commander_summary_data(
         # Return a graceful fallback response
         return {
             "commander_name": commander_name,
-            "commander_url": f"https://thedocs.esearchtools.com/commanders/{card_data.get('sanitized', '')}",
+            "commander_url": f"https://edhrec.com/commanders/{card_data.get('sanitized', '')}",
             "commander_tags": ["unavailable due to EDHRec access restrictions"],
             "top_10_tags": [{
                 "tag": "unavailable due to EDHRec access restrictions",
@@ -275,7 +289,7 @@ def extract_commander_summary_data(
     # Build output structure
     result = {
         "commander_name": commander_name,
-        "commander_url": f"https://thedocs.esearchtools.com/commanders/{card_data.get('sanitized', '')}",
+        "commander_url": f"https://edhrec.com/commanders/{card_data.get('sanitized', '')}",
         "commander_tags": [tag_data.get("value", "") for tag_data in tags_data[:10]],  # Top 10 tags as list of strings
         "top_10_tags": tags_output[:10],  # Top 10 tags as detailed objects
         "all_tags": tags_output,  # All tags as detailed objects
