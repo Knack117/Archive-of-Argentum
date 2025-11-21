@@ -1,217 +1,376 @@
-"""Improved EDHRec service with better error handling and timeouts."""
-from __future__ import annotations
-
+"""Sophisticated EDHREC service - matching the approach from the other repository."""
+import json
 import logging
-import time
-from typing import Any, Dict, Optional
-from urllib.parse import urlparse
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import quote_plus
 
 import httpx
 from fastapi import HTTPException
 
-from aoa.constants import EDHREC_JSON_BASE_URL
+from aoa.constants import EDHREC_BASE_URL
+from aoa.models.themes import EdhrecError, ThemeCollection, ThemeContainer, ThemeItem, PageTheme
+from aoa.utils.commander_identity import normalize_commander_name, get_commander_slug_candidates
+from aoa.utils.edhrec_commander import (
+    extract_build_id_from_html,
+    extract_commander_tags_from_html,
+    extract_commander_tags_from_json,
+    extract_nextjs_payload,
+    normalize_commander_tags,
+    _camel_or_snake_to_title,
+    _order_commander_headers,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _normalize_edhrec_path(path_or_url: str) -> str:
-    """Return a normalized EDHRec path without protocol prefixes."""
-    if not path_or_url:
-        raise ValueError("EDHRec path cannot be empty")
-
-    if path_or_url.startswith("http"):
-        parsed = urlparse(path_or_url)
-        candidate = parsed.path or ""
-    else:
-        candidate = path_or_url
-
-    normalized = candidate.strip().strip("/")
-    if not normalized:
-        raise ValueError("EDHRec path cannot be empty")
-    return normalized
-
-
-def build_edhrec_json_path(path_or_url: str) -> str:
-    """Convert an EDHRec page path or URL into a JSON endpoint path."""
-    normalized = _normalize_edhrec_path(path_or_url)
-    if normalized.endswith(".json"):
-        return normalized
-    return f"{normalized}.json"
-
-
-def build_edhrec_json_url(path_or_url: str) -> str:
-    """Return the absolute EDHRec JSON endpoint URL for the provided path."""
-    path = build_edhrec_json_path(path_or_url)
-    base = EDHREC_JSON_BASE_URL.rstrip("/")
-    return f"{base}/{path}"
-
-
-async def verify_edhrec_page_exists(path_or_url: str) -> bool:
-    """
-    Verify that an EDHRec page exists by checking the HTML endpoint.
+class CommanderPageSnapshot:
+    """In-memory representation of commander page metadata."""
     
-    This helps distinguish between 403 (access denied) and 404 (not found) errors,
-    as S3 returns 403 for non-existent JSON files instead of 404.
-    """
-    from aoa.constants import EDHREC_BASE_URL
+    def __init__(self, url: str, html: str, tags: List[str], json_payload: Optional[Dict[str, Any]] = None):
+        self.url = url
+        self.html = html
+        self.tags = tags
+        self.json_payload = json_payload
+
+
+async def fetch_commander_summary(name: str, budget: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch comprehensive commander summary using sophisticated EDHREC extraction."""
+    try:
+        display_name, slug, edhrec_url = normalize_commander_name(name)
+        
+        # Fetch commander page snapshot
+        snapshot = await _fetch_commander_page_snapshot(slug)
+        if not snapshot:
+            raise EdhrecError("NOT_FOUND", f"Could not find commander data for '{display_name}'")
+        
+        # Extract synergy data using sophisticated Next.js approach
+        page_data, snapshot = await _try_fetch_commander_synergy(slug, snapshot=snapshot)
+        
+        # Build PageTheme response
+        tags = snapshot.tags if snapshot else []
+        source_url = snapshot.url if snapshot else edhrec_url
+        
+        # Check if we have meaningful data
+        if not _payload_has_collections(page_data):
+            # Return fallback with error message
+            fallback_page = PageTheme(
+                header=f"{display_name} | EDHREC",
+                description="",
+                tags=tags,
+                container=ThemeContainer(collections=[]),
+                source_url=source_url,
+                error=f"Synergy unavailable for {display_name}",
+            )
+            return fallback_page.dict()
+        
+        # Process the data into the expected format
+        processed_data = _process_commander_data(page_data, display_name, tags, source_url)
+        return processed_data
+        
+    except EdhrecError:
+        raise
+    except Exception as exc:
+        logger.exception(f"Failed to fetch commander summary for '{name}': {exc}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(exc)}")
+
+
+async def _fetch_commander_page_snapshot(slug: str) -> Optional[CommanderPageSnapshot]:
+    """Fetch commander page snapshot with both HTML and JSON data."""
+    commander_url = f"{EDHREC_BASE_URL}commanders/{slug}"
     
-    normalized = _normalize_edhrec_path(path_or_url)
-    html_url = f"{EDHREC_BASE_URL.rstrip('/')}/{normalized}"
+    try:
+        # Fetch HTML
+        html = await _fetch_text(commander_url)
+    except HTTPException:
+        logger.warning(f"Commander HTML fetch failed for slug '{slug}'")
+        return None
     
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
+    # Extract tags from HTML
+    html_tags = extract_commander_tags_from_html(html)
     
-    # Retry logic with exponential backoff
-    max_retries = 3
-    base_delay = 1.0
+    # Extract build ID for JSON
+    build_id = extract_build_id_from_html(html)
     
-    for attempt in range(max_retries):
+    json_payload = None
+    json_tags = []
+    
+    if build_id:
+        json_url = f"{EDHREC_BASE_URL}_next/data/{build_id}/commanders/{slug}.json"
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=5.0),
-                follow_redirects=True,
-                trust_env=False,
-            ) as client:
-                response = await client.get(html_url, headers=headers)
-                if response.status_code == 200:
-                    return True
-                elif attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    logger.warning(f"Page verification attempt {attempt + 1} failed, retrying in {delay}s...")
-                    time.sleep(delay)
-                    continue
-        except Exception as exc:
-            logger.warning("Error verifying EDHRec page %s (attempt %d): %s", html_url, attempt + 1, exc)
-            if attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt)
-                time.sleep(delay)
-                continue
+            json_payload = await _fetch_json(json_url)
+            json_tags = extract_commander_tags_from_json(json_payload)
+        except HTTPException:
+            logger.warning(f"Commander JSON fetch failed for slug '{slug}'")
+            json_payload = None
+    else:
+        logger.warning(f"No buildId discovered for commander slug '{slug}'")
+    
+    # Combine and normalize tags
+    tags = normalize_commander_tags(html_tags + json_tags)
+    
+    return CommanderPageSnapshot(
+        url=commander_url,
+        html=html,
+        tags=tags,
+        json_payload=json_payload,
+    )
+
+
+async def _try_fetch_commander_synergy(
+    slug: str, 
+    snapshot: Optional[CommanderPageSnapshot] = None
+) -> Tuple[Optional[Dict[str, Any]], Optional[CommanderPageSnapshot]]:
+    """Try to fetch commander synergy data using Next.js JSON extraction."""
+    if snapshot is None:
+        snapshot = await _fetch_commander_page_snapshot(slug)
+    
+    if snapshot is None:
+        return None, None
+    
+    # Extract title and description from HTML
+    header, description = _extract_title_description_from_head(snapshot.html)
+    
+    # Extract card buckets from JSON payload
+    buckets = _extract_commander_buckets(snapshot.json_payload or {})
+    ordered_headers = _order_commander_headers(list(buckets.keys()))
+    
+    # Build collections
+    collections = []
+    for header_name in ordered_headers:
+        items = buckets.get(header_name, [])
+        if items:
+            collections.append(ThemeCollection(header=header_name, items=items))
+    
+    # Build PageTheme
+    page = PageTheme(
+        header=header or f"{slug.replace('-', ' ').title()} | EDHREC",
+        description=description or "",
+        tags=snapshot.tags,
+        container=ThemeContainer(collections=collections),
+        source_url=snapshot.url,
+    )
+    
+    return page.dict(), snapshot
+
+
+def _extract_title_description_from_head(html: str) -> Tuple[str, str]:
+    """Extract title and description from HTML head."""
+    import re
+    title = ""
+    desc = ""
+    
+    # Extract title
+    title_match = re.search(r"<title>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+    if title_match:
+        title = _snakecase(re.sub(r"<.*?>", "", title_match.group(1)))
+    
+    # Extract description
+    desc_match = re.search(
+        r'<meta\s+name=["\']description["\'][^>]+content=["\'](.*?)["\']',
+        html, re.IGNORECASE | re.DOTALL
+    )
+    if desc_match:
+        desc = _snakecase(desc_match.group(1))
+    
+    return title or "Unknown", desc or ""
+
+
+def _snakecase(s: str) -> str:
+    """Convert string to snake case."""
+    import re
+    return re.sub(r"\s+", " ", s or "").strip()
+
+
+def _extract_commander_buckets(data: Any) -> Dict[str, List[ThemeItem]]:
+    """Extract commander card buckets from JSON payload."""
+    buckets = {}
+    visited_lists = set()
+    
+    def walk(node: Any, path: List[str]):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                walk(value, path + [key])
+            return
+        
+        if isinstance(node, list):
+            node_id = id(node)
+            if node_id in visited_lists:
+                return
+            visited_lists.add(node_id)
+            
+            # Extract card-like items
+            items = []
+            for element in node:
+                item = _commander_item_from_entry(element)
+                if item:
+                    items.append(item)
+            
+            if items:
+                key = path[-1] if path else "cards"
+                header = _camel_or_snake_to_title(key)
+                existing = buckets.setdefault(header, [])
+                existing_names = {it.name for it in existing}
+                for item in items:
+                    if item.name not in existing_names:
+                        existing.append(item)
+                        existing_names.add(item.name)
+            
+            # Continue walking nested elements
+            for element in node:
+                walk(element, path)
+    
+    if isinstance(data, dict):
+        # Handle Next.js pageProps structure
+        page_props = data.get("pageProps")
+        if isinstance(page_props, dict) and "data" in page_props:
+            walk(page_props.get("data"), [])
+        else:
+            walk(data, [])
+    else:
+        walk(data, [])
+    
+    return buckets
+
+
+def _commander_item_from_entry(entry: Any) -> Optional[ThemeItem]:
+    """Extract commander item from JSON entry."""
+    if not isinstance(entry, dict):
+        return None
+    
+    name = None
+    scryfall_id = None
+    image_url = None
+    
+    # Extract from card object
+    card = entry.get("card")
+    if isinstance(card, dict):
+        name = card.get("name") or card.get("label")
+        scryfall_id = card.get("scryfall_id") or card.get("scryfallId") or card.get("id")
+        image_field = card.get("image") or card.get("image_url") or card.get("imageUri")
+        if isinstance(image_field, str):
+            image_url = image_field
+        elif isinstance(image_field, dict):
+            image_url = image_field.get("normal") or image_field.get("large") or image_field.get("art")
+    
+    # Fallback to entry direct fields
+    if not name:
+        name = entry.get("name") or entry.get("label")
+    
+    if not name:
+        return None
+    
+    item = ThemeItem(name=name)
+    
+    # Set ID if available
+    scryfall_id = scryfall_id or entry.get("scryfall_id") or entry.get("scryfallId")
+    if isinstance(scryfall_id, str) and scryfall_id:
+        item.id = scryfall_id
+    
+    # Set image if available
+    if not image_url:
+        image_field = entry.get("image") or entry.get("image_url") or entry.get("imageUri")
+        if isinstance(image_field, str):
+            image_url = image_field
+        elif isinstance(image_field, dict):
+            image_url = image_field.get("normal") or image_field.get("large")
+    
+    if isinstance(image_url, str) and image_url:
+        item.image = image_url
+    
+    return item
+
+
+def _payload_has_collections(payload: Optional[Dict[str, Any]]) -> bool:
+    """Check if payload has meaningful card collections."""
+    if not payload:
+        return False
+    
+    container = payload.get("container")
+    if isinstance(container, dict):
+        collections = container.get("collections")
+        if isinstance(collections, list):
+            for collection in collections:
+                if isinstance(collection, dict):
+                    items = collection.get("items")
+                    if isinstance(items, list) and items:
+                        return True
     
     return False
 
 
-async def fetch_edhrec_json(path_or_url: str, max_retries: int = 3) -> Dict[str, Any]:
-    """
-    Fetch JSON payloads directly from the EDHRec live data service with improved error handling.
+def _process_commander_data(
+    data: Dict[str, Any], 
+    commander_name: str, 
+    tags: List[str], 
+    source_url: str
+) -> Dict[str, Any]:
+    """Process commander data into the expected format."""
+    # Ensure required fields are present
+    data.setdefault("header", f"{commander_name} | EDHREC")
+    data.setdefault("description", "")
     
-    First verifies the page exists to provide better error messages when
-    commanders don't exist on EDHRec.
+    # Ensure container is properly formatted
+    container = data.get("container")
+    if isinstance(container, dict):
+        if "collections" not in container:
+            data["container"] = {"collections": []}
+    else:
+        data["container"] = {"collections": []}
     
-    Args:
-        path_or_url: EDHRec path or URL
-        max_retries: Maximum number of retry attempts
-        
-    Returns:
-        Dictionary containing the JSON response data
-    """
-    json_url = build_edhrec_json_url(path_or_url)
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://edhrec.com/",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-    }
-
-    # Retry logic with exponential backoff
-    base_delay = 2.0
+    # Ensure tags are set
+    if not tags:
+        tags_value = data.get("tags")
+        if isinstance(tags_value, list):
+            tags = normalize_commander_tags(tags_value)
+        elif isinstance(tags_value, str):
+            tags = normalize_commander_tags([tags_value])
     
-    for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0),
-                follow_redirects=True,
-                trust_env=False,
-                limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
-            ) as client:
-                logger.info(f"Fetching EDHRec JSON (attempt {attempt + 1}): {json_url}")
-                response = await client.get(json_url, headers=headers)
-                response.raise_for_status()
-                
-                # Log successful response
-                logger.info(f"Successfully fetched EDHRec JSON: {json_url} ({response.status_code})")
-                return response.json()
-                
-        except httpx.HTTPStatusError as exc:
-            status_code = exc.response.status_code
-            
-            # If we get a 403, verify if the page actually exists
-            if status_code == 403:
-                logger.info("Received 403 for %s, verifying page existence (attempt %d)", json_url, attempt + 1)
-                page_exists = await verify_edhrec_page_exists(path_or_url)
-                
-                if not page_exists:
-                    logger.warning("Page does not exist on EDHRec: %s", path_or_url)
-                    raise HTTPException(
-                        status_code=404,
-                        detail=(
-                            f"Commander page not found on EDHRec: '{path_or_url}'. "
-                            "Please verify the commander name is correct and exists on EDHRec.com"
-                        ),
-                    ) from exc
-                else:
-                    # Page exists but JSON is blocked - this is a real 403
-                    logger.warning("EDHRec JSON blocked (403) for existing page: %s", json_url)
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
-                        logger.warning(f"Retrying in {delay}s...")
-                        time.sleep(delay)
-                        continue
-                    else:
-                        raise HTTPException(
-                            status_code=403,
-                            detail=f"EDHRec blocked access to data for '{path_or_url}'",
-                        ) from exc
-            
-            logger.warning("EDHRec JSON responded with %s for %s (attempt %d)", status_code, json_url, attempt + 1)
-            
-            if attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt)
-                logger.warning(f"Retrying in {delay}s...")
-                time.sleep(delay)
-                continue
-            
-            raise HTTPException(
-                status_code=status_code,
-                detail=f"EDHRec returned status {status_code} for '{path_or_url}'",
-            ) from exc
-            
-        except httpx.RequestError as exc:
-            logger.error("Network error fetching EDHRec JSON %s (attempt %d): %s", json_url, attempt + 1, exc)
-            
-            if attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt)
-                logger.warning(f"Retrying in {delay}s...")
-                time.sleep(delay)
-                continue
-            else:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Failed to contact EDHRec for '{path_or_url}'",
-                ) from exc
-
-    # This should never be reached, but just in case
-    raise HTTPException(
-        status_code=503,
-        detail=f"Service temporarily unavailable for '{path_or_url}'"
-    )
+    data["tags"] = tags
+    data.setdefault("source_url", source_url)
+    
+    return data
 
 
-__all__ = [
-    "build_edhrec_json_path",
-    "build_edhrec_json_url",
-    "fetch_edhrec_json",
-    "verify_edhrec_page_exists",
-]
+async def _fetch_text(url: str) -> str:
+    """Fetch text content with error handling."""
+    logger.info(f"HTTP GET {url}")
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0),
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.text
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response else 502
+        if status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Resource not found ({url})")
+        raise HTTPException(status_code=502, detail=f"Upstream fetch failed ({status_code} {url})")
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Upstream request failed ({url})")
+
+
+async def _fetch_json(url: str) -> Any:
+    """Fetch JSON content with error handling."""
+    logger.info(f"HTTP GET {url}")
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0),
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response else 502
+        if status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Resource not found ({url})")
+        raise HTTPException(status_code=502, detail=f"Upstream JSON fetch failed ({status_code} {url})")
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Upstream JSON request failed ({url})")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Invalid JSON from {url}")
