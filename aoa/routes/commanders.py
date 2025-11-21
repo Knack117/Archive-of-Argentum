@@ -39,7 +39,7 @@ async def get_commander_summary(
         regex="^(standard|compact)$",
         description="Response mode: 'standard' (full data) or 'compact' (minimal data)"
     ),
-    api_key: str = Depends(verify_api_key),
+    # TEMPORARILY DISABLED: api_key: str = Depends(verify_api_key),
 ) -> CommanderSummary:
     """Fetch EDHRec commander summary data with pagination and filtering.
     
