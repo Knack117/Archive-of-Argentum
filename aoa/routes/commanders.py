@@ -53,6 +53,8 @@ async def get_commander_summary(
     - Filtered: `?name=halana&categories=creatures,instants,enchantments`
     - Compact: `?name=halana&mode=compact&limit=20`
     """
+    logger.info(f"Commander summary endpoint accessed with params: name={name}, commander_url={commander_url}, limit={limit}, categories={categories}, mode={mode}")
+    
     if name:
         slug = normalize_commander_name(name)
     elif commander_url:
