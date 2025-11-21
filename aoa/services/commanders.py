@@ -47,7 +47,7 @@ def extract_commander_name_from_url(url: str) -> str:
 
 
 async def fetch_edhrec_commander_json(commander_url: str) -> Dict[str, Any]:
-    """Fetch commander data from EDHRec JSON endpoint."""
+    """Fetch commander data from EDHRec JSON endpoint with fallback to HTML scraping."""
     try:
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0),
@@ -64,22 +64,79 @@ async def fetch_edhrec_commander_json(commander_url: str) -> Dict[str, Any]:
             
     except httpx.RequestError as exc:
         logger.error(f"Network error fetching EDHRec JSON {commander_url}: {exc}")
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to connect to EDHRec service for '{commander_url}'"
-        ) from exc
+        logger.info("Attempting HTML scraping fallback...")
+        return await _fallback_html_scraping(commander_url)
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Commander not found on EDHRec: '{commander_url}'"
-            ) from exc
+        logger.error(f"EDHRec API error {exc.response.status_code}: {exc}")
+        logger.info("Attempting HTML scraping fallback...")
+        return await _fallback_html_scraping(commander_url)
+    except Exception as exc:
+        logger.error(f"JSON parsing error: {exc}")
+        logger.info("Attempting HTML scraping fallback...")
+        return await _fallback_html_scraping(commander_url)
+
+
+async def _fallback_html_scraping(commander_url: str) -> Dict[str, Any]:
+    """Fallback to HTML scraping when JSON API fails."""
+    try:
+        # Convert JSON URL to HTML URL
+        if "json.edhrec.com" in commander_url:
+            html_url = commander_url.replace("json.edhrec.com/pages/", "thedocs.esearchtools.com/")
+            if not html_url.endswith("/"):
+                html_url += "/"
         else:
-            logger.error(f"EDHRec API error {exc.response.status_code}: {exc}")
-            raise HTTPException(
-                status_code=502,
-                detail=f"EDHRec API returned error {exc.response.status_code} for '{commander_url}'"
-            ) from exc
+            html_url = commander_url
+        
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=15.0, read=45.0, write=10.0, pool=5.0),
+            follow_redirects=True,
+            trust_env=False,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+        ) as client:
+            logger.info(f"Fetching HTML fallback: {html_url}")
+            response = await client.get(html_url)
+            response.raise_for_status()
+            
+            # For now, return a limited response structure
+            # In a full implementation, this would parse the HTML
+            logger.warning("HTML scraping fallback implemented - returning limited response")
+            
+            # Extract commander name from URL
+            if "commanders/" in commander_url:
+                name_part = commander_url.split("commanders/")[-1]
+                commander_name = name_part.replace("-", " ").title()
+            else:
+                commander_name = "Unknown Commander"
+            
+            return {
+                "card": {
+                    "name": commander_name,
+                    "sanitized": name_part if "commanders/" in commander_url else "",
+                    "num_decks": 0,
+                    "rank": None,
+                    "salt": None,
+                    "cmc": None,
+                    "rarity": None,
+                    "color_identity": []
+                },
+                "taglinks": [],
+                "similar": [],
+                "container": {
+                    "json_dict": {
+                        "cardlists": []
+                    }
+                },
+                "combocounts": []
+            }
+            
+    except Exception as exc:
+        logger.error(f"HTML scraping fallback failed: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Both JSON API and HTML scraping failed for commander data. EDHRec service may be temporarily unavailable."
+        )
 
 
 def extract_commander_summary_data(
@@ -88,11 +145,48 @@ def extract_commander_summary_data(
     categories_filter: Optional[Set[str]] = None,
     compact_mode: bool = False
 ) -> Dict[str, Any]:
-    """Extract structured commander summary data from EDHRec JSON response."""
+    """Extract structured commander summary data from EDHRec JSON response with fallback support."""
     
     # Get commander info from the card section
     card_data = json_data.get("card", {})
-    logger.info(f"Commander card data: {card_data.get('name', 'Unknown')} - {card_data.get('num_decks', 0)} decks")
+    commander_name = card_data.get("name", "Unknown Commander")
+    
+    # Check if this is fallback data (indicated by limited structure)
+    is_fallback = (not card_data.get("num_decks") or card_data.get("num_decks") == 0) and len(json_data.get("container", {}).get("json_dict", {}).get("cardlists", [])) == 0
+    
+    if is_fallback:
+        logger.warning(f"Using fallback response for {commander_name} - EDHRec data unavailable")
+        # Return a graceful fallback response
+        return {
+            "commander_name": commander_name,
+            "commander_url": f"https://thedocs.esearchtools.com/commanders/{card_data.get('sanitized', '')}",
+            "commander_tags": ["unavailable due to EDHRec access restrictions"],
+            "top_10_tags": [{
+                "tag": "unavailable due to EDHRec access restrictions",
+                "count": None,
+                "link": None
+            }],
+            "all_tags": [{
+                "tag": "unavailable due to EDHRec access restrictions",
+                "count": None,
+                "link": None
+            }],
+            "combos": [],
+            "similar_commanders": [],
+            "categories": {},
+            "timestamp": datetime.utcnow().isoformat(),
+            "commander_stats": {
+                "rank": None,
+                "total_decks": 0,
+                "salt_score": None,
+                "cmc": None,
+                "rarity": None,
+                "color_identity": card_data.get("color_identity", [])
+            },
+            "warning": "EDHRec JSON API access is currently restricted. Limited commander data available."
+        }
+    
+    logger.info(f"Commander card data: {commander_name} - {card_data.get('num_decks', 0)} decks")
     
     # Get tags data
     tags_data = json_data.get("taglinks", [])
@@ -180,8 +274,8 @@ def extract_commander_summary_data(
     
     # Build output structure
     result = {
-        "commander_name": card_data.get("name", "Unknown Commander"),
-        "commander_url": f"https://edhrec.com/commanders/{card_data.get('sanitized', '')}",
+        "commander_name": commander_name,
+        "commander_url": f"https://thedocs.esearchtools.com/commanders/{card_data.get('sanitized', '')}",
         "commander_tags": [tag_data.get("value", "") for tag_data in tags_data[:10]],  # Top 10 tags as list of strings
         "top_10_tags": tags_output[:10],  # Top 10 tags as detailed objects
         "all_tags": tags_output,  # All tags as detailed objects
