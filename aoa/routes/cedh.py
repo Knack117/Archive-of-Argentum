@@ -20,8 +20,11 @@ router = APIRouter(
 )
 
 # Database URLs with fallback option
-CEDH_DATABASE_URL = "https://raw.githubusercontent.com/AverageDragon/cEDH-Decklist-Database/master/_data/database.json"
+# Updated to use the official cEDH database from cedh-decklist-database.com
+CEDH_DATABASE_URL = "https://raw.githubusercontent.com/averagewagon/cEDH-Decklist-Database/main/_data/database.json"
 CEDH_DATABASE_FALLBACK_URL = "https://raw.githubusercontent.com/cedh-decklist-database/cedh-decklist-database/main/_data/database.json"
+# Additional fallback for master branch compatibility
+CEDH_DATABASE_FALLBACK_URL_2 = "https://raw.githubusercontent.com/AverageDragon/cEDH-Decklist-Database/master/_data/database.json"
 
 # Cache for database with TTL
 _database_cache: Optional[Dict[str, Any]] = None
@@ -48,8 +51,8 @@ async def fetch_cedh_database(force_refresh: bool = False, max_retries: int = 3)
             logger.info("Returning cached cEDH database")
             return _database_cache
     
-    # Try primary URL first, then fallback
-    urls_to_try = [CEDH_DATABASE_URL, CEDH_DATABASE_FALLBACK_URL]
+    # Try primary URL first, then fallbacks
+    urls_to_try = [CEDH_DATABASE_URL, CEDH_DATABASE_FALLBACK_URL, CEDH_DATABASE_FALLBACK_URL_2]
     base_delay = 2.0
     
     for url_index, database_url in enumerate(urls_to_try):
@@ -281,6 +284,8 @@ async def search_cedh_decks(
     limit: int = Query(20, ge=1, le=100, description="Maximum number of results"),
 ) -> CEDHSearchResponse:
     """Search the cEDH database with filters."""
+    logger.info(f"cEDH search endpoint accessed with filters: commander={commander}, colors={colors}, section={section}, primer_only={primer_only}, limit={limit}")
+    
     # Fetch database
     database = await fetch_cedh_database()
     
