@@ -616,7 +616,10 @@ async def refresh_tags_cache(
 
 
 @router.get("/tags/catalog")
-async def get_tags_catalog(cache = Depends(get_tag_cache)) -> Dict[str, Any]:
+async def get_tags_catalog(
+    api_key: str = Depends(verify_api_key),  # Add API key dependency
+    cache = Depends(get_tag_cache)
+) -> Dict[str, Any]:
     """Get the complete tags catalog with examples and usage info."""
     await cache.load_cache()
     tags = await cache.get_available_tags()
