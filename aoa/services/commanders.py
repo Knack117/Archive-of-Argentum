@@ -1,168 +1,206 @@
-"""Utilities for performing live commander data extraction from EDHRec."""
-from __future__ import annotations
-
+"""Rewritten commander data fetching to work with real EDHRec JSON structure."""
 import logging
-import re
-from collections import deque
 from datetime import datetime
-from typing import Any, Deque, Dict, List, Optional, Set
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional, Set
 
+import httpx
 from fastapi import HTTPException
 
-from aoa.constants import EDHREC_BASE_URL
-from aoa.services.edhrec import fetch_edhrec_json
+from aoa.constants import EDHREC_JSON_BASE_URL
 
 logger = logging.getLogger(__name__)
 
 
-def _extract_page_data(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Return the commander data block regardless of how Next.js nests it."""
-
-    if not isinstance(payload, dict):
-        return {}
-
-    # Check if payload is already the data block (new EDHRec API format)
-    # The data block typically has keys like 'panels', 'similar', 'cardlists', 'container'
-    data_indicators = {'panels', 'similar', 'cardlists', 'container'}
-    if any(key in payload for key in data_indicators):
-        logger.debug("Payload appears to be direct data block (new format)")
-        return payload
-
-    # Otherwise, search for pageProps.data (old format with Next.js wrapper)
-    queue: Deque[Any] = deque([payload])
-    while queue:
-        node = queue.popleft()
-        if isinstance(node, dict):
-            page_props = node.get("pageProps")
-            if isinstance(page_props, dict):
-                data_block = page_props.get("data")
-                if isinstance(data_block, dict):
-                    logger.debug("Found data block in pageProps.data (old format)")
-                    return data_block
-            for value in node.values():
-                if isinstance(value, (dict, list, tuple)):
-                    queue.append(value)
-        elif isinstance(node, (list, tuple)):
-            for item in node:
-                if isinstance(item, (dict, list, tuple)):
-                    queue.append(item)
+def normalize_commander_name(name: str) -> str:
+    """Normalize commander name for EDHRec URL."""
+    if not name:
+        return ""
     
-    logger.warning("Could not find commander data in payload")
-    return {}
-
-
-def extract_build_id_from_html(html: str) -> Optional[str]:
-    """Return the Next.js buildId from EDHREC commander HTML (if present)."""
-    if not html:
-        return None
-    match = re.search(r'"buildId"\s*:\s*"([^"]+)"', html)
-    if match:
-        return match.group(1)
-    return None
-
-
-def normalize_commander_tags(values: List[str]) -> List[str]:
-    """Clean and deduplicate commander tags while preserving order."""
-    seen = set()
-    result: List[str] = []
-
-    for raw in values:
-        cleaned = raw.strip() if isinstance(raw, str) else ""
-        if not cleaned or len(cleaned) > 64 or not re.search(r"[A-Za-z]", cleaned):
-            continue
-        key = cleaned.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(cleaned)
-    return result
+    # Remove special characters and normalize
+    normalized = name.lower().strip()
+    normalized = normalized.replace(",", "-")
+    normalized = normalized.replace("'", "")
+    normalized = normalized.replace(" ", "-")
+    normalized = normalized.replace("--", "-")
+    
+    # Remove extra hyphens
+    while "--" in normalized:
+        normalized = normalized.replace("--", "-")
+    
+    return normalized.strip("-")
 
 
 def extract_commander_name_from_url(url: str) -> str:
-    """Extract commander name from an EDHREC commander URL."""
+    """Extract commander name from EDHRec URL."""
+    if not url:
+        return ""
+    
+    # Handle EDHRec URLs
+    if "commanders/" in url:
+        name_part = url.split("commanders/")[-1]
+        # Convert URL format back to readable name
+        name = name_part.replace("-", " ").title()
+        return name
+    
+    # If it's already a name, return as-is
+    return url.strip()
+
+
+async def fetch_edhrec_commander_json(commander_url: str) -> Dict[str, Any]:
+    """Fetch commander data from EDHRec JSON endpoint."""
     try:
-        parsed = urlparse(url)
-        path = (parsed.path or "").split("?")[0].split("#")[0]
-        if path.startswith("/"):
-            path = path[1:]
-        if path.startswith("commanders/"):
-            slug = path.split("commanders/", 1)[1]
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0),
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            logger.info(f"Fetching EDHRec JSON for: {commander_url}")
+            response = await client.get(commander_url)
+            response.raise_for_status()
+            
+            data = response.json()
+            logger.info(f"Successfully fetched EDHRec data: {len(data)} top-level keys")
+            return data
+            
+    except httpx.RequestError as exc:
+        logger.error(f"Network error fetching EDHRec JSON {commander_url}: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to connect to EDHRec service for '{commander_url}'"
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Commander not found on EDHRec: '{commander_url}'"
+            ) from exc
         else:
-            slug = path.split("/")[-1]
-        slug = slug.strip("/").replace("-", " ").replace("_", " ")
-        return " ".join(word.capitalize() for word in slug.split()) or "unknown"
-    except Exception:
-        return "unknown"
+            logger.error(f"EDHRec API error {exc.response.status_code}: {exc}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"EDHRec API returned error {exc.response.status_code} for '{commander_url}'"
+            ) from exc
 
 
-def normalize_commander_name(name: str) -> str:
-    """Normalize a commander name into an EDHRec slug."""
-    slug = name.strip().lower()
-    slug = re.sub(r"[^a-z0-9]+", "-", slug)
-    slug = re.sub(r"-+", "-", slug)
-    return slug.strip("-") or "unknown"
-
-
-def _clean_text(value: str) -> str:
-    from html import unescape
-
-    cleaned = unescape(value or "")
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned.strip()
-
-
-def _gather_section_card_names(source: Any) -> List[str]:
-    names: List[str] = []
-    visited = set()
-
-    def collect(node: Any) -> None:
-        node_id = id(node)
-        if node_id in visited:
-            return
-        visited.add(node_id)
-
-        if isinstance(node, dict):
-            name_value = None
-            for key in ("name", "cardName", "label", "title"):
-                raw = node.get(key)
-                if isinstance(raw, str) and raw.strip():
-                    name_value = _clean_text(raw)
-                    break
-            if name_value:
-                names.append(name_value)
-            for child_key, child_value in node.items():
-                if child_key in {"name", "cardName", "label", "title", "names"}:
-                    continue
-                if isinstance(child_value, (dict, list, tuple, set)):
-                    collect(child_value)
-        elif isinstance(node, (list, tuple, set)):
-            str_entries = [
-                _clean_text(entry)
-                for entry in node
-                if isinstance(entry, str) and _clean_text(entry)
-            ]
-            if str_entries and len(str_entries) == len(node):
-                names.extend(str_entries)
-            else:
-                for entry in node:
-                    if isinstance(entry, (dict, list, tuple, set)):
-                        collect(entry)
-
-    collect(source)
-
-    deduped: List[str] = []
-    seen = set()
-    for name in names:
-        cleaned = _clean_text(name)
-        if not cleaned:
+def extract_commander_summary_data(
+    json_data: Dict[str, Any], 
+    limit_per_category: Optional[int] = None,
+    categories_filter: Optional[Set[str]] = None,
+    compact_mode: bool = False
+) -> Dict[str, Any]:
+    """Extract structured commander summary data from EDHRec JSON response."""
+    
+    # Get commander info from the card section
+    card_data = json_data.get("card", {})
+    logger.info(f"Commander card data: {card_data.get('name', 'Unknown')} - {card_data.get('num_decks', 0)} decks")
+    
+    # Get tags data
+    tags_data = json_data.get("taglinks", [])
+    logger.info(f"Found {len(tags_data)} tags")
+    
+    # Get similar commanders
+    similar_data = json_data.get("similar", [])
+    logger.info(f"Found {len(similar_data)} similar commanders")
+    
+    # Get card categories
+    container_data = json_data.get("container", {})
+    cardlists = container_data.get("json_dict", {}).get("cardlists", [])
+    logger.info(f"Found {len(cardlists)} card categories")
+    
+    # Extract card data by category
+    categories_output = {}
+    
+    for category in cardlists:
+        category_header = category.get("header", "")
+        category_tag = category.get("tag", "")
+        
+        # Skip if not in filter
+        if categories_filter and category_tag not in categories_filter:
             continue
-        key = cleaned.lower()
-        if key in seen:
+            
+        # Skip empty categories
+        if not category_header:
             continue
-        seen.add(key)
-        deduped.append(cleaned)
-    return deduped
+            
+        cardviews = category.get("cardviews", [])
+        if not cardviews:
+            continue
+            
+        # Apply limit per category
+        if limit_per_category:
+            cardviews = cardviews[:limit_per_category]
+        elif compact_mode:
+            cardviews = cardviews[:10]  # Compact mode default
+        
+        # Convert card views to commander cards
+        commander_cards = []
+        for card in cardviews:
+            commander_card = {
+                "name": card.get("name"),
+                "num_decks": card.get("num_decks"),
+                "potential_decks": card.get("potential_decks"),
+                "inclusion_percentage": card.get("inclusion") if card.get("inclusion") else None,
+                "synergy_percentage": card.get("synergy") if card.get("synergy") else None,
+                "sanitized_name": card.get("sanitized"),
+                "card_url": card.get("url")
+            }
+            commander_cards.append(commander_card)
+        
+        if commander_cards:
+            categories_output[category_header] = commander_cards
+            logger.info(f"Category '{category_header}': {len(commander_cards)} cards")
+    
+    # Build tags output
+    tags_output = []
+    for tag_data in tags_data:
+        tags_output.append({
+            "tag": tag_data.get("value"),
+            "count": tag_data.get("count"),
+            "link": f"/tags/{tag_data.get('slug')}"
+        })
+    
+    # Build similar commanders output
+    similar_output = []
+    for sim_cmd in similar_data:
+        similar_output.append({
+            "name": sim_cmd.get("name"),
+            "url": sim_cmd.get("url")
+        })
+    
+    # Build combos output (if available)
+    combos_data = json_data.get("combocounts", [])
+    combos_output = []
+    for combo in combos_data:
+        combo_name = combo.get("value", "")
+        if combo_name and combo_name != "See More...":
+            combos_output.append({
+                "combo": combo_name,
+                "url": combo.get("href")
+            })
+    
+    # Build output structure
+    result = {
+        "commander_name": card_data.get("name", "Unknown Commander"),
+        "commander_url": f"https://edhrec.com/commanders/{card_data.get('sanitized', '')}",
+        "commander_tags": [tag_data.get("value", "") for tag_data in tags_data[:10]],  # Top 10 tags as list of strings
+        "top_10_tags": tags_output[:10],  # Top 10 tags as detailed objects
+        "all_tags": tags_output,  # All tags as detailed objects
+        "combos": combos_output,
+        "similar_commanders": similar_output,
+        "categories": categories_output,
+        "timestamp": datetime.utcnow().isoformat(),
+        "commander_stats": {
+            "rank": card_data.get("rank"),
+            "total_decks": card_data.get("num_decks"),
+            "salt_score": card_data.get("salt"),
+            "cmc": card_data.get("cmc"),
+            "rarity": card_data.get("rarity"),
+            "color_identity": card_data.get("color_identity", [])
+        }
+    }
+    
+    logger.info(f"Extracted commander summary with {len(result['categories'])} categories, {len(result['all_tags'])} tags")
+    return result
 
 
 async def scrape_edhrec_commander_page(
@@ -171,266 +209,27 @@ async def scrape_edhrec_commander_page(
     categories_filter: Optional[Set[str]] = None,
     compact_mode: bool = False
 ) -> Dict[str, Any]:
-    """Fetch commander data from EDHRec's live JSON endpoints.
+    """Fetch commander data from EDHRec using the JSON endpoint.
     
-    Args:
-        commander_url: EDHRec commander URL
-        limit_per_category: Maximum cards to return per category
-        categories_filter: Set of category names to include (lowercase)
-        compact_mode: If True, return minimal card data
-        
-    Returns:
-        Extracted and filtered commander data
+    This replaces the old HTML scraping approach with the direct JSON API.
     """
-    commander_name = extract_commander_name_from_url(commander_url)
-
     try:
-        payload = await fetch_edhrec_json(commander_url)
-    except HTTPException:
-        raise
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error("Unexpected error fetching commander JSON for %s: %s", commander_url, exc)
-        raise HTTPException(status_code=500, detail="Failed to fetch commander data") from exc
-
-    json_data = extract_commander_json_data(
-        payload,
-        limit_per_category=limit_per_category,
-        categories_filter=categories_filter,
-        compact_mode=compact_mode
-    )
-
-    return {
-        "commander_name": commander_name,
-        "commander_url": commander_url,
-        "commander_tags": json_data.get("commander_tags", []),
-        "top_10_tags": json_data.get("top_10_tags", []),
-        "all_tags": json_data.get("all_tags", []),
-        "combos": json_data.get("combos", []),
-        "similar_commanders": json_data.get("similar_commanders", []),
-        "categories": json_data.get("categories", {}),
-        "timestamp": datetime.utcnow().isoformat(),
-    }
-
-def extract_commander_json_data(
-    payload: Dict[str, Any],
-    limit_per_category: Optional[int] = None,
-    categories_filter: Optional[Set[str]] = None,
-    compact_mode: bool = False
-) -> Dict[str, Any]:
-    """Extract commander data from the live EDHRec JSON payload.
-    
-    Args:
-        payload: Raw JSON payload from EDHRec
-        limit_per_category: Maximum cards to return per category
-        categories_filter: Set of category names to include (lowercase)
-        compact_mode: If True, return minimal card data
+        # Fetch raw JSON data
+        json_data = await fetch_edhrec_commander_json(commander_url)
         
-    Returns:
-        Extracted and filtered commander data
-    """
-    page_data = _extract_page_data(payload)
-    panels = page_data.get("panels", {})
-    container = page_data.get("container", {})
-
-    all_tags: List[Dict[str, Any]] = []
-    taglinks = panels.get("taglinks", [])
-    if isinstance(taglinks, list):
-        sorted_tags = sorted(taglinks, key=lambda x: x.get("count", 0), reverse=True)
-        for entry in sorted_tags:
-            if not isinstance(entry, dict):
-                continue
-            tag = entry.get("tag") or entry.get("label") or entry.get("value")
-            if not tag:
-                continue
-            all_tags.append(
-                {
-                    "tag": tag,
-                    "count": entry.get("count", 0),
-                    "url": entry.get("url") or entry.get("href"),
-                }
-            )
-
-    commander_tags = normalize_commander_tags([tag.get("tag", "") for tag in all_tags])
-    top_10_tags = all_tags[:10]
-
-    combos: List[Dict[str, Any]] = []
-    combos_data = panels.get("combocounts") or panels.get("combos", [])
-    for combo_entry in combos_data or []:
-        if not isinstance(combo_entry, dict):
-            continue
-        combo_name = (
-            combo_entry.get("name")
-            or combo_entry.get("title")
-            or combo_entry.get("value")
+        # Extract structured data
+        result = extract_commander_summary_data(
+            json_data, 
+            limit_per_category=limit_per_category,
+            categories_filter=categories_filter,
+            compact_mode=compact_mode
         )
-        if not combo_name:
-            continue
-        combos.append(
-            {
-                "name": combo_name,
-                "url": combo_entry.get("url") or combo_entry.get("href"),
-                "cards": _gather_section_card_names(combo_entry.get("cards", [])),
-            }
-        )
-
-    similar_commanders: List[Dict[str, Any]] = []
-    similar_data = page_data.get("similar") or panels.get("similarCommanders", [])
-    for entry in similar_data or []:
-        if not isinstance(entry, dict):
-            continue
-        name = entry.get("name")
-        if not name:
-            continue
-        similar_commanders.append(
-            {
-                "name": name,
-                "url": entry.get("url") or entry.get("href"),
-                "similarity": entry.get("similarity"),
-            }
-        )
-
-    cardlists_sources = [
-        page_data.get("cardlists"),
-        container.get("cardlists"),
-        container.get("json_dict", {}).get("cardlists"),
-        panels.get("jsonCardLists"),
-    ]
-
-    categories: Dict[str, Dict[str, Any]] = {}
-    for candidate in cardlists_sources:
-        if not candidate:
-            continue
-        for section in candidate:
-            if not isinstance(section, dict):
-                continue
-            header = section.get("header") or section.get("label") or "cards"
-            
-            # Apply category filter
-            if categories_filter:
-                header_lower = header.lower().replace(" ", "").replace("-", "")
-                # Check if this category matches any in the filter
-                if not any(filter_cat in header_lower for filter_cat in categories_filter):
-                    continue
-            
-            cards = section.get("cardviews") or section.get("cards") or []
-            
-            # Apply limit per category
-            if limit_per_category:
-                cards = cards[:limit_per_category]
-            
-            normalized_cards = []
-            for card in cards:
-                if not isinstance(card, dict):
-                    continue
-                card_name = card.get("name") or card.get("cardname")
-                if not card_name:
-                    continue
-                
-                # Extract raw values
-                num_decks = card.get("num_decks") or card.get("decks_in") or 0
-                potential_decks = card.get("potential_decks") or card.get("potential") or 1
-                synergy_raw = card.get("synergy_percentage") or card.get("synergy") or 0
-                inclusion_raw = card.get("inclusion_percentage") or card.get("inclusion")
-                
-                # Calculate percentages
-                # Synergy is typically 0-1 decimal, convert to percentage
-                synergy_percentage = synergy_raw * 100 if synergy_raw and synergy_raw <= 1 else synergy_raw
-                
-                # Inclusion percentage: calculate from num_decks/potential_decks if not already a percentage
-                if inclusion_raw and inclusion_raw > 1:
-                    # Already a percentage
-                    inclusion_percentage = inclusion_raw
-                else:
-                    # Calculate from counts
-                    inclusion_percentage = (num_decks / potential_decks * 100) if potential_decks > 0 else 0
-                
-                card_url = card.get("card_url") or card.get("url") or ""
-                if card_url and not card_url.startswith("http"):
-                    card_url = f"{EDHREC_BASE_URL}{card_url}"
-                
-                # Build card data based on mode
-                if compact_mode:
-                    # Compact mode: essential data without sanitized_name
-                    card_data = {
-                        "name": card_name,
-                        "num_decks": num_decks,
-                        "potential_decks": potential_decks,
-                        "inclusion_percentage": round(inclusion_percentage, 1),
-                        "synergy_percentage": round(synergy_percentage, 1),
-                        "card_url": card_url,
-                    }
-                else:
-                    # Standard mode: full data including sanitized_name
-                    card_data = {
-                        "name": card_name,
-                        "num_decks": num_decks,
-                        "potential_decks": potential_decks,
-                        "inclusion_percentage": round(inclusion_percentage, 1),
-                        "synergy_percentage": round(synergy_percentage, 1),
-                        "sanitized_name": card.get("sanitized_name") or card.get("sanitized"),
-                        "card_url": card_url,
-                    }
-                
-                normalized_cards.append(card_data)
-            
-            if normalized_cards:
-                categories[header] = {"cards": normalized_cards}
-        if categories:
-            break
-
-    return {
-        "commander_tags": commander_tags,
-        "top_10_tags": top_10_tags,
-        "all_tags": all_tags,
-        "combos": combos,
-        "similar_commanders": similar_commanders,
-        "categories": categories,
-    }
-
-def extract_commander_tags_from_json(payload: Dict[str, Any]) -> List[str]:
-    """Extract commander tags from EDHRec JSON payloads."""
-    data = _extract_page_data(payload)
-    panels = data.get("panels", {})
-    taglinks = panels.get("taglinks", [])
-    tags: List[str] = []
-    for entry in taglinks:
-        tag = (
-            entry.get("tag")
-            or entry.get("label")
-            or entry.get("value")
-            or entry.get("slug")
-        )
-        if tag:
-            tags.append(tag)
-    return tags
-
-
-def extract_commander_sections_from_json(payload: Dict[str, Any]) -> Dict[str, List[str]]:
-    """Extract commander card sections from EDHRec JSON payloads."""
-    data = _extract_page_data(payload)
-    sections: Dict[str, List[str]] = {}
-
-    cardlists = data.get("cardlists") or []
-    if not cardlists:
-        panels = data.get("panels", {})
-        cardlists = panels.get("jsonCardLists", [])
-    if not cardlists:
-        container = data.get("container", {})
-        json_dict = container.get("json_dict", {})
-        cardlists = json_dict.get("cardlists", [])
-
-    for cardlist in cardlists:
-        header = cardlist.get("header") or cardlist.get("label") or "cards"
-        cards = cardlist.get("cards") or cardlist.get("cardviews") or []
-        sections[header] = _gather_section_card_names(cards)
-
-    return sections
-
-
-__all__ = [
-    "extract_commander_name_from_url",
-    "normalize_commander_name",
-    "scrape_edhrec_commander_page",
-    "extract_commander_tags_from_json",
-    "extract_commander_sections_from_json",
-]
+        
+        return result
+        
+    except Exception as exc:
+        logger.error(f"Unexpected error in scrape_edhrec_commander_page: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to process commander data"
+        ) from exc
