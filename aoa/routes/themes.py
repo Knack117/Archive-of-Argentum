@@ -13,8 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from aoa.constants import COLOR_SLUG_MAP, EDHREC_BASE_URL, SORTED_COLOR_IDENTIFIERS
 from aoa.models import PageTheme, ThemeCollection, ThemeItem, ThemeContainer
 from aoa.security import verify_api_key
-from aoa.services.edhrec import fetch_edhrec_json
-from aoa.services.themes import scrape_edhrec_theme_page
+from aoa.services.edhrec import fetch_edhrec_json, scrape_edhrec_theme_page
 from aoa.services.tag_cache import get_tag_cache, validate_theme_slug
 
 router = APIRouter(prefix="/api/v1", tags=["themes"])
