@@ -374,3 +374,57 @@ async def _fetch_json(url: str) -> Any:
         raise HTTPException(status_code=502, detail=f"Upstream JSON request failed ({url})")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Invalid JSON from {url}")
+
+
+async def fetch_edhrec_json(endpoint: str) -> Any:
+    """Fetch JSON from EDHREC API endpoint.
+    
+    Args:
+        endpoint: API endpoint path (e.g., 'tags/themes')
+        
+    Returns:
+        JSON response data
+        
+    Raises:
+        HTTPException: If fetch fails
+    """
+    url = f"{EDHREC_BASE_URL}/{endpoint.lstrip('/')}"
+    return await _fetch_json(url)
+
+
+async def scrape_edhrec_theme_page(page_url: str) -> Dict[str, Any]:
+    """Scrape EDHREC theme page HTML content.
+    
+    Args:
+        page_url: Full EDHREC theme page URL
+        
+    Returns:
+        Dictionary with scraped data
+        
+    Raises:
+        HTTPException: If fetch fails
+    """
+    logger.info(f"Scraping theme page: {page_url}")
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0),
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = await client.get(page_url)
+            response.raise_for_status()
+            
+            # Return basic page info - the themes route will parse the HTML
+            return {
+                "url": page_url,
+                "content": response.text,
+                "status_code": response.status_code,
+                "headers": dict(response.headers)
+            }
+    except httpx.HTTPStatusError as exc:
+        status_code = exc.response.status_code if exc.response else 502
+        if status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Theme page not found ({page_url})")
+        raise HTTPException(status_code=502, detail=f"Theme page fetch failed ({status_code} {page_url})")
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Theme page request failed ({page_url})")
