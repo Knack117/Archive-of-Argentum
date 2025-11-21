@@ -2,7 +2,7 @@
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from aoa.models.themes import EdhrecError, HealthResponse, PageTheme
 from aoa.services.edhrec import fetch_commander_summary
@@ -12,10 +12,10 @@ router = APIRouter(prefix="/api/v1", tags=["commanders"])
 logger = logging.getLogger(__name__)
 
 
-@router.get("/commander/summary", response_model=PageTheme)
+@router.get("/commanders/summary", response_model=PageTheme)
 async def get_commander_summary(
     name: str = Query(..., description="Commander name (raw string, partners, MDFCs supported)"),
-    # TEMPORARILY DISABLED: api_key: str = Depends(verify_api_key),
+    api_key: str = Depends(verify_api_key),
 ) -> PageTheme:
     """Fetch EDHREC commander summary using sophisticated Next.js data extraction.
     
@@ -50,8 +50,8 @@ async def health():
 # Legacy endpoints kept for backward compatibility but marked as deprecated
 @router.get("/average_deck/summary", deprecated=True)
 async def get_average_deck_summary(*args, **kwargs):
-    """Deprecated endpoint - use /commander/summary instead."""
+    """Deprecated endpoint - use /commanders/summary instead."""
     raise HTTPException(
         status_code=410,
-        detail="This endpoint has been deprecated. Use /api/v1/commander/summary instead."
+        detail="This endpoint has been deprecated. Use /api/v1/commanders/summary instead."
     )
