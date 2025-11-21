@@ -40,4 +40,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD sh -c "curl -f http://localhost:$PORT/health || exit 1"
 
 # Run the application with shell form to properly expand environment variables
-CMD ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port $PORT"]
+CMD ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port $PORT --log-level ${LOG_LEVEL:-info} --access-log"]
