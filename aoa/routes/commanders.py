@@ -59,10 +59,11 @@ async def get_commander_summary(
     # Add timeout wrapper for commander data fetching
     try:
         # Use asyncio.wait_for to limit total execution time
-        commander_data = await asyncio.wait_for(
-            _fetch_commander_data(name, commander_url, limit, categories, mode),
+        commander_summary = await asyncio.wait_for(
+            _fetch_commander_summary(name, commander_url, limit, categories, mode),
             timeout=25.0  # 25 second total timeout
         )
+        return commander_summary
     except asyncio.TimeoutError:
         logger.warning(f"Commander summary timeout for {name or commander_url}")
         raise HTTPException(
@@ -70,8 +71,8 @@ async def get_commander_summary(
             detail="Request timed out while fetching commander data from EDHRec. Please try again later."
         )
     
-async def _fetch_commander_data(name, commander_url, limit, categories, mode):
-    """Internal function to fetch commander data with better error handling."""
+async def _fetch_commander_summary(name, commander_url, limit, categories, mode):
+    """Internal function to fetch and process commander data."""
     if name:
         slug = normalize_commander_name(name)
     elif commander_url:
@@ -106,29 +107,26 @@ async def _fetch_commander_data(name, commander_url, limit, categories, mode):
         compact_mode=compact_mode
     )
     
-    return commander_data
-
+    # Transform the data into the expected model format
     categories_output: Dict[str, List[CommanderCard]] = {}
-    for category_key, category_data in commander_data.get("categories", {}).items():
-        if not isinstance(category_data, dict):
-            continue
-        cards_data = category_data.get("cards", [])
-        card_objects: List[CommanderCard] = []
-        for card in cards_data:
-            if isinstance(card, dict):
-                card_objects.append(
-                    CommanderCard(
-                        name=card.get("name"),
-                        num_decks=card.get("num_decks"),
-                        potential_decks=card.get("potential_decks"),
-                        inclusion_percentage=card.get("inclusion_percentage"),
-                        synergy_percentage=card.get("synergy_percentage"),
-                        sanitized_name=card.get("sanitized_name"),
-                        card_url=card.get("card_url"),
+    for category_key, category_cards in commander_data.get("categories", {}).items():
+        if isinstance(category_cards, list):
+            card_objects: List[CommanderCard] = []
+            for card in category_cards:
+                if isinstance(card, dict):
+                    card_objects.append(
+                        CommanderCard(
+                            name=card.get("name"),
+                            num_decks=card.get("num_decks"),
+                            potential_decks=card.get("potential_decks"),
+                            inclusion_percentage=card.get("inclusion_percentage"),
+                            synergy_percentage=card.get("synergy_percentage"),
+                            sanitized_name=card.get("sanitized_name"),
+                            card_url=card.get("card_url"),
+                        )
                     )
-                )
-        if card_objects:
-            categories_output[category_key] = card_objects
+            if card_objects:
+                categories_output[category_key] = card_objects
 
     all_tags_output: List[CommanderTag] = []
     for tag_data in commander_data.get("all_tags", []):
@@ -137,7 +135,7 @@ async def _fetch_commander_data(name, commander_url, limit, categories, mode):
                 CommanderTag(
                     tag=tag_data.get("tag"),
                     count=tag_data.get("count"),
-                    link=tag_data.get("url"),
+                    link=tag_data.get("link"),
                 )
             )
 
@@ -146,7 +144,7 @@ async def _fetch_commander_data(name, commander_url, limit, categories, mode):
         if isinstance(combo_data, dict):
             combos_output.append(
                 CommanderCombo(
-                    combo=combo_data.get("name"),
+                    combo=combo_data.get("combo"),
                     url=combo_data.get("url"),
                 )
             )
@@ -168,7 +166,7 @@ async def _fetch_commander_data(name, commander_url, limit, categories, mode):
                 CommanderTag(
                     tag=tag_data.get("tag"),
                     count=tag_data.get("count"),
-                    link=tag_data.get("url"),
+                    link=tag_data.get("link"),
                 )
             )
 
