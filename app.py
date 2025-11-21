@@ -1,5 +1,7 @@
 """FastAPI application entry point for Archive of Argentum."""
+import logging
 import os
+import time
 import uvicorn
 from datetime import datetime
 
@@ -39,6 +41,19 @@ from aoa.services.commanders import (
     normalize_commander_name,
     scrape_edhrec_commander_page,
 )
+
+# Configure logging FIRST (before creating FastAPI app)
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),  # Ensure logs go to stdout for Render
+    ]
+)
+
+# Set uvicorn logging level too
+uvicorn_logger = logging.getLogger("uvicorn")
+uvicorn_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 
 app = FastAPI(
     title="MTG Deckbuilding API",
@@ -87,6 +102,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all HTTP requests with timing and response status."""
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = (time.time() - start_time) * 1000
+    
+    # Log request details
+    logger = logging.getLogger("aoa.access")
+    logger.info(
+        f"{request.client.host} {request.method} {request.url.path} "
+        f"-> {response.status_code} ({process_time:.1f}ms)"
+    )
+    
+    return response
 
 app.include_router(system.router)
 app.include_router(cards.router)
