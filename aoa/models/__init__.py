@@ -15,7 +15,7 @@ from .deck_validation import (
     DeckValidationRequest,
     DeckValidationResponse,
 )
-from .themes import PageTheme, ThemeCollection, ThemeContainer, ThemeItem
+from .themes import EdhrecError, HealthResponse, PageTheme, ThemeCollection, ThemeContainer, ThemeItem
 from .responses import (
     GameChangerResponse,
     BannedCardsResponse,
