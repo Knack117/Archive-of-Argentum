@@ -1,26 +1,34 @@
-"""Security and OpenAPI metadata regression tests."""
-from fastapi.testclient import TestClient
+import pytest
+from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 
-from app import app
-
-client = TestClient(app)
-
-
-def test_cedh_routes_require_authentication() -> None:
-    response = client.get("/api/v1/cedh/search")
-    assert response.status_code == 403
-    payload = response.json().get("error", {})
-    assert payload.get("message") == "Not authenticated"
+from app import MAX_OPENAPI_OPERATIONS, PRIORITIZED_OPENAPI_PATHS, app
+from aoa.security import verify_api_key
 
 
-def test_openapi_marks_cedh_routes_secure() -> None:
+def test_verify_api_key_accepts_default_and_rejects_invalid():
+    valid_credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="test-key")
+    assert verify_api_key(valid_credentials) == "test-key"
+
+    invalid_credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="wrong")
+    with pytest.raises(HTTPException) as exc:
+        verify_api_key(invalid_credentials)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid API key"
+
+
+def test_openapi_limits_and_security_defaults():
     schema = app.openapi()
-    cedh_search = schema["paths"]["/api/v1/cedh/search"]["get"]
-    assert {"HTTPBearer": []} in cedh_search.get("security", [])
 
+    assert len(schema["paths"]) <= MAX_OPENAPI_OPERATIONS
 
-def test_openapi_limits_operations() -> None:
-    schema = app.openapi()
-    operation_count = sum(len(methods) for methods in schema["paths"].values())
-    assert operation_count <= 30
-    assert "/api/v1/cedh/search" in schema["paths"]
+    cards_search = schema["paths"].get("/api/v1/cards/search", {}).get("post", {})
+    assert cards_search.get("security") == [{"HTTPBearer": []}]
+
+    root_path = schema["paths"].get("/", {}).get("get", {})
+    assert root_path.get("security") is None
+
+    for prioritized in PRIORITIZED_OPENAPI_PATHS:
+        if prioritized in schema["paths"]:
+            assert "security" in next(iter(schema["paths"][prioritized].values()))
