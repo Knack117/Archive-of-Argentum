@@ -1,5 +1,6 @@
 """cEDH Deck Database routes - search and filter competitive EDH decklists."""
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -18,8 +19,9 @@ router = APIRouter(
     dependencies=[Depends(verify_api_key)],
 )
 
-# Database URL
+# Database URLs with fallback option
 CEDH_DATABASE_URL = "https://raw.githubusercontent.com/AverageDragon/cEDH-Decklist-Database/master/_data/database.json"
+CEDH_DATABASE_FALLBACK_URL = "https://raw.githubusercontent.com/cedh-decklist-database/cedh-decklist-database/main/_data/database.json"
 
 # Cache for database with TTL
 _database_cache: Optional[Dict[str, Any]] = None
@@ -27,12 +29,13 @@ _cache_timestamp: Optional[datetime] = None
 CACHE_TTL_HOURS = 6  # Refresh every 6 hours
 
 
-async def fetch_cedh_database(force_refresh: bool = False) -> List[Dict[str, Any]]:
+async def fetch_cedh_database(force_refresh: bool = False, max_retries: int = 3) -> List[Dict[str, Any]]:
     """
-    Fetch the cEDH database from GitHub with caching.
+    Fetch the cEDH database from GitHub with improved error handling and retry logic.
     
     Args:
         force_refresh: Force refresh the cache even if still valid
+        max_retries: Maximum number of retry attempts per URL
         
     Returns:
         List of deck entries from the database
@@ -45,38 +48,107 @@ async def fetch_cedh_database(force_refresh: bool = False) -> List[Dict[str, Any
             logger.info("Returning cached cEDH database")
             return _database_cache
     
-    # Fetch fresh data
-    logger.info("Fetching fresh cEDH database from GitHub")
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(CEDH_DATABASE_URL)
-            response.raise_for_status()
-            data = response.json()
+    # Try primary URL first, then fallback
+    urls_to_try = [CEDH_DATABASE_URL, CEDH_DATABASE_FALLBACK_URL]
+    base_delay = 2.0
+    
+    for url_index, database_url in enumerate(urls_to_try):
+        logger.info(f"Fetching cEDH database from URL {url_index + 1}: {database_url}")
+        
+        for attempt in range(max_retries):
+            try:
+                # Configure client with extended timeouts and limits
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(
+                        connect=30.0,    # Connection timeout
+                        read=120.0,      # Read timeout - increased for large JSON
+                        write=30.0,      # Write timeout
+                        pool=10.0        # Pool timeout
+                    ),
+                    limits=httpx.Limits(
+                        max_connections=20,
+                        max_keepalive_connections=10
+                    ),
+                    follow_redirects=True,
+                    trust_env=False
+                ) as client:
+                    headers = {
+                        "User-Agent": "Archive-of-Argentum/1.0 (MTG Deck Builder API)",
+                        "Accept": "application/json",
+                        "Accept-Encoding": "gzip, deflate, br",
+                        "Cache-Control": "no-cache",
+                        "Pragma": "no-cache"
+                    }
+                    
+                    logger.info(f"Attempting to fetch cEDH database (attempt {attempt + 1}/{max_retries})")
+                    response = await client.get(database_url, headers=headers)
+                    response.raise_for_status()
+                    
+                    # Parse JSON data
+                    data = response.json()
+                    
+                    # Validate data structure
+                    if not isinstance(data, list):
+                        raise ValueError(f"Expected list, got {type(data)}")
+                    
+                    # Update cache
+                    _database_cache = data
+                    _cache_timestamp = datetime.utcnow()
 
-            # Update cache
-            _database_cache = data
-            _cache_timestamp = datetime.utcnow()
+                    logger.info(f"Successfully fetched {len(data)} cEDH deck entries from {database_url}")
+                    return data
 
-            logger.info(f"Successfully fetched {len(data)} cEDH deck entries")
-            return data
-
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "Failed to fetch cEDH database (status %s): %s",
-            exc.response.status_code,
-            exc.response.text,
-        )
-    except httpx.RequestError as exc:
-        logger.error("Failed to fetch cEDH database: %s", exc)
-
-    # Return cached data if available, even if stale
+            except httpx.HTTPStatusError as exc:
+                logger.error(
+                    "Failed to fetch cEDH database from %s (status %s, attempt %d): %s",
+                    database_url,
+                    exc.response.status_code,
+                    attempt + 1,
+                    exc.response.text
+                )
+                
+                # If it's a client error (4xx), don't retry for this URL
+                if 400 <= exc.response.status_code < 500:
+                    break
+                    
+            except httpx.RequestError as exc:
+                logger.error(
+                    "Network error fetching cEDH database from %s (attempt %d): %s",
+                    database_url,
+                    attempt + 1,
+                    exc
+                )
+                
+            except (ValueError, KeyError) as exc:
+                logger.error(
+                    "Data validation error from %s (attempt %d): %s",
+                    database_url,
+                    attempt + 1,
+                    exc
+                )
+                
+            # Wait before retrying
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)  # Exponential backoff
+                logger.warning(f"Retrying in {delay}s...")
+                time.sleep(delay)
+        
+        # If we exhausted all retries for this URL, try the next one
+        if url_index < len(urls_to_try) - 1:
+            logger.info(f"Moving to fallback URL...")
+            time.sleep(1)  # Brief pause between URLs
+    
+    # If all attempts failed, return cached data if available, even if stale
     if _database_cache is not None:
-        logger.warning("Returning cached cEDH database after fetch failure")
+        logger.warning("Returning cached cEDH database after all fetch attempts failed")
         return _database_cache
 
     raise HTTPException(
         status_code=503,
-        detail="Unable to fetch cEDH database and no cached data available",
+        detail=(
+            "Unable to fetch cEDH database from any source. "
+            "Please try again later or check your internet connection."
+        ),
     )
 
 
