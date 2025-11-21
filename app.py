@@ -69,7 +69,7 @@ PRIORITIZED_OPENAPI_PATHS = [
     "/api/v1/cards/banned",
     "/api/v1/cards/mass-land-destruction",
     "/api/v1/cards/{card_id}",
-    "/api/v1/commander/summary",
+    "/api/v1/commanders/summary",
     "/api/v1/combos/commander/{commander_name}",
     "/api/v1/combos/search",
     "/api/v1/combos/early-game",
@@ -106,17 +106,35 @@ app.add_middleware(
 async def log_requests(request: Request, call_next):
     """Log all HTTP requests with timing and response status."""
     start_time = time.time()
-    response = await call_next(request)
-    process_time = (time.time() - start_time) * 1000
+    response = None
     
-    # Log request details
-    logger = logging.getLogger("aoa.access")
-    logger.info(
-        f"{request.client.host} {request.method} {request.url.path} "
-        f"-> {response.status_code} ({process_time:.1f}ms)"
-    )
-    
-    return response
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as exc:
+        # Log the exception before re-raising
+        logger = logging.getLogger("aoa.access")
+        process_time = (time.time() - start_time) * 1000
+        logger.error(
+            f"{request.client.host} {request.method} {request.url.path} "
+            f"-> EXCEPTION: {exc.__class__.__name__}: {str(exc)} ({process_time:.1f}ms)"
+        )
+        raise
+    finally:
+        # Always log the request, even if an exception occurred
+        process_time = (time.time() - start_time) * 1000
+        logger = logging.getLogger("aoa.access")
+        
+        # Determine status code - 500 if exception occurred, otherwise from response
+        if response is not None:
+            status_code = response.status_code
+        else:
+            status_code = 500
+        
+        logger.info(
+            f"{request.client.host} {request.method} {request.url.path} "
+            f"-> {status_code} ({process_time:.1f}ms)"
+        )
 
 app.include_router(system.router)
 app.include_router(cards.router)
