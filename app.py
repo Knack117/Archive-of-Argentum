@@ -36,8 +36,7 @@ from aoa.routes.themes import (
 )
 from aoa.services.commanders import (
     extract_commander_name_from_url,
-    extract_commander_sections_from_json,
-    extract_commander_tags_from_json,
+    extract_commander_summary_data,
     normalize_commander_name,
     scrape_edhrec_commander_page,
 )
@@ -217,8 +216,7 @@ __all__ = [
     "scrape_edhrec_commander_page",
     "extract_commander_name_from_url",
     "normalize_commander_name",
-    "extract_commander_tags_from_json",
-    "extract_commander_sections_from_json",
+    "extract_commander_summary_data",
     "_build_theme_route_candidates",
     "_resolve_theme_card_limit",
     "_estimate_response_size",
