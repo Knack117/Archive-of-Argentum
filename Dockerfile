@@ -32,8 +32,8 @@ RUN useradd --create-home --shell /bin/bash app \
     && chown -R app:app /app
 USER app
 
-# Expose port (Render will provide this via PORT env var)
-EXPOSE $PORT
+# Expose port (Render uses PORT=10000 by default)
+EXPOSE 10000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
