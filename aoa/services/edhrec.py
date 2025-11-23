@@ -187,7 +187,7 @@ def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
                                         all_cards.append(card_info)
                                         
         except (KeyError, TypeError) as e:
-            logger.warning(f\"Could not navigate to card data: {e}\")
+            logger.warning(f"Could not navigate to card data: {e}")
         
         # Group cards by type if we have enhanced data
         if all_cards:
@@ -263,7 +263,7 @@ async def fetch_commander_summary(name: str, budget: Optional[str] = None) -> Di
         # Use enhanced EDHRec parsing to extract real statistics
         enhanced_data = await _fetch_enhanced_commander_data(snapshot.html, display_name, edhrec_url)
         
-        if enhanced_data and enhanced_data.get('collections'):
+        if enhanced_data and enhanced_data.get('container', {}).get('collections'):
             # Return enhanced data with real statistics
             return enhanced_data
         
@@ -303,11 +303,14 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
     try:
         # Extract commander stats
         commander_stats = _extract_commander_stats_enhanced(html)
+        logger.info(f"Enhanced parser - commander_stats: {commander_stats}")
         
         # Extract real card data from all sections
         card_sections = _extract_real_card_sections(html)
+        logger.info(f"Enhanced parser - card_sections keys: {list(card_sections.keys()) if card_sections else 'None'}")
         
         if not card_sections:
+            logger.warning("Enhanced parser - No card sections found")
             return None
         
         # Convert EDHRecCardData to ThemeItem format with statistics
@@ -328,14 +331,13 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
                     theme_item = ThemeItem(
                         name=card.card_name,
                         id=None,
-                        image=None
+                        image=None,
+                        inclusion_percentage=card.inclusion_percentage,
+                        decks_with_commander=card.decks_with_commander,
+                        total_decks_for_card=card.total_decks_for_card,
+                        synergy_score=card.synergy_score,
+                        card_url=card.card_url
                     )
-                    # Store additional statistics as custom fields
-                    theme_item.inclusion_percentage = card.inclusion_percentage
-                    theme_item.decks_with_commander = card.decks_with_commander
-                    theme_item.total_decks_for_card = card.total_decks_for_card
-                    theme_item.synergy_score = card.synergy_score
-                    theme_item.card_url = card.card_url
                     theme_items.append(theme_item)
                 
                 if theme_items:
@@ -345,7 +347,10 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
                     ))
         
         if not collections:
+            logger.warning("Enhanced parser - No collections built")
             return None
+        
+        logger.info(f"Enhanced parser - Built {len(collections)} collections")
         
         # Build enhanced response (maintain original API format)
         response = {
@@ -361,7 +366,7 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
         
         # Log commander stats for debugging
         if commander_stats:
-            logger.info(f"Enhanced parser - Commander stats: {commander_stats}")
+            logger.info(f"Enhanced parser - Final response has {len(response['container']['collections'])} collections")
         
         return response
         
