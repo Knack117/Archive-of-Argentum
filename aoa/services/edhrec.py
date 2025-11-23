@@ -80,30 +80,44 @@ def _extract_commander_stats_enhanced(html: str) -> Dict[str, Any]:
     stats = {}
     
     try:
-        # Extract the JSON data from Next.js pageProps
-        page_props_match = re.search(r'pageProps":\s*(\{.*?"header":\s*"[^"]*".*?\})', html, re.DOTALL)
-        if not page_props_match:
-            logger.warning("Could not find pageProps JSON data")
+        # Extract the Next.js JSON data from the HTML script tag
+        json_match = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+        if not json_match:
+            logger.warning("Could not find Next.js data in HTML")
             return {}
         
-        # Parse JSON
-        json_data = json.loads(page_props_match.group(1))
+        try:
+            json_data = json.loads(json_match.group(1))
+        except json.JSONDecodeError as e:
+            logger.warning(f"Could not parse Next.js JSON data: {e}")
+            return {}
         
-        # Extract commander data
-        if 'card' in json_data:
-            commander_card = json_data['card']
-            
-            # Get rank
-            rank = commander_card.get('rank')
-            if rank:
-                stats["rank"] = rank
-                logger.info(f"Commander rank: #{rank}")
-            
-            # Get total decks
-            inclusion = commander_card.get('inclusion')
-            if inclusion:
-                stats["total_decks"] = inclusion
-                logger.info(f"Total decks: {inclusion:,}")
+        # Navigate to commander data in the Next.js structure
+        # Path: props.pageProps.data.container.json_dict.card
+        try:
+            if 'props' in json_data and 'pageProps' in json_data['props']:
+                page_props = json_data['props']['pageProps']
+                if 'data' in page_props and 'container' in page_props['data']:
+                    container = page_props['data']['container']
+                    if 'json_dict' in container and 'card' in container['json_dict']:
+                        commander_card = container['json_dict']['card']
+                        
+                        # Get rank
+                        rank = commander_card.get('rank')
+                        if rank:
+                            stats["rank"] = rank
+                            logger.info(f"Commander rank: #{rank}")
+                        
+                        # Get total decks
+                        inclusion = commander_card.get('inclusion')
+                        if inclusion:
+                            stats["total_decks"] = inclusion
+                            logger.info(f"Total decks: {inclusion:,}")
+                            
+                        return stats
+        except (KeyError, TypeError) as e:
+            logger.warning(f"Could not navigate to commander data: {e}")
+            return {}
         
         return stats
         
@@ -118,60 +132,62 @@ def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
     card_sections = {}
     
     try:
-        # Extract the JSON data from Next.js pageProps
-        page_props_match = re.search(r'pageProps":\s*(\{.*?"header":\s*"[^"]*".*?\})', html, re.DOTALL)
-        if not page_props_match:
-            logger.warning("Could not find pageProps JSON data")
+        # Extract the Next.js JSON data from the HTML script tag
+        json_match = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+        if not json_match:
+            logger.warning("Could not find Next.js data in HTML")
             return {}
         
-        # Parse JSON
-        json_data = json.loads(page_props_match.group(1))
+        try:
+            json_data = json.loads(json_match.group(1))
+        except json.JSONDecodeError as e:
+            logger.warning(f"Could not parse Next.js JSON data: {e}")
+            return {}
         
-        # Extract card data from various possible locations
+        # Extract card data from Next.js structure
         all_cards = []
         
-        # Method 1: Look in source.container.collections (most common)
-        if 'source' in json_data and 'container' in json_data['source']:
-            container = json_data['source']['container']
-            if 'collections' in container:
-                for collection in container.get('collections', []):
-                    header = collection.get('header', '')
-                    items = collection.get('items', [])
-                    
-                    if header in ['Cardviews', 'Cards']:  # These sections have structured data
-                        for item in items:
-                            if isinstance(item, dict):
-                                # Extract real statistics from JSON
-                                card_name = item.get('name', '')
-                                synergy = item.get('synergy', 0.0)
-                                inclusion = item.get('inclusion', 0)  # decks with this card
-                                potential_decks = item.get('potential_decks', 0)  # total decks for this commander
-                                
-                                if card_name and potential_decks > 0:
-                                    # Calculate inclusion percentage
-                                    inclusion_percentage = (inclusion / potential_decks) * 100
-                                    synergy_score = synergy * 100  # Convert to percentage
+        # Navigate to cardlists in the Next.js structure
+        # Path: props.pageProps.data.container.json_dict.cardlists
+        try:
+            if 'props' in json_data and 'pageProps' in json_data['props']:
+                page_props = json_data['props']['pageProps']
+                if 'data' in page_props and 'container' in page_props['data']:
+                    container = page_props['data']['container']
+                    if 'json_dict' in container and 'cardlists' in container['json_dict']:
+                        cardlists = container['json_dict']['cardlists']
+                        
+                        # Process each cardlist
+                        for cardlist in cardlists:
+                            header = cardlist.get('header', '')
+                            cardviews = cardlist.get('cardviews', [])
+                            
+                            # Process cards in this cardlist
+                            for item in cardviews:
+                                if isinstance(item, dict):
+                                    # Extract real statistics from JSON
+                                    card_name = item.get('name', '')
+                                    synergy = item.get('synergy', 0.0)
+                                    inclusion = item.get('inclusion', 0)  # decks with this card
+                                    potential_decks = item.get('potential_decks', 0)  # total decks for this commander
                                     
-                                    card_info = EDHRecCardData(
-                                        card_name=card_name,
-                                        inclusion_percentage=round(inclusion_percentage, 1),
-                                        decks_with_commander=inclusion,
-                                        total_decks_for_card=potential_decks,
-                                        synergy_score=round(synergy_score, 1),
-                                        card_url=f"https://scryfall.com/search?q={card_name.replace(' ', '+')}"
-                                    )
-                                    all_cards.append(card_info)
-        
-        # Method 2: Look in direct card data
-        if 'card' in json_data:
-            commander_card = json_data['card']
-            if 'inclusion' in commander_card:
-                # Get commander total decks
-                commander_total = commander_card.get('inclusion', 0)
-                commander_rank = commander_card.get('rank', 0)
-                
-                if commander_rank and commander_total:
-                    logger.info(f"Commander rank: #{commander_rank}, total decks: {commander_total}")
+                                    if card_name and potential_decks > 0:
+                                        # Calculate inclusion percentage
+                                        inclusion_percentage = (inclusion / potential_decks) * 100
+                                        synergy_score = synergy * 100  # Convert to percentage
+                                        
+                                        card_info = EDHRecCardData(
+                                            card_name=card_name,
+                                            inclusion_percentage=round(inclusion_percentage, 1),
+                                            decks_with_commander=inclusion,
+                                            total_decks_for_card=potential_decks,
+                                            synergy_score=round(synergy_score, 1),
+                                            card_url=f"https://scryfall.com/search?q={card_name.replace(' ', '+')}"
+                                        )
+                                        all_cards.append(card_info)
+                                        
+        except (KeyError, TypeError) as e:
+            logger.warning(f\"Could not navigate to card data: {e}\")
         
         # Group cards by type if we have enhanced data
         if all_cards:
