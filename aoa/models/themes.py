@@ -9,6 +9,13 @@ class ThemeItem(BaseModel):
     name: str
     id: Optional[str] = None  # Scryfall UUID
     image: Optional[str] = None  # Optional Scryfall image URL
+    
+    # Enhanced EDHRec statistics (optional)
+    inclusion_percentage: Optional[float] = None
+    decks_with_commander: Optional[int] = None
+    total_decks_for_card: Optional[int] = None
+    synergy_score: Optional[float] = None
+    card_url: Optional[str] = None
 
 
 class ThemeCollection(BaseModel):
