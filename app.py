@@ -5,7 +5,7 @@ import time
 import uvicorn
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
@@ -54,6 +54,17 @@ logging.basicConfig(
 uvicorn_logger = logging.getLogger("uvicorn")
 uvicorn_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
 
+# Configure custom loggers for proper propagation to stdout
+access_logger = logging.getLogger("aoa.access")
+access_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+access_logger.addHandler(logging.StreamHandler())
+access_logger.propagate = True
+
+auth_logger = logging.getLogger("aoa.auth")
+auth_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
+auth_logger.addHandler(logging.StreamHandler())
+auth_logger.propagate = True
+
 app = FastAPI(
     title="MTG Deckbuilding API",
     description="Commander utility endpoints including deck validation and EDHRec tooling.",
@@ -94,6 +105,7 @@ PRIORITIZED_OPENAPI_PATHS = [
     "/api/v1/cedh/info",
 ]
 
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
@@ -102,11 +114,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add OPTIONS handler before CORS to log preflight requests
+@app.options("/{path:path}")
+async def log_options(path: str, request: Request):
+    """Log CORS preflight OPTIONS requests for debugging."""
+    logger = logging.getLogger("aoa.access")
+    logger.info(f"OPTIONS {request.url.path} -> 200 (CORS preflight)")
+    return Response(status_code=200)
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log all HTTP requests with timing and response status."""
     start_time = time.time()
     response = None
+    
+    # Skip logging for OPTIONS requests (they're handled by the OPTIONS handler above)
+    if request.method == "OPTIONS":
+        return await call_next(request)
     
     try:
         response = await call_next(request)
@@ -121,20 +145,21 @@ async def log_requests(request: Request, call_next):
         )
         raise
     finally:
-        # Always log the request, even if an exception occurred
-        process_time = (time.time() - start_time) * 1000
-        logger = logging.getLogger("aoa.access")
-        
-        # Determine status code - 500 if exception occurred, otherwise from response
-        if response is not None:
-            status_code = response.status_code
-        else:
-            status_code = 500
-        
-        logger.info(
-            f"{request.client.host} {request.method} {request.url.path} "
-            f"-> {status_code} ({process_time:.1f}ms)"
-        )
+        # Always log the request, even if an exception occurred (except OPTIONS which are handled above)
+        if request.method != "OPTIONS":
+            process_time = (time.time() - start_time) * 1000
+            logger = logging.getLogger("aoa.access")
+            
+            # Determine status code - 500 if exception occurred, otherwise from response
+            if response is not None:
+                status_code = response.status_code
+            else:
+                status_code = 500
+            
+            logger.info(
+                f"{request.client.host} {request.method} {request.url.path} "
+                f"-> {status_code} ({process_time:.1f}ms)"
+            )
 
 app.include_router(system.router)
 app.include_router(cards.router)
