@@ -76,69 +76,115 @@ def _parse_edhrec_card_entry(text: str) -> Optional[EDHRecCardData]:
 
 
 def _extract_commander_stats_enhanced(html: str) -> Dict[str, Any]:
-    """Extract commander rank and deck statistics from HTML."""
+    """Extract commander rank and deck statistics from JSON-embedded HTML."""
     stats = {}
     
     try:
-        soup = BeautifulSoup(html, 'html.parser')
+        # Extract the JSON data from Next.js pageProps
+        page_props_match = re.search(r'pageProps":\s*(\{.*?"header":\s*"[^"]*".*?\})', html, re.DOTALL)
+        if not page_props_match:
+            logger.warning("Could not find pageProps JSON data")
+            return {}
         
-        # Look for rank information
-        rank_elem = soup.find(text=re.compile(r'#\d+|Rank.*\d+'))
-        if rank_elem:
-            rank_match = re.search(r'#(\d+)', rank_elem)
-            if rank_match:
-                stats["rank"] = int(rank_match.group(1))
-                
-        # Look for total decks
-        deck_elem = soup.find(text=re.compile(r'\d+K?.*total.*deck|deck.*count'))
-        if deck_elem:
-            deck_match = re.search(r'([\d.]+K?)\s*deck', deck_elem)
-            if deck_match:
-                decks_text = deck_match.group(1)
-                if 'K' in decks_text:
-                    stats["total_decks"] = int(float(decks_text.replace('K', '')) * 1000)
-                else:
-                    stats["total_decks"] = int(decks_text)
-                    
-    except Exception as e:
-        logger.warning(f"Error extracting enhanced commander stats: {e}")
+        # Parse JSON
+        json_data = json.loads(page_props_match.group(1))
         
-    return stats
+        # Extract commander data
+        if 'card' in json_data:
+            commander_card = json_data['card']
+            
+            # Get rank
+            rank = commander_card.get('rank')
+            if rank:
+                stats["rank"] = rank
+                logger.info(f"Commander rank: #{rank}")
+            
+            # Get total decks
+            inclusion = commander_card.get('inclusion')
+            if inclusion:
+                stats["total_decks"] = inclusion
+                logger.info(f"Total decks: {inclusion:,}")
+        
+        return stats
+        
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.warning(f"Failed to parse JSON data for commander stats: {e}")
+        return {}
 
 
 def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
-    """Extract all card sections with real EDHRec data using enhanced parsing."""
-    sections = {}
+    """Extract all card sections with real EDHRec statistics from JSON-embedded HTML."""
+    
+    card_sections = {}
     
     try:
-        soup = BeautifulSoup(html, 'html.parser')
+        # Extract the JSON data from Next.js pageProps
+        page_props_match = re.search(r'pageProps":\s*(\{.*?"header":\s*"[^"]*".*?\})', html, re.DOTALL)
+        if not page_props_match:
+            logger.warning("Could not find pageProps JSON data")
+            return {}
         
-        # Find all card sections
-        section_patterns = [
-            ('new_cards', r'New Cards'),
-            ('high_synergy', r'High Synergy Cards'),
-            ('top_cards', r'Top Cards'),
-            ('game_changers', r'Game Changers'),
-            ('creatures', r'Creatures'),
-            ('instants', r'Instants'),
-            ('sorceries', r'Sorceries'),
-            ('utility_artifacts', r'Utility Artifacts'),
-            ('enchantments', r'Enchantments'),
-            ('planeswalkers', r'Planeswalkers'),
-            ('utility_lands', r'Utility Lands'),
-            ('mana_artifacts', r'Mana Artifacts'),
-            ('lands', r'Lands')
-        ]
+        # Parse JSON
+        json_data = json.loads(page_props_match.group(1))
         
-        for section_key, pattern_name in section_patterns:
-            cards = _parse_enhanced_card_section(soup, pattern_name)
-            if cards:
-                sections[section_key] = cards
+        # Extract card data from various possible locations
+        all_cards = []
+        
+        # Method 1: Look in source.container.collections (most common)
+        if 'source' in json_data and 'container' in json_data['source']:
+            container = json_data['source']['container']
+            if 'collections' in container:
+                for collection in container.get('collections', []):
+                    header = collection.get('header', '')
+                    items = collection.get('items', [])
+                    
+                    if header in ['Cardviews', 'Cards']:  # These sections have structured data
+                        for item in items:
+                            if isinstance(item, dict):
+                                # Extract real statistics from JSON
+                                card_name = item.get('name', '')
+                                synergy = item.get('synergy', 0.0)
+                                inclusion = item.get('inclusion', 0)  # decks with this card
+                                potential_decks = item.get('potential_decks', 0)  # total decks for this commander
+                                
+                                if card_name and potential_decks > 0:
+                                    # Calculate inclusion percentage
+                                    inclusion_percentage = (inclusion / potential_decks) * 100
+                                    synergy_score = synergy * 100  # Convert to percentage
+                                    
+                                    card_info = EDHRecCardData(
+                                        card_name=card_name,
+                                        inclusion_percentage=round(inclusion_percentage, 1),
+                                        decks_with_commander=inclusion,
+                                        total_decks_for_card=potential_decks,
+                                        synergy_score=round(synergy_score, 1),
+                                        card_url=f"https://scryfall.com/search?q={card_name.replace(' ', '+')}"
+                                    )
+                                    all_cards.append(card_info)
+        
+        # Method 2: Look in direct card data
+        if 'card' in json_data:
+            commander_card = json_data['card']
+            if 'inclusion' in commander_card:
+                # Get commander total decks
+                commander_total = commander_card.get('inclusion', 0)
+                commander_rank = commander_card.get('rank', 0)
                 
-    except Exception as e:
-        logger.warning(f"Error extracting enhanced card sections: {e}")
+                if commander_rank and commander_total:
+                    logger.info(f"Commander rank: #{commander_rank}, total decks: {commander_total}")
         
-    return sections
+        # Group cards by type if we have enhanced data
+        if all_cards:
+            # For now, put all cards in "All Cards" section
+            # In a more sophisticated version, we'd analyze card types
+            card_sections['all_cards'] = all_cards[:50]  # Limit to 50 cards
+            logger.info(f"Extracted {len(all_cards)} cards with real statistics")
+        
+        return card_sections
+        
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.warning(f"Failed to parse JSON data: {e}")
+        return {}
 
 
 def _parse_enhanced_card_section(soup: BeautifulSoup, section_name: str) -> List[EDHRecCardData]:
@@ -251,21 +297,9 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
         # Convert EDHRecCardData to ThemeItem format with statistics
         collections = []
         
-        # Define section mapping for better names
+        # Define section mapping for better names (match original API format)
         section_names = {
-            'new_cards': 'New Cards',
-            'high_synergy': 'High Synergy Cards',
-            'top_cards': 'Top Cards',
-            'game_changers': 'Game Changers',
-            'creatures': 'Creatures',
-            'instants': 'Instants',
-            'sorceries': 'Sorceries',
-            'utility_artifacts': 'Utility Artifacts',
-            'enchantments': 'Enchantments',
-            'planeswalkers': 'Planeswalkers',
-            'utility_lands': 'Utility Lands',
-            'mana_artifacts': 'Mana Artifacts',
-            'lands': 'Lands'
+            'all_cards': 'Enhanced Cards'
         }
         
         for section_key, cards in card_sections.items():
@@ -275,15 +309,17 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
                 # Convert cards to ThemeItem format with enhanced statistics
                 theme_items = []
                 for card in cards:
-                    # Create enhanced card name with statistics
-                    enhanced_name = f"{card.card_name} ({card.inclusion_percentage}% inclusion, {card.synergy_score}% synergy)"
-                    
                     theme_item = ThemeItem(
-                        name=enhanced_name,
-                        id=card.card_url  # Store URL as ID for later retrieval
+                        name=card.card_name,
+                        id=None,
+                        image=None
                     )
-                    # Store additional statistics in a way that can be used
-                    theme_item.description = f"Included in {card.decks_with_commander:,} of {commander_name} decks. Total {card.total_decks_for_card:,} decks."
+                    # Store additional statistics as custom fields
+                    theme_item.inclusion_percentage = card.inclusion_percentage
+                    theme_item.decks_with_commander = card.decks_with_commander
+                    theme_item.total_decks_for_card = card.total_decks_for_card
+                    theme_item.synergy_score = card.synergy_score
+                    theme_item.card_url = card.card_url
                     theme_items.append(theme_item)
                 
                 if theme_items:
@@ -295,19 +331,23 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
         if not collections:
             return None
         
-        # Build enhanced response
-        return {
-            "header": f"{commander_name} | EDHREC Enhanced",
-            "description": f"Enhanced commander data with real EDHRec statistics" + 
-                          (f" (Rank #{commander_stats.get('rank', 'N/A')})" if commander_stats.get('rank') else ""),
-            "tags": [],  # Will be filled by caller if needed
+        # Build enhanced response (maintain original API format)
+        response = {
+            "header": f"{commander_name} | EDHREC",
+            "description": "",
+            "tags": [],
             "container": {
                 "collections": [collection.dict() for collection in collections]
             },
             "source_url": source_url,
-            "commander_stats": commander_stats,
-            "enhanced": True
+            "error": None
         }
+        
+        # Log commander stats for debugging
+        if commander_stats:
+            logger.info(f"Enhanced parser - Commander stats: {commander_stats}")
+        
+        return response
         
     except Exception as e:
         logger.warning(f"Enhanced EDHRec parsing failed: {e}")
