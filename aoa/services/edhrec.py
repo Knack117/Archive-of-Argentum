@@ -157,12 +157,17 @@ def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
                     if 'json_dict' in container and 'cardlists' in container['json_dict']:
                         cardlists = container['json_dict']['cardlists']
                         
-                        # Process each cardlist
+                        # Process each cardlist and preserve actual EDHRec categories
                         for cardlist in cardlists:
-                            header = cardlist.get('header', '')
+                            header = cardlist.get('header', '').strip()
                             cardviews = cardlist.get('cardviews', [])
                             
-                            # Process cards in this cardlist
+                            # Skip empty headers or non-card sections
+                            if not header or not cardviews:
+                                continue
+                            
+                            # Extract cards from this section
+                            section_cards = []
                             for item in cardviews:
                                 if isinstance(item, dict):
                                     # Extract real statistics from JSON
@@ -184,17 +189,27 @@ def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
                                             synergy_score=round(synergy_score, 1),
                                             card_url=f"https://scryfall.com/search?q={card_name.replace(' ', '+')}"
                                         )
-                                        all_cards.append(card_info)
+                                        section_cards.append(card_info)
+                            
+                            # Store cards under their actual EDHRec category header
+                            if section_cards and header:
+                                # Normalize header for consistency
+                                section_key = header.lower().replace(' ', '_').replace('-', '_')
+                                card_sections[section_key] = section_cards
+                                logger.debug(f"Stored {len(section_cards)} cards in section '{header}'")
                                         
         except (KeyError, TypeError) as e:
             logger.warning(f"Could not navigate to card data: {e}")
         
-        # Group cards by type if we have enhanced data
-        if all_cards:
-            # For now, put all cards in "All Cards" section
-            # In a more sophisticated version, we'd analyze card types
-            card_sections['all_cards'] = all_cards[:50]  # Limit to 50 cards
-            logger.info(f"Extracted {len(all_cards)} cards with real statistics")
+        # Also create a combined list for fallback and add logging
+        if card_sections:
+            all_cards = []
+            for cards in card_sections.values():
+                all_cards.extend(cards)
+            card_sections['all_cards'] = all_cards
+            logger.info(f"Extracted {len(card_sections)-1} actual EDHRec categories with {len(all_cards)} total cards")
+        else:
+            logger.warning("No card sections were extracted - no categories found")
         
         return card_sections
         
@@ -299,103 +314,72 @@ async def fetch_commander_summary(name: str, budget: Optional[str] = None) -> Di
 
 
 def _categorize_commander_cards(card_sections: Dict[str, List[Any]]) -> List[ThemeCollection]:
-    """Categorize commander cards into strategic groups based on EDHRec metrics."""
+    """Convert actual EDHRec sections to ThemeCollections - preserve real categories."""
     
     if not card_sections:
         return []
     
-    # Get all cards from all sections
-    all_cards = []
-    for section_cards in card_sections.values():
-        if section_cards:
-            all_cards.extend(section_cards)
-    
-    if not all_cards:
-        return []
-    
-    # Convert cards to ThemeItem format for categorization
-    theme_cards = []
-    for card in all_cards:
-        theme_item = ThemeItem(
-            name=card.card_name,
-            id=None,
-            image=None,
-            inclusion_percentage=card.inclusion_percentage,
-            decks_with_commander=card.decks_with_commander,
-            total_decks_for_card=card.total_decks_for_card,
-            synergy_score=card.synergy_score,
-            card_url=card.card_url
-        )
-        theme_cards.append(theme_item)
-    
-    # Define thresholds for categorization (based on typical EDHRec distributions)
-    high_inclusion_threshold = 30.0  # Top 30% most included cards
-    high_synergy_threshold = 20.0    # High synergy score
-    game_changer_threshold = 25.0    # Both metrics high
-    
-    # Categorize cards
-    top_cards = []          # High inclusion, lower synergy (staples)
-    high_synergy = []       # High synergy, lower inclusion (tech)
-    new_cards = []          # Low inclusion, newer releases
-    game_changers = []      # Both metrics high
-    
-    for card in theme_cards:
-        inclusion = card.inclusion_percentage
-        synergy = card.synergy_score
-        
-        # Determine if card might be new (low inclusion but could be modern)
-        is_new = (inclusion < 10.0 and synergy >= 0) or card.name in [
-            'The One Ring', 'Jeska\'s Will', 'Delighted Halfling'
-        ]
-        
-        # Categorize based on metrics
-        if inclusion >= game_changer_threshold and synergy >= game_changer_threshold:
-            game_changers.append(card)
-        elif inclusion >= high_inclusion_threshold:
-            top_cards.append(card)
-        elif synergy >= high_synergy_threshold:
-            high_synergy.append(card)
-        elif is_new:
-            new_cards.append(card)
-        else:
-            # Default to high synergy if no other category fits well
-            high_synergy.append(card)
-    
-    # Sort each category by relevance
-    top_cards.sort(key=lambda x: x.inclusion_percentage, reverse=True)
-    high_synergy.sort(key=lambda x: (x.synergy_score, x.inclusion_percentage), reverse=True)
-    new_cards.sort(key=lambda x: (x.inclusion_percentage, x.synergy_score), reverse=True)
-    game_changers.sort(key=lambda x: (x.synergy_score + x.inclusion_percentage), reverse=True)
-    
-    # Build collections (limit to most relevant cards)
     collections = []
     
-    if game_changers:
-        collections.append(ThemeCollection(
-            header="Game Changers",
-            items=game_changers[:20]
-        ))
+    # Map EDHRec section names to proper headers
+    section_headers = {
+        'new_cards': 'New Cards',
+        'high_synergy_cards': 'High Synergy',
+        'top_cards': 'Top Cards',
+        'game_changers': 'Game Changers'
+    }
     
-    if top_cards:
-        collections.append(ThemeCollection(
-            header="Top Cards",
-            items=top_cards[:25]
-        ))
+    # Process each actual EDHRec section
+    for section_key, section_cards in card_sections.items():
+        if not section_cards or section_key == 'all_cards':
+            continue
+            
+        # Get proper header
+        if section_key in section_headers:
+            header = section_headers[section_key]
+        else:
+            # Handle other categories like 'Creatures', 'Instants', etc.
+            # Capitalize and clean up the key
+            header = section_key.replace('_', ' ').title()
+        
+        # Convert cards to ThemeItem format
+        theme_items = []
+        for card in section_cards:
+            theme_item = ThemeItem(
+                name=card.card_name,
+                id=None,
+                image=None,
+                inclusion_percentage=card.inclusion_percentage,
+                decks_with_commander=card.decks_with_commander,
+                total_decks_for_card=card.total_decks_for_card,
+                synergy_score=card.synergy_score,
+                card_url=card.card_url
+            )
+            theme_items.append(theme_item)
+        
+        # Add collection for this section
+        if theme_items:
+            collections.append(ThemeCollection(
+                header=header,
+                items=theme_items
+            ))
     
-    if high_synergy:
-        collections.append(ThemeCollection(
-            header="High Synergy",
-            items=high_synergy[:20]
-        ))
+    # If we have specific strategic categories from EDHRec, return those
+    strategic_categories = ['game_changers', 'top_cards', 'high_synergy_cards', 'new_cards']
+    found_strategic = any(key in card_sections for key in strategic_categories)
     
-    if new_cards:
-        collections.append(ThemeCollection(
-            header="New Cards",
-            items=new_cards[:15]
-        ))
-    
-    logger.info(f"Categorized cards: Game Changers={len(game_changers)}, Top Cards={len(top_cards)}, High Synergy={len(high_synergy)}, New Cards={len(new_cards)}")
-    return collections
+    if found_strategic:
+        # Return only strategic categories in logical order
+        strategic_collections = []
+        for strategic_key in strategic_categories:
+            for collection in collections:
+                if collection.header == section_headers.get(strategic_key, strategic_key.replace('_', ' ').title()):
+                    strategic_collections.append(collection)
+                    break
+        return strategic_collections
+    else:
+        # Fallback: return all categories found
+        return collections
 
 
 async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_url: str) -> Optional[Dict[str, Any]]:
@@ -424,7 +408,7 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
             logger.warning("Enhanced parser - No collections built")
             return None
         
-        logger.info(f"Enhanced parser - Built {len(collections)} categorized collections")
+        logger.info(f"Built {len(collections)} collections from actual EDHRec categories")
         
         # Build enhanced response (maintain original API format)
         response = {
