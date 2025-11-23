@@ -23,15 +23,21 @@ async def get_commander_summary(
     build IDs from EDHREC pages and fetching structured Next.js JSON data.
     Returns a PageTheme with organized card collections and tags.
     """
+    logger.info(f"Commander summary requested: '{name}'")
+    
     try:
         payload = await fetch_commander_summary(name)
+        logger.info(f"Commander summary successfully fetched for: '{name}'")
     except EdhrecError as exc:
         # Convert EdhrecError to appropriate HTTP response
         if exc.code == "NOT_FOUND":
+            logger.warning(f"Commander not found in EDHREC: '{name}'")
             raise HTTPException(status_code=404, detail=exc.message)
         else:
+            logger.warning(f"EDHREC error for '{name}': {exc.to_dict()}")
             raise HTTPException(status_code=400, detail=exc.to_dict())
     except HTTPException:
+        # Re-raise HTTP exceptions (404, 400, etc.) without additional logging
         raise
     except Exception as exc:
         logger.exception(f"Commander summary fetch failed for '{name}'")
