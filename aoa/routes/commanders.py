@@ -41,12 +41,6 @@ async def get_commander_summary(
     return PageTheme.parse_obj(payload)
 
 
-@router.get("/health", response_model=HealthResponse)
-async def health():
-    """Health check endpoint."""
-    return HealthResponse(status="ok")
-
-
 # Legacy endpoints kept for backward compatibility but marked as deprecated
 @router.get("/average_deck/summary", deprecated=True)
 async def get_average_deck_summary(*args, **kwargs):
