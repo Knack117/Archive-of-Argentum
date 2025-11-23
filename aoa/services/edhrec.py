@@ -298,6 +298,106 @@ async def fetch_commander_summary(name: str, budget: Optional[str] = None) -> Di
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(exc)}")
 
 
+def _categorize_commander_cards(card_sections: Dict[str, List[Any]]) -> List[ThemeCollection]:
+    """Categorize commander cards into strategic groups based on EDHRec metrics."""
+    
+    if not card_sections:
+        return []
+    
+    # Get all cards from all sections
+    all_cards = []
+    for section_cards in card_sections.values():
+        if section_cards:
+            all_cards.extend(section_cards)
+    
+    if not all_cards:
+        return []
+    
+    # Convert cards to ThemeItem format for categorization
+    theme_cards = []
+    for card in all_cards:
+        theme_item = ThemeItem(
+            name=card.card_name,
+            id=None,
+            image=None,
+            inclusion_percentage=card.inclusion_percentage,
+            decks_with_commander=card.decks_with_commander,
+            total_decks_for_card=card.total_decks_for_card,
+            synergy_score=card.synergy_score,
+            card_url=card.card_url
+        )
+        theme_cards.append(theme_item)
+    
+    # Define thresholds for categorization (based on typical EDHRec distributions)
+    high_inclusion_threshold = 30.0  # Top 30% most included cards
+    high_synergy_threshold = 20.0    # High synergy score
+    game_changer_threshold = 25.0    # Both metrics high
+    
+    # Categorize cards
+    top_cards = []          # High inclusion, lower synergy (staples)
+    high_synergy = []       # High synergy, lower inclusion (tech)
+    new_cards = []          # Low inclusion, newer releases
+    game_changers = []      # Both metrics high
+    
+    for card in theme_cards:
+        inclusion = card.inclusion_percentage
+        synergy = card.synergy_score
+        
+        # Determine if card might be new (low inclusion but could be modern)
+        is_new = (inclusion < 10.0 and synergy >= 0) or card.name in [
+            'The One Ring', 'Jeska\'s Will', 'Delighted Halfling'
+        ]
+        
+        # Categorize based on metrics
+        if inclusion >= game_changer_threshold and synergy >= game_changer_threshold:
+            game_changers.append(card)
+        elif inclusion >= high_inclusion_threshold:
+            top_cards.append(card)
+        elif synergy >= high_synergy_threshold:
+            high_synergy.append(card)
+        elif is_new:
+            new_cards.append(card)
+        else:
+            # Default to high synergy if no other category fits well
+            high_synergy.append(card)
+    
+    # Sort each category by relevance
+    top_cards.sort(key=lambda x: x.inclusion_percentage, reverse=True)
+    high_synergy.sort(key=lambda x: (x.synergy_score, x.inclusion_percentage), reverse=True)
+    new_cards.sort(key=lambda x: (x.inclusion_percentage, x.synergy_score), reverse=True)
+    game_changers.sort(key=lambda x: (x.synergy_score + x.inclusion_percentage), reverse=True)
+    
+    # Build collections (limit to most relevant cards)
+    collections = []
+    
+    if game_changers:
+        collections.append(ThemeCollection(
+            header="Game Changers",
+            items=game_changers[:20]
+        ))
+    
+    if top_cards:
+        collections.append(ThemeCollection(
+            header="Top Cards",
+            items=top_cards[:25]
+        ))
+    
+    if high_synergy:
+        collections.append(ThemeCollection(
+            header="High Synergy",
+            items=high_synergy[:20]
+        ))
+    
+    if new_cards:
+        collections.append(ThemeCollection(
+            header="New Cards",
+            items=new_cards[:15]
+        ))
+    
+    logger.info(f"Categorized cards: Game Changers={len(game_changers)}, Top Cards={len(top_cards)}, High Synergy={len(high_synergy)}, New Cards={len(new_cards)}")
+    return collections
+
+
 async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_url: str) -> Optional[Dict[str, Any]]:
     """Fetch enhanced commander data using real EDHRec parsing."""
     try:
@@ -313,44 +413,18 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
             logger.warning("Enhanced parser - No card sections found")
             return None
         
-        # Convert EDHRecCardData to ThemeItem format with statistics
-        collections = []
-        
-        # Define section mapping for better names (match original API format)
-        section_names = {
-            'all_cards': 'Enhanced Cards'
-        }
-        
-        for section_key, cards in card_sections.items():
-            if cards:
-                section_name = section_names.get(section_key, section_key.replace('_', ' ').title())
-                
-                # Convert cards to ThemeItem format with enhanced statistics
-                theme_items = []
-                for card in cards:
-                    theme_item = ThemeItem(
-                        name=card.card_name,
-                        id=None,
-                        image=None,
-                        inclusion_percentage=card.inclusion_percentage,
-                        decks_with_commander=card.decks_with_commander,
-                        total_decks_for_card=card.total_decks_for_card,
-                        synergy_score=card.synergy_score,
-                        card_url=card.card_url
-                    )
-                    theme_items.append(theme_item)
-                
-                if theme_items:
-                    collections.append(ThemeCollection(
-                        header=section_name,
-                        items=theme_items
-                    ))
+        # Categorize cards based on EDHRec metrics for strategic insights
+        collections = _categorize_commander_cards(card_sections)
         
         if not collections:
             logger.warning("Enhanced parser - No collections built")
             return None
         
-        logger.info(f"Enhanced parser - Built {len(collections)} collections")
+        if not collections:
+            logger.warning("Enhanced parser - No collections built")
+            return None
+        
+        logger.info(f"Enhanced parser - Built {len(collections)} categorized collections")
         
         # Build enhanced response (maintain original API format)
         response = {
