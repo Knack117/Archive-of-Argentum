@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     
+    # Timeout Configuration (to prevent Render proxy timeouts)
+    external_api_timeout: int = Field(default=25, env="EXTERNAL_API_TIMEOUT")  # 25 seconds max
+    external_api_connect_timeout: int = Field(default=8, env="EXTERNAL_API_CONNECT_TIMEOUT")  # 8 seconds max
+    external_api_write_timeout: int = Field(default=8, env="EXTERNAL_API_WRITE_TIMEOUT")  # 8 seconds max
+    
     # External Services
     # Scryfall doesn't require API key for basic usage
     # Add other service keys as needed
