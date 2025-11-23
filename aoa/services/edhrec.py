@@ -127,9 +127,10 @@ def _extract_commander_stats_enhanced(html: str) -> Dict[str, Any]:
 
 
 def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
-    """Extract all card sections with real EDHRec statistics from JSON-embedded HTML."""
+    """Extract all card sections with real EDHRec statistics from JSON-embedded HTML, preserving actual categories and order."""
     
     card_sections = {}
+    section_order = []  # Track the order of sections as they appear
     
     try:
         # Extract the Next.js JSON data from the HTML script tag
@@ -196,6 +197,7 @@ def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
                                 # Normalize header for consistency
                                 section_key = header.lower().replace(' ', '_').replace('-', '_')
                                 card_sections[section_key] = section_cards
+                                section_order.append((section_key, header))  # Track order
                                 logger.debug(f"Stored {len(section_cards)} cards in section '{header}'")
                                         
         except (KeyError, TypeError) as e:
@@ -207,7 +209,8 @@ def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
             for cards in card_sections.values():
                 all_cards.extend(cards)
             card_sections['all_cards'] = all_cards
-            logger.info(f"Extracted {len(card_sections)-1} actual EDHRec categories with {len(all_cards)} total cards")
+            card_sections['_section_order'] = section_order  # Store order info
+            logger.info(f"Extracted {len(card_sections)-2} actual EDHRec categories with {len(all_cards)} total cards")
         else:
             logger.warning("No card sections were extracted - no categories found")
         
@@ -321,17 +324,17 @@ def _categorize_commander_cards(card_sections: Dict[str, List[Any]]) -> List[The
     
     collections = []
     
-    # Map EDHRec section names to proper headers
+    # Map EDHRec section names to proper headers (preserve exact names)
     section_headers = {
         'new_cards': 'New Cards',
-        'high_synergy_cards': 'High Synergy',
+        'high_synergy_cards': 'High Synergy Cards',  # Preserve exact EDHRec name
         'top_cards': 'Top Cards',
         'game_changers': 'Game Changers'
     }
     
     # Process each actual EDHRec section
     for section_key, section_cards in card_sections.items():
-        if not section_cards or section_key == 'all_cards':
+        if not section_cards or section_key in ['all_cards', '_section_order']:
             continue
             
         # Get proper header
@@ -364,21 +367,34 @@ def _categorize_commander_cards(card_sections: Dict[str, List[Any]]) -> List[The
                 items=theme_items
             ))
     
-    # If we have specific strategic categories from EDHRec, return those
+    # If we have specific strategic categories from EDHRec, return those in their original order
     strategic_categories = ['game_changers', 'top_cards', 'high_synergy_cards', 'new_cards']
     found_strategic = any(key in card_sections for key in strategic_categories)
     
     if found_strategic:
-        # Return only strategic categories in logical order
-        strategic_collections = []
-        for strategic_key in strategic_categories:
-            for collection in collections:
-                if collection.header == section_headers.get(strategic_key, strategic_key.replace('_', ' ').title()):
-                    strategic_collections.append(collection)
-                    break
-        return strategic_collections
+        # Check if we have the original section order preserved
+        if '_section_order' in card_sections:
+            # Use EDHRec's original order for strategic categories only
+            strategic_collections = []
+            for section_key, original_header in card_sections['_section_order']:
+                if section_key in strategic_categories:
+                    # Find the corresponding collection and add it
+                    for collection in collections:
+                        if collection.header == section_headers.get(section_key, section_key.replace('_', ' ').title()):
+                            strategic_collections.append(collection)
+                            break
+            return strategic_collections
+        else:
+            # Fallback to hardcoded order if no order info available
+            strategic_collections = []
+            for strategic_key in strategic_categories:
+                for collection in collections:
+                    if collection.header == section_headers.get(strategic_key, strategic_key.replace('_', ' ').title()):
+                        strategic_collections.append(collection)
+                        break
+            return strategic_collections
     else:
-        # Fallback: return all categories found
+        # Fallback: return all categories found (maintaining current order)
         return collections
 
 
