@@ -141,7 +141,55 @@ def create_api_for_group(group_name: str, group_config: Dict[str, Any]) -> Dict[
     # Limit operations to 30 if necessary
     _limit_operations_to_max(openapi_schema, group_config["priority_paths"])
     
+    # Fix validation issues
+    _fix_validation_issues(openapi_schema)
+    
     return openapi_schema
+
+def _fix_validation_issues(openapi_schema: Dict[str, Any]) -> None:
+    """Fix common OpenAPI validation issues."""
+    
+    paths = openapi_schema.get("paths", {})
+    
+    # Fix mass-land-destruction description length
+    mld_path = paths.get("/api/v1/cards/mass-land-destruction")
+    if mld_path and mld_path.get("get"):
+        mld_desc = mld_path["get"].get("description", "")
+        if len(mld_desc) > 300:
+            # Shorten the description to under 300 characters
+            shortened_desc = (
+                "Get Mass Land Destruction cards from Scryfall matching official MLD criteria. "
+                "Returns cards that regularly destroy, exile, and bounce other lands, "
+                "keep lands tapped, or change mana production by four or more lands per player."
+            )
+            mld_path["get"]["description"] = shortened_desc
+    
+    # Fix missing schema properties for status, root, and health endpoints
+    problematic_endpoints = {"/api/v1/status", "/", "/health"}
+    
+    for endpoint in problematic_endpoints:
+        endpoint_data = paths.get(endpoint)
+        if endpoint_data:
+            for method, method_data in endpoint_data.items():
+                responses = method_data.get("responses", {})
+                if "200" in responses:
+                    content = responses["200"].get("content", {})
+                    if "application/json" in content:
+                        schema = content["application/json"].get("schema", {})
+                        # Replace empty schema with proper schema definition
+                        if (schema.get("additionalProperties") is True and 
+                            "properties" not in schema):
+                            schema.update({
+                                "type": "object",
+                                "title": schema.get("title", f"Response {endpoint.replace('/', '').title()}"),
+                                "properties": {
+                                    "message": {
+                                        "type": "string",
+                                        "description": "Response message"
+                                    }
+                                },
+                                "required": ["message"]
+                            })
 
 def _limit_operations_to_max(openapi_schema: Dict[str, Any], priority_paths: List[str]) -> None:
     """Limit the number of operations in the schema to 30, prioritizing specified paths."""
