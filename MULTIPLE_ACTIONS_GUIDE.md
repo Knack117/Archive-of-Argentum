@@ -56,13 +56,22 @@ For each JSON file, create a separate action in your CustomGPT configuration:
 - **API Specification**: Upload `popular_decks_cedh.json`
 - **Server URL**: `https://mtg-mightstone-gpt.onrender.com`
 
-### Step 2: Configure Authentication
+### Step 2: Validation Status
+
+✅ **All schemas have been validated and are compliant with CustomGPT requirements:**
+
+- **Operation Limits**: All 4 schemas respect the 30-operation limit (10, 10, 16, and 7 operations respectively)
+- **Description Lengths**: All endpoint descriptions are under 300 characters
+- **Schema Definitions**: All response schemas have proper property definitions
+- **OpenAPI Compliance**: All schemas are valid OpenAPI 3.1 documents
+
+### Step 3: Configure Authentication
 
 All actions should use the same authentication configuration:
 - **Authentication Type**: Bearer Token
 - **Token**: Your API key for the Archive-of-Argentum service
 
-### Step 3: Test Each Action
+### Step 4: Test Each Action
 
 Verify that each action can successfully call its designated endpoints:
 
