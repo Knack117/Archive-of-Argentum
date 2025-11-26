@@ -1,0 +1,849 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Archive API \u2013 Commanders & Combos",
+    "description": "Commander information, summary data, and combo searches including early/late game combos and combo information.",
+    "version": "1.1.0"
+  },
+  "paths": {
+    "/api/v1/commanders/summary": {
+      "get": {
+        "tags": [
+          "commanders"
+        ],
+        "summary": "Get Commander Summary",
+        "description": "Fetch EDHREC commander summary using sophisticated Next.js data extraction.\n\nThis endpoint uses the same approach as the Knack117 repository, extracting\nbuild IDs from EDHREC pages and fetching structured Next.js JSON data.\nReturns a PageTheme with organized card collections and tags.",
+        "operationId": "get_commander_summary_api_v1_commanders_summary_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Commander name (raw string, partners, MDFCs supported)",
+              "title": "Name"
+            },
+            "description": "Commander name (raw string, partners, MDFCs supported)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageTheme"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/average_deck/summary": {
+      "get": {
+        "tags": [
+          "commanders"
+        ],
+        "summary": "Get Average Deck Summary",
+        "description": "Deprecated endpoint - use /commanders/summary instead.",
+        "operationId": "get_average_deck_summary_api_v1_average_deck_summary_get",
+        "deprecated": true,
+        "parameters": [
+          {
+            "name": "args",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "title": "Args"
+            }
+          },
+          {
+            "name": "kwargs",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "title": "Kwargs"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/combos/commander/{commander_name}": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Get Commander Combos Endpoint",
+        "description": "Fetch all combos for a specific commander from Commander Spellbook.",
+        "operationId": "get_commander_combos_endpoint_api_v1_combos_commander__commander_name__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "commander_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Commander Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComboSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/combos/search": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Search Combos By Card",
+        "description": "Search for combos containing a specific card from Commander Spellbook.",
+        "operationId": "search_combos_by_card_api_v1_combos_search_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "card_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Card name to search for in combos",
+              "title": "Card Name"
+            },
+            "description": "Card name to search for in combos"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComboSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/debug/combos/test": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Debug Combo Search",
+        "description": "Debug endpoint to test combo search and show raw backend API info.",
+        "operationId": "debug_combo_search_api_v1_debug_combos_test_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Test search query",
+              "title": "Query"
+            },
+            "description": "Test search query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Debug Combo Search Api V1 Debug Combos Test Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/combos/early-game": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Get Early Game Combos",
+        "description": "Get the complete list of early-game 2-card combos.\n\nThese combos are NOT acceptable for brackets 1 (Exhibition), 2 (Core), or 3 (Upgraded).\nThey are only acceptable for brackets 4 (Optimized) and 5 (cEDH).",
+        "operationId": "get_early_game_combos_api_v1_combos_early_game_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Early Game Combos Api V1 Combos Early Game Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/combos/late-game": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Get Late Game Combos",
+        "description": "Get the complete list of late-game 2-card combos.\n\nThese combos are considered acceptable for play in brackets 3, 4, and 5\naccording to community voting on EDHRec.",
+        "operationId": "get_late_game_combos_api_v1_combos_late_game_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Late Game Combos Api V1 Combos Late Game Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/combos/search-early-game": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Search Early Game Combos By Card",
+        "description": "Search for early-game combos containing a specific card.\n\nReturns all early-game 2-card combos that include the specified card.",
+        "operationId": "search_early_game_combos_by_card_api_v1_combos_search_early_game_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "card_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Card name to search for in early-game combos",
+              "title": "Card Name"
+            },
+            "description": "Card name to search for in early-game combos"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Search Early Game Combos By Card Api V1 Combos Search Early Game Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/combos/search-late-game": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Search Late Game Combos By Card",
+        "description": "Search for late-game combos containing a specific card.\n\nReturns all late-game 2-card combos that include the specified card.",
+        "operationId": "search_late_game_combos_by_card_api_v1_combos_search_late_game_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "card_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Card name to search for in late-game combos",
+              "title": "Card Name"
+            },
+            "description": "Card name to search for in late-game combos"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Search Late Game Combos By Card Api V1 Combos Search Late Game Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/combos/info": {
+      "get": {
+        "tags": [
+          "combos"
+        ],
+        "summary": "Get Combo Api Info",
+        "description": "Get information about the combo API endpoints.\n\nProvides an overview of available endpoints, combo categories, and usage examples.",
+        "operationId": "get_combo_api_info_api_v1_combos_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Combo Api Info Api V1 Combos Info Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ComboResult": {
+        "properties": {
+          "combo_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combo Id"
+          },
+          "combo_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combo Name"
+          },
+          "color_identity": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Color Identity"
+          },
+          "cards_in_combo": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Cards In Combo"
+          },
+          "results_in_combo": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Results In Combo"
+          },
+          "decks_edhrec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decks Edhrec"
+          },
+          "variants": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variants"
+          },
+          "combo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combo Url"
+          },
+          "price_info": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Price Info"
+          }
+        },
+        "type": "object",
+        "title": "ComboResult",
+        "description": "Serialized representation of a Commander Spellbook combo."
+      },
+      "ComboSearchResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "commander_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commander Name"
+          },
+          "search_query": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Query"
+          },
+          "total_results": {
+            "type": "integer",
+            "title": "Total Results"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ComboResult"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "total_results",
+          "results",
+          "source_url",
+          "timestamp"
+        ],
+        "title": "ComboSearchResponse",
+        "description": "Envelope describing combo search API responses."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "PageTheme": {
+        "properties": {
+          "header": {
+            "type": "string",
+            "title": "Header"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "container": {
+            "$ref": "#/components/schemas/ThemeContainer"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "header",
+          "container"
+        ],
+        "title": "PageTheme",
+        "description": "Complete page theme with metadata and card collections."
+      },
+      "ThemeCollection": {
+        "properties": {
+          "header": {
+            "type": "string",
+            "title": "Header"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ThemeItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "header"
+        ],
+        "title": "ThemeCollection",
+        "description": "Collection of theme items under a specific header."
+      },
+      "ThemeContainer": {
+        "properties": {
+          "collections": {
+            "items": {
+              "$ref": "#/components/schemas/ThemeCollection"
+            },
+            "type": "array",
+            "title": "Collections"
+          }
+        },
+        "type": "object",
+        "title": "ThemeContainer",
+        "description": "Container holding multiple theme collections."
+      },
+      "ThemeItem": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
+          "inclusion_percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inclusion Percentage"
+          },
+          "decks_with_commander": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decks With Commander"
+          },
+          "total_decks_for_card": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Decks For Card"
+          },
+          "synergy_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synergy Score"
+          },
+          "card_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ThemeItem",
+        "description": "Individual theme item (card) with optional metadata."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://mtg-mightstone-gpt.onrender.com",
+      "description": "Render production deployment"
+    }
+  ]
+}

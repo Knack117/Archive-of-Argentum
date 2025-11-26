@@ -1,0 +1,103 @@
+{
+  "customgpt_actions": [
+    {
+      "action_name": "Archive API - System & Cards",
+      "description": "Use this action for system status checks and card search functionality including autocomplete, random cards, game changers, banned cards, and mass land destruction.",
+      "api_spec_file": "system_cards.json",
+      "server_url": "https://mtg-mightstone-gpt.onrender.com",
+      "authentication": {
+        "type": "Bearer Token",
+        "token_field": "Your API key here"
+      },
+      "key_endpoints": [
+        "GET /api/v1/status",
+        "POST /api/v1/cards/search", 
+        "GET /api/v1/cards/autocomplete",
+        "GET /api/v1/cards/random",
+        "GET /api/v1/cards/gamechangers",
+        "GET /api/v1/cards/banned",
+        "GET /api/v1/cards/mass-land-destruction",
+        "GET /api/v1/cards/{card_id}"
+      ],
+      "operation_count": 10
+    },
+    {
+      "action_name": "Archive API - Commanders & Combos",
+      "description": "Use this action for commander information and combo searches including early/late game combos and detailed combo information.",
+      "api_spec_file": "commanders_combos.json",
+      "server_url": "https://mtg-mightstone-gpt.onrender.com",
+      "authentication": {
+        "type": "Bearer Token",
+        "token_field": "Your API key here"
+      },
+      "key_endpoints": [
+        "GET /api/v1/commanders/summary",
+        "GET /api/v1/commanders/{commander_name}",
+        "GET /api/v1/combos/commander/{commander_name}",
+        "POST /api/v1/combos/search",
+        "GET /api/v1/combos/early-game",
+        "GET /api/v1/combos/late-game",
+        "GET /api/v1/combos/info"
+      ],
+      "operation_count": 10
+    },
+    {
+      "action_name": "Archive API - Themes & Deck Validation",
+      "description": "Use this action for theme-based deck building and comprehensive deck validation including salt checks, bracket information, and combo validation.",
+      "api_spec_file": "themes_deck_validation.json",
+      "server_url": "https://mtg-mightstone-gpt.onrender.com",
+      "authentication": {
+        "type": "Bearer Token",
+        "token_field": "Your API key here"
+      },
+      "key_endpoints": [
+        "GET /api/v1/themes/{theme_slug}",
+        "GET /api/v1/tags/available",
+        "GET /api/v1/tags/catalog",
+        "POST /api/v1/deck/validate",
+        "GET /api/v1/deck/commander-salt/{commander_name}",
+        "GET /api/v1/brackets/info",
+        "GET /api/v1/salt/info",
+        "POST /api/v1/deck/check-early-game-combos",
+        "POST /api/v1/deck/check-late-game-combos",
+        "POST /api/v1/deck/check-all-combos"
+      ],
+      "operation_count": 16
+    },
+    {
+      "action_name": "Archive API - Popular Decks & cEDH",
+      "description": "Use this action for popular deck lists by bracket and competitive EDH (cEDH) data including commander stats and tournament information.",
+      "api_spec_file": "popular_decks_cedh.json",
+      "server_url": "https://mtg-mightstone-gpt.onrender.com",
+      "authentication": {
+        "type": "Bearer Token",
+        "token_field": "Your API key here"
+      },
+      "key_endpoints": [
+        "GET /api/v1/popular-decks",
+        "GET /api/v1/popular-decks/info",
+        "GET /api/v1/popular-decks/{bracket}",
+        "POST /api/v1/cedh/search",
+        "GET /api/v1/cedh/commanders",
+        "GET /api/v1/cedh/stats",
+        "GET /api/v1/cedh/info"
+      ],
+      "operation_count": 7
+    }
+  ],
+  "configuration_summary": {
+    "total_operations": 43,
+    "total_actions": 4,
+    "max_operations_per_action": 30,
+    "compliance_status": "PASSED",
+    "server_url": "https://mtg-mightstone-gpt.onrender.com",
+    "generated_date": "2025-11-27"
+  },
+  "implementation_notes": [
+    "All actions use the same server URL and authentication method",
+    "Each action contains logically grouped endpoints",
+    "All schemas respect the 30-operation limit per action",
+    "Authentication is handled via Bearer tokens",
+    "Public endpoints (status, health) do not require authentication"
+  ]
+}

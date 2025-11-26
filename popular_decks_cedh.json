@@ -1,0 +1,594 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Archive API \u2013 Popular Decks & cEDH",
+    "description": "Popular deck lists by bracket and competitive EDH (cEDH) data including commander stats and tournament information.",
+    "version": "1.1.0"
+  },
+  "paths": {
+    "/api/v1/popular-decks": {
+      "get": {
+        "tags": [
+          "popular-decks"
+        ],
+        "summary": "Get All Popular Decks",
+        "description": "Get top most-viewed Commander decks from Moxfield and Archidekt without bracket filtering.\n\nWhen a commander is specified, only Moxfield results are returned (10 decks total).\nWithout a commander, returns decks from both sources (5 from each by default).\n\nReturns deck URLs with metadata including view count, primer status, and source information.\n- Commander name (for search context)\n\nArgs:\n    limit_per_source: Number of decks to fetch from each source (default 5, max 20)\n    commander: Optional commander name to filter results\n    \nReturns:\n    Dictionary containing decks with metadata including bracket info",
+        "operationId": "get_all_popular_decks_api_v1_popular_decks_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit_per_source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "description": "Number of decks to fetch from each source (default 5)",
+              "default": 5,
+              "title": "Limit Per Source"
+            },
+            "description": "Number of decks to fetch from each source (default 5)"
+          },
+          {
+            "name": "commander",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by commander name (e.g., 'Brudiclad' or 'Brudiclad, Telchor Engineer')",
+              "title": "Commander"
+            },
+            "description": "Filter by commander name (e.g., 'Brudiclad' or 'Brudiclad, Telchor Engineer')"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PopularDecksResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/popular-decks/info": {
+      "get": {
+        "tags": [
+          "popular-decks"
+        ],
+        "summary": "Get Popular Decks Info",
+        "description": "Get information about the popular decks endpoint.\n\nReturns supported brackets and usage examples.",
+        "operationId": "get_popular_decks_info_api_v1_popular_decks_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PopularDecksInfoResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/popular-decks/{bracket}": {
+      "get": {
+        "tags": [
+          "popular-decks"
+        ],
+        "summary": "Get Popular Decks",
+        "description": "Get top most-viewed decks for a specific commander bracket from both Moxfield and Archidekt.\n\nWhen a commander is specified, only Moxfield results are returned (10 decks total).\nWithout a commander, returns decks from both sources (5 from each by default).\n\nReturns deck URLs with metadata including view count, primer status, and source information.\n- Whether it includes a primer\n- Deck title\n- Source (moxfield or archidekt)\n- Bracket information\n- Commander name (for search context)\n\nArgs:\n    bracket: Commander bracket (exhibition, core, upgraded, optimized, cedh)\n    limit_per_source: Number of decks to fetch from each source (default 5, max 20)\n    commander: Optional commander name to filter results\n    \nReturns:\n    Dictionary containing decks with metadata",
+        "operationId": "get_popular_decks_api_v1_popular_decks__bracket__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "bracket",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Commander bracket: exhibition, core, upgraded, optimized, or cedh",
+              "title": "Bracket"
+            },
+            "description": "Commander bracket: exhibition, core, upgraded, optimized, or cedh"
+          },
+          {
+            "name": "limit_per_source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "description": "Number of decks to fetch from each source (default 5)",
+              "default": 5,
+              "title": "Limit Per Source"
+            },
+            "description": "Number of decks to fetch from each source (default 5)"
+          },
+          {
+            "name": "commander",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by commander name (e.g., 'Brudiclad' or 'Brudiclad, Telchor Engineer')",
+              "title": "Commander"
+            },
+            "description": "Filter by commander name (e.g., 'Brudiclad' or 'Brudiclad, Telchor Engineer')"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PopularDecksResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cedh/search": {
+      "get": {
+        "tags": [
+          "cedh"
+        ],
+        "summary": "Search cEDH Database",
+        "description": "Search the competitive EDH decklist database with filters for commander, colors, section, primer availability, and result limit.",
+        "operationId": "search_cedh_decks_api_v1_cedh_search_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "commander",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Commander name to search for",
+              "title": "Commander"
+            },
+            "description": "Commander name to search for"
+          },
+          {
+            "name": "colors",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Color identity (e.g., 'ub', 'wubrg')",
+              "title": "Colors"
+            },
+            "description": "Color identity (e.g., 'ub', 'wubrg')"
+          },
+          {
+            "name": "section",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Section filter: COMPETITIVE, DEPRECATED, or BREW",
+              "title": "Section"
+            },
+            "description": "Section filter: COMPETITIVE, DEPRECATED, or BREW"
+          },
+          {
+            "name": "primer_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Only return decks with primers",
+              "default": false,
+              "title": "Primer Only"
+            },
+            "description": "Only return decks with primers"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Maximum number of results",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Maximum number of results"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CEDHSearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/cedh/commanders": {
+      "get": {
+        "tags": [
+          "cedh"
+        ],
+        "summary": "List All Commanders",
+        "description": "Get a list of all commanders in the cEDH database with deck counts.",
+        "operationId": "list_commanders_api_v1_cedh_commanders_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cedh/stats": {
+      "get": {
+        "tags": [
+          "cedh"
+        ],
+        "summary": "Database Statistics",
+        "description": "Get statistics about the cEDH database including color distribution, section breakdown, and more.",
+        "operationId": "get_database_stats_api_v1_cedh_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cedh/info": {
+      "get": {
+        "tags": [
+          "cedh"
+        ],
+        "summary": "API Information",
+        "description": "Get information about the cEDH database API endpoints and usage.",
+        "operationId": "get_api_info_api_v1_cedh_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CEDHSearchResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Operation success status",
+            "default": true
+          },
+          "data": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Data",
+            "description": "List of cEDH decks"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Number of decks returned"
+          },
+          "filters_applied": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Filters Applied",
+            "description": "Filters that were applied"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "Response timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "count",
+          "timestamp"
+        ],
+        "title": "CEDHSearchResponse",
+        "description": "Response model for cEDH search endpoint."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "PopularDecksInfoResponse": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Endpoint description",
+            "default": "Fetch top most-viewed Commander decks from Moxfield and Archidekt"
+          },
+          "supported_brackets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Supported Brackets",
+            "description": "Supported bracket values",
+            "default": [
+              "exhibition",
+              "core",
+              "upgraded",
+              "optimized",
+              "cedh"
+            ]
+          },
+          "usage_examples": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Usage Examples",
+            "description": "Usage examples"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "Response timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "timestamp"
+        ],
+        "title": "PopularDecksInfoResponse",
+        "description": "Response model for popular decks info endpoint."
+      },
+      "PopularDecksResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "description": "Operation success status",
+            "default": true
+          },
+          "data": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Data",
+            "description": "List of popular decks"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Number of decks returned"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Data sources",
+            "default": "moxfield+archidekt"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Endpoint description",
+            "default": "Top most-viewed Commander decks from Moxfield and Archidekt"
+          },
+          "bracket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bracket",
+            "description": "Bracket filter applied"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "Response timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "count",
+          "timestamp"
+        ],
+        "title": "PopularDecksResponse",
+        "description": "Response model for popular decks endpoints."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://mtg-mightstone-gpt.onrender.com",
+      "description": "Render production deployment"
+    }
+  ]
+}
