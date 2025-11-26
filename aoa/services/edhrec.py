@@ -762,7 +762,7 @@ async def fetch_edhrec_json(endpoint: str) -> Any:
     Raises:
         HTTPException: If fetch fails
     """
-    url = f"{EDHREC_BASE_URL}/{endpoint.lstrip('/')}"
+    url = f"{EDHREC_BASE_URL.rstrip('/')}/{endpoint.lstrip('/')}"
     return await _fetch_json(url)
 
 
