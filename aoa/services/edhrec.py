@@ -802,3 +802,109 @@ async def scrape_edhrec_theme_page(page_url: str) -> Dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"Theme page fetch failed ({status_code} {page_url})")
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail=f"Theme page request failed ({page_url})")
+
+
+async def fetch_average_deck_data(commander_name: str, bracket: Optional[str] = None, theme_slug: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch EDHRec average deck data from the correct average-decks endpoint.
+    
+    Args:
+        commander_name: Commander name to fetch average deck for
+        bracket: Optional bracket level (exhibition, core, upgraded, optimized, cedh)
+        theme_slug: Optional theme slug to filter average deck
+        
+    Returns:
+        Dictionary containing average deck data
+        
+    Raises:
+        EdhrecError: If commander not found
+        HTTPException: If fetch fails
+    """
+    try:
+        # Normalize commander name to get the slug
+        display_name, slug, _ = normalize_commander_name(commander_name)
+        
+        # Build the correct average-decks URL with bracket support
+        if bracket:
+            # Bracket-specific average deck URL
+            if theme_slug:
+                # Bracket + theme combination
+                average_deck_url = f"{EDHREC_BASE_URL}average-decks/{slug}/{bracket}?theme={theme_slug}"
+            else:
+                # Just bracket
+                average_deck_url = f"{EDHREC_BASE_URL}average-decks/{slug}/{bracket}"
+        else:
+            # Standard average deck URL
+            if theme_slug:
+                # Theme without bracket
+                average_deck_url = f"{EDHREC_BASE_URL}average-decks/{slug}?theme={theme_slug}"
+            else:
+                # Base average deck
+                average_deck_url = f"{EDHREC_BASE_URL}average-decks/{slug}"
+        
+        logger.info(f"Fetching average deck data from: {average_deck_url}")
+        
+        # Fetch the average deck page HTML
+        html = await _fetch_text(average_deck_url)
+        
+        # Extract the Next.js JSON data
+        json_match = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+        if not json_match:
+            raise EdhrecError("NOT_FOUND", f"No data found for average deck of '{display_name}'")
+        
+        try:
+            json_data = json.loads(json_match.group(1))
+        except json.JSONDecodeError as e:
+            raise EdhrecError("PARSE_ERROR", f"Failed to parse JSON data for '{display_name}': {str(e)}")
+        
+        # Navigate to the average deck data in the Next.js structure
+        try:
+            if 'props' in json_data and 'pageProps' in json_data['props']:
+                page_props = json_data['props']['pageProps']
+                if 'data' in page_props and 'container' in page_props['data']:
+                    container = page_props['data']['container']
+                    
+                    # The average deck data structure
+                    avg_deck_data = {
+                        "commander_name": display_name,
+                        "commander_url": average_deck_url,
+                        "average_deck_data": container.get("json_dict", {}),
+                        "deck_statistics": {},
+                        "bracket_filter": {"bracket": bracket, "applied": bracket is not None} if bracket else None,
+                        "theme_filter": {"theme_slug": theme_slug, "applied": theme_slug is not None} if theme_slug else None,
+                        "source": "edhrec",
+                        "timestamp": datetime.utcnow().isoformat() + "Z"
+                    }
+                    
+                    # Extract some basic statistics from the data
+                    json_dict = container.get("json_dict", {})
+                    if json_dict:
+                        # Calculate some basic stats
+                        total_cards = 0
+                        cardlists = json_dict.get("cardlists", [])
+                        
+                        for cardlist in cardlists:
+                            cardviews = cardlist.get("cardviews", [])
+                            total_cards += len(cardviews)
+                        
+                        avg_deck_data["deck_statistics"] = {
+                            "total_sections": len(cardlists),
+                            "total_cards_listed": total_cards,
+                            "data_source": "edhrec_average_decks",
+                            "bracket_applied": bracket is not None,
+                            "theme_applied": theme_slug is not None
+                        }
+                    
+                    logger.info(f"Successfully fetched average deck data for '{display_name}'")
+                    return avg_deck_data
+                    
+        except (KeyError, TypeError) as e:
+            raise EdhrecError("PARSE_ERROR", f"Could not navigate to average deck data for '{display_name}': {str(e)}")
+        
+        # If we get here, the data structure wasn't as expected
+        raise EdhrecError("NOT_FOUND", f"Average deck data not found for '{display_name}'")
+        
+    except EdhrecError:
+        raise
+    except Exception as exc:
+        logger.exception(f"Failed to fetch average deck data for '{commander_name}': {exc}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(exc)}")
