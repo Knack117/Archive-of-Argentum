@@ -2,6 +2,8 @@
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
+from aoa.constants import EDHREC_BASE_URL
+
 
 def normalize_commander_name(name: str) -> Tuple[str, str, str]:
     """Normalize commander name to display name, slug, and EDHREC URL.
@@ -19,7 +21,7 @@ def normalize_commander_name(name: str) -> Tuple[str, str, str]:
     slug = _generate_commander_slug(display_name)
     
     # Construct EDHREC URL
-    edhrec_url = f"https://edrez.com/commanders/{slug}"
+    edhrec_url = f"{EDHREC_BASE_URL}commanders/{slug}"
     
     return display_name, slug, edhrec_url
 

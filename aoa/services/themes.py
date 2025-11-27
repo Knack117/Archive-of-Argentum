@@ -26,7 +26,7 @@ async def scrape_edhrec_theme_page(theme_url: str) -> Dict[str, Any]:
             ),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://edrez.com/",
+            "Referer": EDHREC_BASE_URL,
         }
         
         async with httpx.AsyncClient(
