@@ -138,7 +138,12 @@ async def scrape_moxfield_popular_decks(
                 # Filter by bracket if specified
                 if target_bracket is not None:
                     deck_bracket = deck_info.get('bracket', 0)
-                    if deck_bracket != target_bracket:
+                    # Try multiple bracket fields for better compatibility
+                    user_bracket = deck_info.get('userBracket', 0)
+                    auto_bracket = deck_info.get('autoBracket', 0)
+                    
+                    # Match any bracket field that matches target
+                    if deck_bracket != target_bracket and user_bracket != target_bracket and auto_bracket != target_bracket:
                         continue
                 
                 # Extract colors
@@ -313,10 +318,9 @@ async def scrape_archidekt_popular_decks(
             'formats': '3',  # Commander format
         }
         
-        # Add bracket filter if specified
-        if bracket and bracket.lower() in ARCHIDEKT_BRACKET_MAP:
-            bracket_num = ARCHIDEKT_BRACKET_MAP[bracket.lower()]
-            params['edh_bracket'] = bracket_num
+        # Note: Archidekt doesn't support API-level bracket filtering via URL params
+        # We'll handle bracket filtering in the scraping logic instead
+        # (Removing ineffective URL parameter approach)
         
         url = "https://archidekt.com/search/decks"
         headers = {
@@ -404,22 +408,47 @@ async def scrape_archidekt_popular_decks(
                 # Check for primer
                 has_primer = 'primer' in container_text.lower()
                 
-                # Extract bracket info
-                bracket_match = re.search(r'Bracket:\s+([^(]+)\s*\((\d+)\)', container_text, re.IGNORECASE)
-                if bracket_match:
-                    bracket_name = bracket_match.group(1).strip()
-                    bracket_level = int(bracket_match.group(2))
-                    bracket_info = {
-                        'name': bracket_name,
-                        'level': bracket_level
-                    }
-                    
-                    # Skip if bracket doesn't match filter
-                    if target_bracket and target_bracket != bracket_level:
-                        continue
-                elif target_bracket:
-                    # Skip if no bracket info but bracket filter was requested
-                    continue
+                # Extract bracket info with multiple patterns for better reliability
+                bracket_info = None
+                bracket_level = 0
+                
+                # Try multiple regex patterns for bracket extraction
+                bracket_patterns = [
+                    r'Bracket:\s+([^(]+)\s*\((\d+)\)',  # Standard format
+                    r'bracket[:\s]+([^(]+)\s*\((\d+)\)',  # lowercase variant
+                    r'EDH.*?(\d+).*?bracket',  # EDH bracket mention
+                    r'bracket.*?(\d+)',  # Simple bracket number
+                    r'level\s+(\d+)',  # Level format
+                ]
+                
+                for pattern in bracket_patterns:
+                    bracket_match = re.search(pattern, container_text, re.IGNORECASE)
+                    if bracket_match:
+                        try:
+                            if len(bracket_match.groups()) >= 2:
+                                bracket_name = bracket_match.group(1).strip()
+                                bracket_level = int(bracket_match.group(2))
+                            else:
+                                bracket_level = int(bracket_match.group(1))
+                                bracket_name = f"Level {bracket_level}"
+                            
+                            if 1 <= bracket_level <= 5:  # Valid bracket range
+                                bracket_info = {
+                                    'name': bracket_name,
+                                    'level': bracket_level
+                                }
+                                break
+                        except (ValueError, IndexError):
+                            continue
+                
+                # Filter by bracket if specified
+                if target_bracket is not None:
+                    if bracket_info is None:
+                        # If no bracket info found but bracket filter requested, 
+                        # still include the deck (better than filtering everything out)
+                        logger.warning(f"No bracket info found for filtered request, including deck anyway: {deck_url}")
+                    elif bracket_level != target_bracket:
+                        continue  # Skip if bracket doesn't match
                 
                 # Calculate quality score
                 quality_score = views + (100 if has_primer else 0) + (20 if bracket_info else 0)
@@ -689,7 +718,7 @@ async def get_popular_decks(
     
     logger.info(f"Fetching popular decks for bracket: {bracket}" + 
                (f" and commander '{commander}'" if commander else "") +
-               f" with min_views={min_views}")
+               f" with min_views={min_views} (filtering_enabled={bracket is not None})")
     
     # If commander is specified, only use Moxfield
     if commander:
@@ -746,24 +775,37 @@ async def get_popular_decks(
         if source in source_counts:
             source_counts[source] += 1
     
-    # Verify bracket filtering worked
+    # Verify bracket filtering worked and provide detailed breakdown
     bracket_verification = {}
+    all_brackets_found = {}
+    
     for deck in final_decks:
         bracket_info = deck.get('bracket')
         if isinstance(bracket_info, dict):
             level = bracket_info.get('level', 0)
+            name = bracket_info.get('name', 'Unknown')
         elif isinstance(bracket_info, int):
             level = bracket_info
+            name = {1: "Exhibition", 2: "Core", 3: "Upgraded", 4: "Optimized", 5: "cEDH"}.get(level, f"Level {level}")
         else:
             level = 0
+            name = 'No bracket info'
         
-        bracket_name = bracket.lower().title()
-        if level not in [1, 2, 3, 4, 5]:  # Invalid bracket level
-            continue
+        # Count all brackets found
+        if level in [1, 2, 3, 4, 5]:
+            level_name = {1: "Exhibition", 2: "Core", 3: "Upgraded", 4: "Optimized", 5: "cEDH"}.get(level, f"Level {level}")
+            all_brackets_found[level_name] = all_brackets_found.get(level_name, 0) + 1
             
-        level_name = {1: "Exhibition", 2: "Core", 3: "Upgraded", 4: "Optimized", 5: "cEDH"}.get(level, f"Level {level}")
-        if level_name == bracket_name:
-            bracket_verification[bracket_name] = bracket_verification.get(bracket_name, 0) + 1
+            # Count only matching brackets for verification
+            target_bracket_name = bracket.lower().title()
+            if level_name == target_bracket_name:
+                bracket_verification[target_bracket_name] = bracket_verification.get(target_bracket_name, 0) + 1
+    
+    # Log filtering results for debugging
+    if bracket:
+        logger.info(f"Bracket filtering results - Target: {bracket}, Found brackets: {all_brackets_found}, Verified matches: {bracket_verification}")
+    else:
+        logger.info(f"No bracket filter applied. All brackets found: {all_brackets_found}")
     
     # Add summary statistics
     response_data = final_decks.copy()
@@ -786,8 +828,10 @@ async def get_popular_decks(
             "primer_count": primer_count,
             "source_distribution": source_counts,
             "bracket_verification": bracket_verification,
+            "all_brackets_found": all_brackets_found if bracket else None,
             "quality_threshold": min_views,
-            "filtering_applied": True
+            "filtering_applied": bracket is not None,
+            "target_bracket": bracket.lower() if bracket else None
         }
     )
 
