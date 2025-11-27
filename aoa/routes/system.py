@@ -201,8 +201,8 @@ async def privacy_policy() -> str:
             <h2>Contact Information</h2>
             <p>If you have questions about this privacy policy or our data practices, please contact us:</p>
             <ul>
-                <li><strong>Email:</strong> YOUR_EMAIL@example.com</li>
-                <li><strong>GitHub Issues:</strong> https://github.com/yourusername/yourrepo/issues</li>
+                <li><strong>Email:</strong> pommnetwork@gmail.com</li>
+                <li><strong>GitHub Issues:</strong> https://github.com/Knack117/Archive-of-Argentum/issues</li>
             </ul>
         </div>
 
