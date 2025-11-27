@@ -164,7 +164,7 @@ def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
                             cardviews = cardlist.get('cardviews', [])
                             
                             # Skip empty headers or non-card sections
-                            if not header or not cardviews:
+                            if not header:
                                 continue
                             
                             # Extract cards from this section
@@ -193,12 +193,11 @@ def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
                                         section_cards.append(card_info)
                             
                             # Store cards under their actual EDHRec category header
-                            if section_cards and header:
-                                # Normalize header for consistency
-                                section_key = header.lower().replace(' ', '_').replace('-', '_')
-                                card_sections[section_key] = section_cards
-                                section_order.append((section_key, header))  # Track order
-                                logger.debug(f"Stored {len(section_cards)} cards in section '{header}'")
+                            # Store even empty sections to preserve complete structure
+                            section_key = header.lower().replace(' ', '_').replace('-', '_')
+                            card_sections[section_key] = section_cards
+                            section_order.append((section_key, header))  # Track order
+                            logger.info(f"Processed section '{header}': {len(section_cards)} cards")
                                         
         except (KeyError, TypeError) as e:
             logger.warning(f"Could not navigate to card data: {e}")
@@ -211,6 +210,7 @@ def _extract_real_card_sections(html: str) -> Dict[str, List[EDHRecCardData]]:
             card_sections['all_cards'] = all_cards
             card_sections['_section_order'] = section_order  # Store order info
             logger.info(f"Extracted {len(card_sections)-2} actual EDHRec categories with {len(all_cards)} total cards")
+            logger.info(f"Categories found: {list(card_sections.keys())}")
         else:
             logger.warning("No card sections were extracted - no categories found")
         
@@ -279,7 +279,7 @@ async def fetch_commander_summary(name: str, budget: Optional[str] = None) -> Di
             raise EdhrecError("NOT_FOUND", f"Could not find commander data for '{display_name}'")
         
         # Use enhanced EDHRec parsing to extract real statistics
-        enhanced_data = await _fetch_enhanced_commander_data(snapshot.html, display_name, edhrec_url)
+        enhanced_data = await _fetch_enhanced_commander_data(snapshot.html, display_name, edhrec_url, snapshot)
         
         if enhanced_data and enhanced_data.get('container', {}).get('collections'):
             # Return enhanced data with real statistics
@@ -329,7 +329,17 @@ def _categorize_commander_cards(card_sections: Dict[str, List[Any]]) -> List[The
         'new_cards': 'New Cards',
         'high_synergy_cards': 'High Synergy Cards',  # Preserve exact EDHRec name
         'top_cards': 'Top Cards',
-        'game_changers': 'Game Changers'
+        'game_changers': 'Game Changers',
+        'creatures': 'Creatures',
+        'instants': 'Instants', 
+        'sorceries': 'Sorceries',
+        'artifacts': 'Artifacts',
+        'enchantments': 'Enchantments',
+        'planeswalkers': 'Planeswalkers',
+        'lands': 'Lands',
+        'utility_artifacts': 'Utility Artifacts',
+        'utility_lands': 'Utility Lands',
+        'mana_artifacts': 'Mana Artifacts'
     }
     
     # Process each actual EDHRec section
@@ -367,38 +377,24 @@ def _categorize_commander_cards(card_sections: Dict[str, List[Any]]) -> List[The
                 items=theme_items
             ))
     
-    # If we have specific strategic categories from EDHRec, return those in their original order
-    strategic_categories = ['game_changers', 'top_cards', 'high_synergy_cards', 'new_cards']
-    found_strategic = any(key in card_sections for key in strategic_categories)
-    
-    if found_strategic:
-        # Check if we have the original section order preserved
-        if '_section_order' in card_sections:
-            # Use EDHRec's original order for strategic categories only
-            strategic_collections = []
-            for section_key, original_header in card_sections['_section_order']:
-                if section_key in strategic_categories:
-                    # Find the corresponding collection and add it
-                    for collection in collections:
-                        if collection.header == section_headers.get(section_key, section_key.replace('_', ' ').title()):
-                            strategic_collections.append(collection)
-                            break
-            return strategic_collections
-        else:
-            # Fallback to hardcoded order if no order info available
-            strategic_collections = []
-            for strategic_key in strategic_categories:
-                for collection in collections:
-                    if collection.header == section_headers.get(strategic_key, strategic_key.replace('_', ' ').title()):
-                        strategic_collections.append(collection)
-                        break
-            return strategic_collections
+    # Return ALL categories found, not just strategic ones
+    # Use the original section order if available, otherwise maintain current order
+    if '_section_order' in card_sections:
+        # Use EDHRec's original order for ALL categories
+        ordered_collections = []
+        for section_key, original_header in card_sections['_section_order']:
+            # Find the corresponding collection and add it
+            for collection in collections:
+                if collection.header == original_header:
+                    ordered_collections.append(collection)
+                    break
+        return ordered_collections
     else:
         # Fallback: return all categories found (maintaining current order)
         return collections
 
 
-async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_url: str) -> Optional[Dict[str, Any]]:
+async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_url: str, snapshot) -> Optional[Dict[str, Any]]:
     """Fetch enhanced commander data using real EDHRec parsing."""
     try:
         # Extract commander stats
@@ -427,10 +423,19 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
         logger.info(f"Built {len(collections)} collections from actual EDHRec categories")
         
         # Build enhanced response (maintain original API format)
+        # Use tags from the snapshot, which are properly extracted from the EDHRec page
+        tags = snapshot.tags if snapshot and hasattr(snapshot, 'tags') else []
+        
+        # If no formal tags found, infer functional tags from card data
+        if not tags:
+            inferred_tags = _infer_functional_tags(card_sections)
+            tags = inferred_tags
+            logger.info(f"Inferred functional tags: {tags}")
+        
         response = {
             "header": f"{commander_name} | EDHREC",
             "description": "",
-            "tags": [],
+            "tags": tags,
             "container": {
                 "collections": [collection.dict() for collection in collections]
             },
@@ -447,6 +452,78 @@ async def _fetch_enhanced_commander_data(html: str, commander_name: str, source_
     except Exception as e:
         logger.warning(f"Enhanced EDHRec parsing failed: {e}")
         return None
+
+
+def _infer_functional_tags(card_sections: Dict[str, List[EDHRecCardData]]) -> List[str]:
+    """Infer functional tags based on card synergies and categories."""
+    if not card_sections:
+        return []
+    
+    inferred_tags = []
+    
+    # Define card-based tag inference patterns
+    burn_cards = [
+        'fire', 'lightning', 'lightning bolt', 'shock', 'bolt', 'fireball', 'chaos',
+        'damage', 'direct damage', 'burn', 'explosion', 'fireball', 'flame', 'ember',
+        'lightning', 'thunder', 'volcano', 'magma', 'lava'
+    ]
+    
+    extra_combat_cards = [
+        'aggravated assault', 'extra combat', 'combat', 'attack', 'battle cry',
+        'strike', 'charge', 'rush', 'haste', 'double strike', 'fury'
+    ]
+    
+    big_mana_cards = [
+        'mana', 'ramp', 'land', 'forest', 'mountain', 'giant growth', 'khalni heart expedition',
+        'exploration', 'far', 'away', 'doubling cube', 'gauntlet of power'
+    ]
+    
+    artifacts_cards = [
+        'artifact', 'sol ring', 'mana vault', 'mox', 'gemstone', 'lens', 'sphere',
+        'talisman', 'signet', 'mycosynth', 'chrome mox'
+    ]
+    
+    creature_cards = [
+        'creature', 'beast', 'dragon', 'elemental', 'giant', 'golem', 'goblin',
+        'phoenix', 'wyvern', 'drake'
+    ]
+    
+    # Check each category and infer tags
+    for section_name, cards in card_sections.items():
+        if section_name in ['all_cards', '_section_order']:
+            continue
+            
+        # Analyze cards in this section for tag patterns
+        section_text = ' '.join([card.card_name.lower() for card in cards])
+        
+        # Check for burn patterns
+        if any(burn_word in section_text for burn_word in burn_cards):
+            if 'burn' not in inferred_tags:
+                inferred_tags.append('burn')
+        
+        # Check for extra combat patterns
+        if any(combat_word in section_text for combat_word in extra_combat_cards):
+            if 'extra combat' not in inferred_tags:
+                inferred_tags.append('extra combat')
+        
+        # Check for big mana patterns
+        if any(mana_word in section_text for mana_word in big_mana_cards):
+            if 'big mana' not in inferred_tags:
+                inferred_tags.append('big mana')
+        
+        # Add category-based tags
+        if 'creatures' in section_name.lower():
+            if 'creature synergies' not in inferred_tags:
+                inferred_tags.append('creature synergies')
+        elif 'artifacts' in section_name.lower():
+            if 'artifact synergies' not in inferred_tags:
+                inferred_tags.append('artifact synergies')
+        elif 'instants' in section_name.lower() or 'sorceries' in section_name.lower():
+            if 'spell synergies' not in inferred_tags:
+                inferred_tags.append('spell synergies')
+    
+    # Return top 10 most relevant tags
+    return inferred_tags[:10]
 
 
 async def _fetch_commander_page_snapshot(slug: str) -> Optional[CommanderPageSnapshot]:
