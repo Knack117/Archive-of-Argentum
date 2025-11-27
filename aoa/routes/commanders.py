@@ -5,16 +5,11 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from typing import Any, Dict, Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Query
-
-from aoa.models import AverageDeckResponse
-from aoa.models.themes import EdhrecError, HealthResponse, PageTheme
 from pydantic import BaseModel, Field
-from aoa.services.edhrec import fetch_commander_summary, fetch_edhrec_json
+
+from aoa.models.themes import EdhrecError, PageTheme
+from aoa.services.edhrec import fetch_commander_summary
 from aoa.security import verify_api_key
-from aoa.services.themes import scrape_edhrec_theme_page
 from aoa.services.tag_cache import get_tag_cache, validate_theme_slug
 
 router = APIRouter(prefix="/api/v1", tags=["commanders"])
@@ -57,71 +52,72 @@ async def get_commander_summary(
 
 
 class EDHRecAverageDeckResponse(BaseModel):
-    """EDHRec average deck response with theme filtering support."""
+    """EDHRec average deck response with bracket and theme filtering support."""
     commander_name: str
     commander_url: Optional[str] = None
     average_deck_data: Dict[str, Any] = Field(default_factory=dict)
     deck_statistics: Dict[str, Any] = Field(default_factory=dict)
+    bracket_filter: Optional[Dict[str, Any]] = None
     theme_filter: Optional[Dict[str, Any]] = None
     source: str = "edhrec"
     timestamp: str
 
 
 @router.get("/commanders/{commander_name}/average-deck", response_model=EDHRecAverageDeckResponse)
+@router.get("/commanders/{commander_name}/average-deck/{bracket}", response_model=EDHRecAverageDeckResponse)
 async def get_average_deck(
     commander_name: str,
+    bracket: Optional[str] = None,
     theme_slug: Optional[str] = Query(None, description="Optional theme slug to filter average deck (e.g., 'voltron', 'blue-storm')"),
     api_key: str = Depends(verify_api_key),
     cache = Depends(get_tag_cache),
-) -> AverageDeckResponse:
-    """Fetch EDHRec average deck data for a commander with optional theme filtering.
+) -> EDHRecAverageDeckResponse:
+    """Fetch EDHRec average deck data for a commander with optional bracket and theme filtering.
     
     Returns the statistical average deck composition based on EDHRec data.
-    Supports optional theme-slug filtering to focus on specific deck archetypes.
+    Supports optional bracket filtering for different power levels:
+    - exhibition: Casual/beginner level
+    - core: Standard power level
+    - upgraded: Enhanced builds
+    - optimized: Highly tuned decks
+    - cedh: Competitive EDH level
+    
+    Also supports optional theme-slug filtering to focus on specific deck archetypes.
     
     Examples:
     - /api/v1/commanders/the-ur-dragon/average-deck
+    - /api/v1/commanders/the-ur-dragon/average-deck/optimized
     - /api/v1/commanders/jhoira/average-deck?theme=storm
-    - /api/v1/commanders/sol-ring/average-deck?theme=blue-control
+    - /api/v1/commanders/jhoira/average-deck/core?theme=storm
+    - /api/v1/commanders/sol-ring/average-deck/cedh
     """
-    logger.info(f"Average deck requested for commander: '{commander_name}', theme: '{theme_slug}'")
+    logger.info(f"Average deck requested for commander: '{commander_name}', bracket: '{bracket}', theme: '{theme_slug}'")
     
     try:
-        # Get the commander summary data from EDHRec
-        commander_data = await fetch_commander_summary(commander_name)
-        
-        # Extract commander information
-        commander_header = commander_data.get("header", "")
-        # Parse commander name from header (format: "commander-name | EDHREC")
-        if " | " in commander_header:
-            commander_name = commander_header.split(" | ")[0].replace("-", " ").title()
-        else:
-            commander_name = commander_header.replace("-", " ").title()
-        
-        commander_url = commander_data.get("source_url", "")
-        
-        # Initialize deck statistics and average deck data
-        deck_statistics = {}
-        average_deck_data = {}
+        # Validate bracket if provided
+        valid_brackets = ["exhibition", "core", "upgraded", "optimized", "cedh"]
+        if bracket and bracket not in valid_brackets:
+            logger.warning(f"Invalid bracket specified: '{bracket}'. Valid options: {valid_brackets}")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid bracket '{bracket}'. Valid brackets: {', '.join(valid_brackets)}"
+            )
+    
+    try:
+        # Validate theme_slug if provided
         theme_filter_data = None
-        
-        # If theme_slug provided, validate it
         if theme_slug:
             try:
-                validated_theme = await validate_theme_slug(theme_slug, cache)
-                if validated_theme:
-                    logger.info(f"Theme validated: '{theme_slug}' -> theme: {validated_theme}")
-                    theme_filter_data = {
-                        "theme_slug": theme_slug,
-                        "validated": True,
-                        "theme_info": validated_theme
-                    }
+                validated_result = await validate_theme_slug(theme_slug, cache)
+                if validated_result and validated_result.get("validated", False):
+                    logger.info(f"Theme validated: '{theme_slug}' -> {validated_result}")
+                    theme_filter_data = validated_result
                 else:
-                    logger.warning(f"Invalid theme slug: '{theme_slug}'")
-                    theme_filter_data = {
+                    logger.warning(f"Theme not found in cache: '{theme_slug}'")
+                    theme_filter_data = validated_result or {
                         "theme_slug": theme_slug,
                         "validated": False,
-                        "error": "Theme slug not found in EDHRec catalog"
+                        "error": "Theme validation failed"
                     }
             except Exception as theme_error:
                 logger.warning(f"Theme validation failed for '{theme_slug}': {theme_error}")
@@ -131,51 +127,21 @@ async def get_average_deck(
                     "error": str(theme_error)
                 }
         
-        # Extract available statistics from commander data
-        container_data = commander_data.get("container", {})
-        if container_data:
-            # Extract collections (this is what EDHRec uses instead of "sections")
-            collections = container_data.get("collections", [])
-            categories = {}
-            
-            for collection in collections:
-                collection_name = collection.get("header", "Unknown Collection")
-                items = collection.get("items", [])
-                if items:
-                    categories[collection_name] = {
-                        "count": len(items),
-                        "sample_items": items[:5]  # Limit to first 5 items for response
-                    }
-            
-            average_deck_data["collections"] = categories
-            
-            # Calculate some basic statistics
-            deck_statistics.update({
-                "total_collections": len(collections),
-                "total_cards_listed": sum(len(collection.get("items", [])) for collection in collections),
-                "data_source": "edhrec_commander_summary",
-                "theme_applied": theme_slug is not None,
-                "last_updated": container_data.get("last_updated", "")
-            })
-        
-        # Build the response
-        response = EDHRecAverageDeckResponse(
-            commander_name=commander_name,
-            commander_url=commander_url,
-            average_deck_data=average_deck_data,
-            deck_statistics=deck_statistics,
-            theme_filter=theme_filter_data,
-            timestamp=datetime.now().isoformat() + "Z"
-        )
+        # Fetch average deck data using the correct EDHREC average-decks endpoint
+        from aoa.services.edhrec import fetch_average_deck_data
+        average_deck_data = await fetch_average_deck_data(commander_name, bracket, theme_slug)
         
         logger.info(f"Average deck successfully processed for: '{commander_name}'")
-        return response
+        return EDHRecAverageDeckResponse(**average_deck_data)
         
     except EdhrecError as exc:
         # Convert EdhrecError to appropriate HTTP response
         if exc.code == "NOT_FOUND":
-            logger.warning(f"Commander not found in EDHREC: '{commander_name}'")
+            logger.warning(f"Commander not found in EDHREC average decks: '{commander_name}'")
             raise HTTPException(status_code=404, detail=exc.message)
+        elif exc.code == "PARSE_ERROR":
+            logger.warning(f"Failed to parse average deck data for '{commander_name}': {exc.message}")
+            raise HTTPException(status_code=400, detail=exc.message)
         else:
             logger.warning(f"EDHREC error for '{commander_name}': {exc.to_dict()}")
             raise HTTPException(status_code=400, detail=exc.to_dict())
