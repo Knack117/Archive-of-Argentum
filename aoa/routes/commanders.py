@@ -93,15 +93,14 @@ async def get_average_deck(
     """
     logger.info(f"Average deck requested for commander: '{commander_name}', bracket: '{bracket}', theme: '{theme_slug}'")
     
-    try:
-        # Validate bracket if provided
-        valid_brackets = ["exhibition", "core", "upgraded", "optimized", "cedh"]
-        if bracket and bracket not in valid_brackets:
-            logger.warning(f"Invalid bracket specified: '{bracket}'. Valid options: {valid_brackets}")
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Invalid bracket '{bracket}'. Valid brackets: {', '.join(valid_brackets)}"
-            )
+    # Validate bracket if provided
+    valid_brackets = ["exhibition", "core", "upgraded", "optimized", "cedh"]
+    if bracket and bracket not in valid_brackets:
+        logger.warning(f"Invalid bracket specified: '{bracket}'. Valid options: {valid_brackets}")
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid bracket '{bracket}'. Valid brackets: {', '.join(valid_brackets)}"
+        )
     
     try:
         # Validate theme_slug if provided
