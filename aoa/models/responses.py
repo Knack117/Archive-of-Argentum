@@ -66,6 +66,7 @@ class PopularDecksResponse(BaseModel):
     description: str = Field("Top most-viewed Commander decks from Moxfield and Archidekt", description="Endpoint description")
     bracket: Optional[str] = Field(None, description="Bracket filter applied")
     timestamp: str = Field(..., description="Response timestamp")
+    stats: Optional[Dict[str, Any]] = Field(default=None, description="Additional statistics about the returned decks")
 
 
 class PopularDecksInfoResponse(BaseModel):
