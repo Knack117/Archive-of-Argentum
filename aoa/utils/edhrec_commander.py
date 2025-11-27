@@ -60,6 +60,20 @@ def extract_commander_tags_from_html(html: str) -> List[str]:
         if match.strip():
             tags.append(match.strip())
     
+    # NEW: Look for NavigationPanel tags (specific EDHRec structure)
+    # These are in <div class="NavigationPanel_tags__*">
+    # with tag names in <span class="NavigationPanel_label__*">
+    navpanel_pattern = r'<div[^>]*class="[^"]*NavigationPanel_tags[^"]*"[^>]*>.*?</div>'
+    navpanel_matches = re.findall(navpanel_pattern, html, re.DOTALL)
+    
+    for navpanel in navpanel_matches:
+        # Extract all NavigationPanel_label spans
+        label_pattern = r'<span[^>]*class="[^"]*NavigationPanel_label[^"]*"[^>]*>([^<]+)</span>'
+        label_matches = re.findall(label_pattern, navpanel)
+        for label in label_matches:
+            if label.strip():
+                tags.append(label.strip())
+    
     return _normalize_tags(tags)
 
 
